@@ -531,7 +531,9 @@ function renderEvents(h) {
     el("td", {}, tr, dayHm(e.ts));
     const st = el("td", {}, tr);
     const cat = e.on ? reasonCat(e.reason) || "comfort" : null;
+    // Same-size box on every row keeps the text aligned: filled = heating (by reason), hollow = off.
     if (cat) el("span", { class: "swatch", style: `background:${catColor(cat)};margin-right:6px` }, st);
+    else el("span", { class: "swatch swatch-off", style: "margin-right:6px" }, st);
     st.appendChild(document.createTextNode(e.on ? "ON" : "OFF"));
     el("td", {}, tr, reasonLabel(e.reason));
     el("td", { class: "num" }, tr, temp(e.inputs?.temperature));
