@@ -171,6 +171,9 @@ function helpButton(parent, key, anchor) {
     e.preventDefault();
     e.stopPropagation();
     if (box) { box.remove(); box = null; b.classList.remove("open"); return; }
+    // A "?" in a collapsed section's header: open the section, or the text would be hidden inside it
+    const details = b.closest("summary")?.parentElement;
+    if (details && !details.open) details.open = true;
     box = helpContent(key);
     (anchor || parent).after(box);
     b.classList.add("open");
