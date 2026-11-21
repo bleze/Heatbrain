@@ -175,6 +175,13 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                   {"plugs", r.plugs},
                   {"priceOnly", r.room->priceOnly.has_value()},
                   {"override", nullptr}};
+        json plan = json::array();
+        for (const auto& s : r.plan) {
+            json seg{{"from", s.from.time_since_epoch().count()}, {"to", s.to.time_since_epoch().count()}, {"kind", s.kind}};
+            if (s.target) seg["target"] = *s.target;
+            plan.push_back(seg);
+        }
+        room["plan"] = plan;
         if (auto it = overrides.find(r.room->id); it != overrides.end() && it->second.until > now) {
             room["override"] = {{"on", it->second.on}, {"until", it->second.until.time_since_epoch().count()}};
         }
@@ -202,8 +209,11 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
         away = {{"keepAbove", a->keepAbove}, {"from", a->from.time_since_epoch().count()},
                 {"until", a->until.time_since_epoch().count()}, {"active", a->activeAt(now)}};
     }
+    json outdoor = nullptr;
+    if (const auto& o = env.controller->outdoor()) outdoor = {{"name", o->first}, {"temperature", o->second}};
     return json{{"now", now.time_since_epoch().count()},
                 {"away", away},
+                {"outdoor", outdoor},
                 {"tickSeconds", env.tick.count()},
                 {"timezone", env.cfg.timezone},
                 {"currency", env.cfg.currency},

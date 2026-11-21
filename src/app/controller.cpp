@@ -207,6 +207,8 @@ TickResult Controller::tick(Instant now, bool apply) {
             }
         }
         if (o && o->temperature && o->measuredAt && now - *o->measuredAt < hours{1}) outdoor = o->temperature;
+        outdoorUsed_.reset();
+        if (outdoor) outdoorUsed_ = std::pair{o->name, *outdoor};
     }
 
     for (const auto& room : rooms_) {
@@ -230,6 +232,7 @@ TickResult Controller::tick(Instant now, bool apply) {
         rr.room = &room;
         rr.decision = decideRoom(room, in, prices_, tz_);
         rr.changed = prev == lastOn_.end() || prev->second != rr.decision.on;
+        rr.plan = planAhead(room, prices_, tz_, now, hours{24}, away, outdoor);
 
         if (rr.decision.reason == Reason::StaleDataLimp) {
             add(result, "room:" + room.id + ":limp", Severity::Warning,

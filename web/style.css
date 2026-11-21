@@ -120,7 +120,10 @@ a { color: var(--accent); }
 .nav a:hover { background: var(--surface-2); }
 .nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .updated { margin-left: auto; color: var(--muted); font-size: 13px; }
+.outdoor-card { cursor: default; background: linear-gradient(180deg, var(--cool-tint), transparent 60%), var(--surface); }
+.outdoor-card:hover { border-color: var(--border); }
 .away-btn { border-radius: 999px; }
+.away-btn .icon { color: var(--accent); }  /* same as the plane on the away panel */
 .away-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-color: var(--accent);
   background: linear-gradient(90deg, var(--accent-soft), transparent 70%), var(--surface); }
 .away-bar .grow { flex: 1; min-width: 200px; }
@@ -304,6 +307,19 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }
+
+/* Next 24 h plan on room cards */
+.plan { margin-top: 12px; }
+.planbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--grid); gap: 1px; }
+.planbar > div { min-width: 2px; }
+.planbar .pl-heat { background: var(--cat-comfort); opacity: 0.55; }
+.planbar .pl-keep { background: var(--cat-comfort); opacity: 0.28; }
+.planbar .pl-preheat, .planbar .pl-boost { background: var(--cat-price); opacity: 0.8; }
+.planbar .pl-coast { background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--grid) 4px 8px); }
+.planbar .pl-off { background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--grid) 4px 8px); opacity: 0.6; }
+.planbar .pl-away { background: var(--accent); opacity: 0.35; }
+.plan-axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.plan-next { font-size: 12.5px; color: var(--ink-2); margin-top: 4px; }
 
 /* Job progress (firmware upgrade / fail-safe test) */
 .joblog { margin-top: 12px; border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 10px; padding: 10px 12px; background: var(--surface); }

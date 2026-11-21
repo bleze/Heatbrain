@@ -102,4 +102,18 @@ double outdoorFactor(double target, std::optional<double> outdoor);
 Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceTable& prices,
                     const TimeZone& tz);
 
+// What a room is set to do over the coming hours, for display. Each slot is decided by the
+// real planner assuming the room sits at its target, which yields the intent per period:
+//   "heat" (to target, as needed), "preheat", "coast" (expensive: lets it cool a little),
+//   "boost" (cheapest hours), "keep" (keep above), "away", "off".
+struct PlanSegment {
+    Instant from;
+    Instant to;
+    std::string kind;
+    std::optional<double> target;
+};
+std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz, Instant now,
+                                   std::chrono::hours horizon, std::optional<AwayMode> away,
+                                   std::optional<double> outdoorTemp);
+
 }  // namespace hb

@@ -273,8 +273,80 @@ function renderProblems() {
 }
 
 // ---------------------------------------------------------------------------------------
+// Plan for the next 24 h (from the server: the planner's intent per period)
+// ---------------------------------------------------------------------------------------
+const PLAN = {
+  heat: (t) => (t == null ? "heat (cheap hours)" : `heat to ${temp(t)} as needed`),
+  preheat: (t) => `pre-heat (target ${temp(t)})`,
+  coast: () => "coast - expensive",
+  boost: () => "cheap boost",
+  keep: (t) => `keep above ${temp(t)}`,
+  away: (t) => `away - keep above ${temp(t)}`,
+  off: () => "off",
+};
+const planLabel = (s) => (PLAN[s.kind] || (() => s.kind))(s.target);
+
+function planStrip(parent, plan) {
+  const t0 = plan[0].from, t1 = plan[plan.length - 1].to;
+  const wrap = el("div", { class: "plan" }, parent);
+  const bar = el("div", { class: "planbar" }, wrap);
+  for (const s of plan) {
+    el("div", { class: `pl-${s.kind}`, style: `flex:${s.to - s.from}`, title: `${hm(s.from)}-${hm(s.to)}: ${planLabel(s)}` }, bar);
+  }
+  const axis = el("div", { class: "plan-axis" }, wrap);
+  el("span", {}, axis, "now");
+  el("span", {}, axis, hm(t0 + (t1 - t0) / 2));
+  el("span", {}, axis, hm(t1));
+  // The next two changes, in words
+  const next = plan.slice(1, 3).map((s) => `${planLabel(s)} ${hm(s.from)}`);
+  el("div", { class: "plan-next" }, wrap, `Now: ${planLabel(plan[0])}${next.length ? ` · then ${next.join(" · ")}` : ""}`);
+}
+
+// ---------------------------------------------------------------------------------------
 // Away / holiday mode
 // ---------------------------------------------------------------------------------------
+// The outdoor sensor as a card next to the rooms.
+function outdoorCard(host) {
+  const o = state.status?.outdoor;
+  if (!o) return;
+  const s = (state.status.sensors || []).find((x) => x.name === o.name && x.kind === "outdoor") || {};
+  const card = el("article", { class: "card room outdoor-card" }, host);
+  const top = el("div", { class: "room-top" }, card);
+  const name = el("div", { class: "room-name" }, top);
+  name.appendChild(badge("snow", "cool"));
+  name.appendChild(document.createTextNode("Outside"));
+  el("span", { class: "muted" }, top, o.name);
+  const hero = el("div", { class: "hero" }, card, temp(o.temperature));
+  if (s.humidity != null) el("small", {}, hero, `${Math.round(s.humidity)} % humidity`);
+  el("div", { class: "detail" }, card, "Colder outside means more pre-heating before expensive or off periods.");
+  const chips = el("div", { class: "plugs" }, card);
+  const chip = (cls, iconName, text) => { const c = el("span", { class: `chip ${cls}` }, chips); c.appendChild(icon(iconName)); c.appendChild(document.createTextNode(text)); };
+  if (s.battery != null) chip(s.battery <= 20 ? "error" : s.battery <= 40 ? "warn" : "", "battery", `battery ${s.battery} %`);
+  if (s.ageMinutes != null) chip("", "clock", `${s.ageMinutes} min ago`);
+}
+
+// A spinbox like the ones in the settings: [ - value unit + ]
+function makeStepper({ value, step = 1, min, max, unit, label }) {
+  const wrap = el("span", { class: `stepper${unit ? " has-unit" : ""}` });
+  const input = el("input", { type: "number", step, min, max, inputmode: "decimal", "aria-label": label });
+  input.value = value;
+  const bump = (dir) => {
+    let v = Math.round(((Number(input.value) || 0) + dir * step) / step) * step;
+    if (min != null) v = Math.max(min, v);
+    if (max != null) v = Math.min(max, v);
+    input.value = v.toFixed((String(step).split(".")[1] || "").length);
+  };
+  const minus = el("button", { type: "button", class: "step", "aria-label": "Decrease", tabindex: -1 }, wrap);
+  minus.appendChild(icon("minus"));
+  wrap.appendChild(input);
+  if (unit) el("span", { class: "unit" }, wrap, unit);
+  const plus = el("button", { type: "button", class: "step", "aria-label": "Increase", tabindex: -1 }, wrap);
+  plus.appendChild(icon("plus"));
+  minus.addEventListener("click", () => bump(-1));
+  plus.addEventListener("click", () => bump(1));
+  return { wrap, input };
+}
+
 let awayFormOpen = false;
 function renderAway() {
   const bar = $("away-bar"), headerBtn = $("away-btn");
@@ -324,9 +396,8 @@ function renderAway() {
   until.value = local(d);
   const keepLabel = el("label", { class: "field" }, bar);
   el("span", {}, keepLabel, "Keep above");
-  const keepRow = el("span", { class: "row" }, keepLabel);
-  const keep = el("input", { type: "number", min: 5, max: 20, step: 0.5, value: 12, style: "width:70px", "aria-label": "Keep above" }, keepRow);
-  el("span", { class: "muted" }, keepRow, "°C");
+  const { wrap: keepBox, input: keep } = makeStepper({ value: 12, step: 0.5, min: 5, max: 20, unit: "°C", label: "Keep above" });
+  keepLabel.appendChild(keepBox);
   const start = el("button", { type: "button", class: "primary" }, bar);
   start.appendChild(icon("plane"));
   start.appendChild(document.createTextNode("Save away period"));
@@ -345,12 +416,17 @@ function renderAway() {
   const cancel = el("button", { type: "button", class: "ghost" }, bar, "Cancel");
   cancel.addEventListener("click", () => { awayFormOpen = false; renderAway(); });
 }
-$("away-btn").addEventListener("click", () => { awayFormOpen = true; renderAway(); });
+$("away-btn").addEventListener("click", () => {
+  awayFormOpen = true;
+  if (location.hash.startsWith("#settings")) location.hash = "";  // the panel lives on the dashboard
+  renderAway();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 
 // ---------------------------------------------------------------------------------------
 // Room cards
 // ---------------------------------------------------------------------------------------
-function renderRooms() {
+let renderRooms = function () {
   const host = $("rooms");
   host.replaceChildren();
   if (!state.status.rooms.length) {
@@ -391,6 +467,7 @@ function renderRooms() {
     if (cat) el("span", { class: "swatch", style: `background:${catColor(cat)}` }, reason);
     reason.appendChild(document.createTextNode(reasonLabel(r.reason)));
     el("div", { class: "detail" }, card, r.detail);
+    if (r.plan?.length) planStrip(card, r.plan);
 
     // Only when something outranks the override (e.g. above max); otherwise the reason says it.
     if (r.override && !["MANUAL_ON", "MANUAL_OFF"].includes(r.reason)) {
@@ -415,6 +492,10 @@ function renderRooms() {
     if (r.override) act("Back to auto", (b) => clearOverride(r.id, b));
   }
 }
+
+// Room cards, then the outdoor card (kept as a separate step so it is added exactly once).
+const renderRoomCards = renderRooms;
+renderRooms = function () { renderRoomCards(); if (state.status?.rooms?.length) outdoorCard($("rooms")); };
 
 async function setOverride(id, on, minutes, button) {
   button.disabled = true;
@@ -554,6 +635,17 @@ function renderDetail() {
   for (const s of segs) {
     const x0 = x(s.start) + 1, w = Math.max(2, x(s.end) - x(s.start) - 2); // 2px surface gap between fills
     el("rect", { x: x0, y: stripTop, width: w, height: stripH, rx: 3, fill: catColor(s.cat) }, svg);
+  }
+
+  // Planned heating ahead (lighter): what the planner intends for the coming hours.
+  const plan = (state.status?.rooms || []).find((x) => x.id === room.id)?.plan || [];
+  for (const s of plan) {
+    const cat = { heat: "comfort", keep: "comfort", away: "safety", preheat: "price", boost: "price" }[s.kind];
+    if (!cat) continue;  // off / coast: nothing planned
+    const a = Math.max(s.from, h.to), b = Math.min(s.to, t1);
+    if (b <= a) continue;
+    el("rect", { x: x(a) + 1, y: stripTop, width: Math.max(2, x(b) - x(a) - 2), height: stripH, rx: 3,
+                 fill: catColor(cat), "fill-opacity": 0.35 }, svg);
   }
 
   // Price panel (its own y-scale: separate chart, shared x)

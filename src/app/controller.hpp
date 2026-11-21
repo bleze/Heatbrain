@@ -22,6 +22,7 @@ namespace hb {
 struct RoomResult {
     const RoomConfig* room = nullptr;
     Decision decision;
+    std::vector<PlanSegment> plan;  // next 24 h
     bool changed = false;
     nlohmann::json plugs = nlohmann::json::array();
 };
@@ -50,6 +51,8 @@ public:
     void setDataDir(std::filesystem::path dir) { dataDir_ = std::move(dir); }
     void setAwayStore(const AwayStore* away) { away_ = away; }
     void setOutdoorSensor(std::string ref) { outdoorSensor_ = std::move(ref); }
+    // The outdoor reading used in the last tick (name, °C), if any.
+    const std::optional<std::pair<std::string, double>>& outdoor() const { return outdoorUsed_; }
 
 private:
     void refreshPrices(Instant now, TickResult& result);
@@ -67,6 +70,7 @@ private:
     const Overrides* overrides_;
     const AwayStore* away_ = nullptr;
     std::string outdoorSensor_;  // "<source>:<id or name>"; empty = first outdoor sensor
+    std::optional<std::pair<std::string, double>> outdoorUsed_;
     History* history_;
 
     PriceTable prices_;

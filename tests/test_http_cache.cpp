@@ -34,6 +34,7 @@ TEST_CASE("Failures fall back to a stale copy, or throw if there is none") {
     test::TempDir dir;
     test::FakeHttp http;
     CachingHttpClient cache(http, dir.path());
+    cache.setSleeper([](seconds) {});  // 429 retries must not really wait (was 2 x 30 s)
 
     http.handler = [](const std::string&) { return HttpResponse{429, "slow down"}; };
     CHECK_THROWS_AS(cache.get("https://x/a", seconds{0}), HttpError);

@@ -328,3 +328,37 @@ TEST_CASE("Colder outside: more pre-heating before the peak") {
     CHECK_THAT(d.detail, ContainsSubstring("-5.0°C outside"));
     CHECK(d.inputs.outdoorTemp == -5.0);
 }
+
+TEST_CASE("Plan ahead shows the intent per period") {
+    RoomConfig r = bedroom();
+    r.program = {{7 * 60, ProgramMode::Heat, 19.0}, {17 * 60, ProgramMode::Off, 0}, {21 * 60, ProgramMode::Heat, 20.0},
+                 {23 * 60, ProgramMode::Keep, 16.0}};
+    const auto plan = planAhead(r, makePrices(), tz(), at(12), hours{14}, std::nullopt, std::nullopt);
+    // 12:00 heat 19 -> 14:00 pre-heat (peak at 17 within 3 h) -> 17 off -> 21 heat 20 -> 23 keep 16
+    std::vector<std::string> kinds;
+    for (const auto& s : plan) kinds.push_back(s.kind);
+    CHECK(kinds == std::vector<std::string>{"heat", "preheat", "off", "heat", "keep"});
+    CHECK(plan[1].from == at(14));
+    CHECK(plan[2].from == at(17));
+    CHECK(plan[3].target == 20.0);
+    CHECK(plan.back().to == at(26));
+
+    const auto away = planAhead(r, makePrices(), tz(), at(12), hours{4}, AwayMode{12.0, at(13), at(15)}, std::nullopt);
+    CHECK(away[0].kind != "away");
+    CHECK(away[1].kind == "away");
+    CHECK(away[1].from == at(13));
+}
+
+TEST_CASE("Price-only rooms pick whole hours, so the relay does not flap every 15 minutes") {
+    RoomConfig shed;
+    shed.id = "shed";
+    shed.priceOnly = PriceOnlyConfig{1, {}};
+    PriceTable p = makePrices();
+    // Make 12:15 the single cheapest slot of the day, but 03:00-04:00 the cheapest hour.
+    for (auto& s : p.slots) {
+        if (s.start == at(12, 15)) s.total = s.parts[0] = 0.5;
+        if (s.start >= at(3) && s.start < at(4)) s.total = s.parts[0] = 1.0;
+    }
+    CHECK(decide(input(at(3, 30), std::nullopt), shed, p).reason == Reason::CheapHours);
+    CHECK(decide(input(at(12, 15), std::nullopt), shed, p).reason == Reason::NotCheapHours);
+}

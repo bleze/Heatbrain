@@ -1,6 +1,7 @@
 #include "core/planner.hpp"
 
 #include <algorithm>
+#include <map>
 #include <format>
 #include <vector>
 
@@ -140,32 +141,39 @@ Decision decidePriceOnly(const RoomConfig& room, const PlannerInput& in, const P
         return std::ranges::any_of(cfg.avoid, [m](const DayWindow& w) { return w.contains(m); });
     };
 
+    // Choose whole hours (average of their slots), not single 15-minute slots: the relay
+    // then switches at most once an hour instead of every quarter.
     const std::string today = formatLocalDate(local);
     const Instant slotNow = floorToSlot(in.now);
     std::optional<double> current;
-    std::vector<double> day;
+    std::map<Instant, std::pair<double, int>> hoursOfDay;  // UTC hour start -> (sum, count)
     for (const auto& s : prices.slots) {
-        if (!s.total || formatLocalDate(tz.toLocal(s.start)) != today || avoided(s.start)) continue;
-        day.push_back(*s.total);
         if (s.start == slotNow) current = s.total;
+        if (!s.total || formatLocalDate(tz.toLocal(s.start)) != today || avoided(s.start)) continue;
+        auto& h = hoursOfDay[floor<hours>(s.start)];
+        h.first += *s.total;
+        h.second += 1;
     }
     inputs.price = current;
-    if (!current || day.empty()) {
+    const auto thisHour = hoursOfDay.find(floor<hours>(in.now));
+    if (!current || thisHour == hoursOfDay.end()) {
         return make(true, Reason::NoPricesFallback, "No prices available: heating outside no-heat windows",
                     inputs);
     }
-    std::ranges::sort(day);
-    const std::size_t k = std::min(day.size(), static_cast<std::size_t>(cfg.hoursPerDay) * 4);
-    const double threshold = day[k - 1];
-    if (*current <= threshold) {
+    std::vector<double> averages;
+    for (const auto& [h, sc] : hoursOfDay) averages.push_back(sc.first / sc.second);
+    std::ranges::sort(averages);
+    const std::size_t k = std::min(averages.size(), static_cast<std::size_t>(cfg.hoursPerDay));
+    const double hourAvg = thisHour->second.first / thisHour->second.second;
+    if (k > 0 && hourAvg <= averages[k - 1]) {
         return make(true, Reason::CheapHours,
-                    std::format("Among today's {} cheapest hours ({:.2f} ≤ {:.2f} {}/kWh)", cfg.hoursPerDay,
-                                *current, threshold, prices.currency),
+                    std::format("Among today's {} cheapest hours ({:.2f} ≤ {:.2f} {}/kWh)", cfg.hoursPerDay, hourAvg,
+                                averages[k - 1], prices.currency),
                     inputs);
     }
     return make(false, Reason::NotCheapHours,
-                std::format("Not among today's {} cheapest hours ({:.2f} > {:.2f} {}/kWh)", cfg.hoursPerDay,
-                            *current, threshold, prices.currency),
+                std::format("Not among today's {} cheapest hours ({:.2f} > {:.2f} {}/kWh)", cfg.hoursPerDay, hourAvg,
+                            k > 0 ? averages[k - 1] : 0.0, prices.currency),
                 inputs);
 }
 
@@ -316,6 +324,53 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     if (t >= target + h) return make(false, Reason::TargetReached, "Target reached: " + where, inputs);
     return in.currentlyOn ? make(true, Reason::HoldOn, "Heating within band: " + where, inputs)
                           : make(false, Reason::HoldOff, "Within band: " + where, inputs);
+}
+
+}  // namespace hb
+
+namespace hb {
+
+std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz, Instant now,
+                                   std::chrono::hours horizon, std::optional<AwayMode> away,
+                                   std::optional<double> outdoorTemp) {
+    std::vector<PlanSegment> out;
+    for (Instant t = floorToSlot(now); t < now + horizon; t += kSlotLength) {
+        // The target in effect at t, so the planner sees a room that is exactly at target.
+        PlannerInput in;
+        in.now = t;
+        in.away = away;
+        in.outdoorTemp = outdoorTemp;
+        const auto period = periodAt(room, minuteOfDay(tz.toLocal(t)));
+        double assumed = period && period->point.mode != ProgramMode::Off ? period->point.target : room.minTemp + 1;
+        if (away && away->activeAt(t)) assumed = away->keepAbove + 1;
+        in.temperature = std::max(assumed, room.minTemp);
+        in.measuredAt = t;
+        const Decision d = decideRoom(room, in, prices, tz);
+
+        std::string kind;
+        switch (d.reason) {
+            case Reason::PreheatBeforePeak: kind = "preheat"; break;
+            case Reason::PeakAvoid:
+            case Reason::BelowComfortDuringPeak: kind = "coast"; break;
+            case Reason::CheapBoost: kind = "boost"; break;
+            case Reason::KeepAbove:
+            case Reason::KeepSatisfied: kind = d.inputs.mode == "away" ? "away" : "keep"; break;
+            case Reason::ScheduledOff:
+            case Reason::AvoidWindow:
+            case Reason::NotCheapHours:
+            case Reason::AwayOff: kind = d.inputs.mode == "away" ? "away" : "off"; break;
+            case Reason::CheapHours:
+            case Reason::NoPricesFallback: kind = "heat"; break;
+            default: kind = room.priceOnly ? (d.on ? "heat" : "off") : "heat"; break;
+        }
+        const std::optional<double> target = (kind == "off") ? std::nullopt : d.inputs.target;
+        if (!out.empty() && out.back().kind == kind && out.back().target == target) {
+            out.back().to = t + kSlotLength;
+        } else {
+            out.push_back({t, t + kSlotLength, kind, target});
+        }
+    }
+    return out;
 }
 
 }  // namespace hb
