@@ -132,13 +132,19 @@
     s.addEventListener("change", () => { obj[key] = s.value; onChange?.(); changed(); });
     return s;
   }
-  function chk(obj, key, label, def = false, onChange) {
-    const l = el("label", { class: "check" });
-    const i = el("input", { type: "checkbox" }, l);
-    i.checked = obj[key] ?? def;
-    i.addEventListener("change", () => { obj[key] = i.checked; onChange?.(); changed(); });
-    l.appendChild(document.createTextNode(label));
+  // On/off settings all use the same switch (like the plug's dry-run/live switch).
+  function toggle(parent, checked, label, onChange) {
+    const l = el("label", { class: "check" }, parent);
+    const sw = el("span", { class: "switch" }, l);
+    const i = el("input", { type: "checkbox" }, sw);
+    i.checked = checked;
+    el("span", {}, sw);
+    if (label) l.appendChild(document.createTextNode(label));
+    i.addEventListener("change", () => onChange(i.checked));
     return l;
+  }
+  function chk(obj, key, label, def = false, onChange) {
+    return toggle(null, obj[key] ?? def, label, (v) => { obj[key] = v; onChange?.(); changed(); });
   }
   function time(obj, key, isEnd = false) {
     const i = el("input", { type: "time", step: 900 });
@@ -306,15 +312,17 @@
     const plugs = S.cfg.plugs || [];
     if (!plugs.length) el("span", { class: "hint" }, plugsRow, "add plugs on the Plugs tab first");
     for (const p of plugs) {
-      const l = el("label", { class: "check chip" }, plugsRow);
-      const i = el("input", { type: "checkbox" }, l);
-      i.checked = (room.plugs || []).includes(p.id);
-      i.addEventListener("change", () => {
+      // Pick several from a list: selectable pills (on/off settings use switches).
+      const on = (room.plugs || []).includes(p.id);
+      const pill = el("button", { type: "button", class: `pick${on ? " on" : ""}`, "aria-pressed": on }, plugsRow);
+      pill.appendChild(icon(on ? "check" : "plug"));
+      pill.appendChild(document.createTextNode(p.name || p.id));
+      pill.addEventListener("click", (e) => {
+        e.preventDefault();
         room.plugs = (room.plugs || []).filter((x) => x !== p.id);
-        if (i.checked) room.plugs.push(p.id);
-        changed();
+        if (!on) room.plugs.push(p.id);
+        changed(); render();
       });
-      l.appendChild(document.createTextNode(p.name || p.id));
     }
 
     if (room.priceOnly) {
@@ -762,9 +770,7 @@
     const qwrap = el("div", { class: "field span2" }, rg);
     el("span", {}, qwrap, "Quiet hours");
     const qrow = el("div", { class: "row" }, qwrap);
-    const qchk = el("input", { type: "checkbox" }, el("label", { class: "check" }, qrow));
-    qchk.checked = quietOn;
-    qchk.addEventListener("change", () => { if (qchk.checked) n.quietHours = { from: "23:00", to: "07:00" }; else delete n.quietHours; changed(); render(); });
+    toggle(qrow, quietOn, quietOn ? "" : "Off", (v) => { if (v) n.quietHours = { from: "23:00", to: "07:00" }; else delete n.quietHours; changed(); render(); });
     el("div", { class: "hint" }, qwrap, "critical alerts still come through");
     if (quietOn) { qrow.appendChild(time(n.quietHours, "from")); el("span", {}, qrow, "–"); qrow.appendChild(time(n.quietHours, "to", true)); }
     const sg = el("div", { class: "field span2" }, rg);
