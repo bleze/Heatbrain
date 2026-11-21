@@ -95,9 +95,11 @@
       i.value = v.toFixed(decimals);
       commit();
     };
-    const minus = el("button", { type: "button", class: "step", "aria-label": "Decrease", tabindex: -1 }, wrap, "−");
+    const minus = el("button", { type: "button", class: "step", "aria-label": "Decrease", tabindex: -1 }, wrap);
+    minus.appendChild(icon("minus"));
     wrap.appendChild(i);
-    const plus = el("button", { type: "button", class: "step", "aria-label": "Increase", tabindex: -1 }, wrap, "+");
+    const plus = el("button", { type: "button", class: "step", "aria-label": "Increase", tabindex: -1 }, wrap);
+    plus.appendChild(icon("plus"));
     minus.addEventListener("click", (e) => { e.preventDefault(); bump(-1); });
     plus.addEventListener("click", (e) => { e.preventDefault(); bump(1); });
     i.addEventListener("input", commit);
@@ -725,6 +727,22 @@
     const control = (S.cfg.control ||= {});
     field(g, "Control interval (s)", num(control, "tickSeconds", { step: 60, min: 60, max: 3600, placeholder: "300" }),
       { hint: "at most half of each live plug's auto-off time" });
+    // Appearance: stored in this browser only, applied immediately (not part of the config).
+    const ap = el("div", { class: "field" }, g);
+    el("span", {}, ap, "Appearance");
+    const seg = el("div", { class: "segmented" }, ap);
+    let current = "auto";
+    try { current = localStorage.getItem("heatbrain-theme") || "auto"; } catch {}
+    for (const [value, label, iconName] of [["auto", "Auto", "gauge"], ["light", "Light", "info"], ["dark", "Dark", "snow"]]) {
+      const b = btn(seg, label, null, () => {
+        try { value === "auto" ? localStorage.removeItem("heatbrain-theme") : localStorage.setItem("heatbrain-theme", value); } catch {}
+        if (value === "auto") delete document.documentElement.dataset.theme;
+        else document.documentElement.dataset.theme = value;
+        render();
+      });
+      b.classList.toggle("active", current === value);
+    }
+    el("div", { class: "hint" }, ap, "this browser only");
     const web = (S.cfg.web ||= {});
     field(g, "Web UI port", num(web, "port", { step: 1, min: 1, max: 65535, placeholder: "8080" }), { hint: "takes effect after a restart" });
 
