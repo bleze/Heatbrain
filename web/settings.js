@@ -358,7 +358,12 @@
     program.forEach((pt, i) => {
       const r = el("div", { class: "sched-row" }, c);
       const at = time(pt, "at");
-      at.addEventListener("change", () => render());  // re-sort once the time is set
+      // Re-sort when leaving the field, and only if the order changed: Chrome fires "change"
+      // on every digit typed into a time field, so redrawing then would steal the focus.
+      at.addEventListener("blur", () => {
+        const sorted = program.every((x, k) => k === 0 || toMin(program[k - 1].at) <= toMin(x.at));
+        if (!sorted) render();
+      });
       r.appendChild(at);
       r.appendChild(sel(pt, "mode", [["heat", "Heat to"], ["keep", "Keep above"], ["off", "Off"]], () => {
         if (pt.mode === "off") delete pt.target;
