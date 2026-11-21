@@ -20,6 +20,7 @@ std::vector<std::unique_ptr<TemperatureSource>> loadTemperatureSources(
         if (!ids.insert(id).second) throw std::runtime_error("Duplicate temperature source id: " + id);
         const std::string type = sj.at("type").get<std::string>();
         if (type == "netatmo") {
+            if (sj.value("clientId", "").empty()) continue;  // not set up yet (e.g. fresh install)
             netatmo::Auth auth(http, sj.value("clientId", ""), sj.value("clientSecret", ""),
                                sj.value("refreshToken", ""), dataDir / (id + "-tokens.json"), now);
             sources.push_back(std::make_unique<netatmo::Source>(id, http, std::move(auth)));

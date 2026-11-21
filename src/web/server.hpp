@@ -44,30 +44,48 @@ struct WebConfig {
 
 WebConfig parseWebConfig(const nlohmann::json& cfg);
 
+struct WebContext {
+    std::filesystem::path dataDir;
+    std::filesystem::path configFile;
+    std::filesystem::path webRoot;           // empty: API only
+    std::function<void()> onOverride;        // an override was set/cleared: re-plan now
+    std::function<void()> onConfigSaved;     // config replaced: reload the controller
+};
+
 // JSON API + static frontend, served from its own thread.
-//   GET    /api/status                      current decisions, plugs, problems, prices
+//
+// Dashboard:
+//   GET    /api/status                      current decisions, plugs, problems, prices, sensors
 //   GET    /api/rooms/<id>/history?hours=N  temperatures, decisions, events, prices
 //   POST   /api/rooms/<id>/override         {"on": true, "minutes": 60}
 //   DELETE /api/rooms/<id>/override
+// Settings:
+//   GET    /api/config                      config with secrets masked
+//   POST   /api/config/validate             {"errors": [...]}
+//   PUT    /api/config                      validate, back up, save, reload
+//   GET    /api/plugs                       live status + fail-safe check of configured plugs
+//   POST   /api/plugs/<id>/provision        {"force": false}
+//   POST   /api/plugs/<id>/restore          refused while the plug is live
+//   POST   /api/discover                    {"subnet": "192.168.1.0/24"}
+//   POST   /api/notify/test
 class WebServer {
 public:
-    // onChange is called after an override was set or cleared (wakes the control loop).
-    WebServer(WebConfig cfg, const StatusBoard& board, std::filesystem::path dataDir, std::vector<RoomConfig> rooms,
-              std::filesystem::path webRoot, std::function<void()> onChange = {});
+    WebServer(WebConfig cfg, const StatusBoard& board, WebContext ctx);
     ~WebServer();
 
     void start();  // throws if the port cannot be bound
     void stop();
+    void setRooms(std::vector<RoomConfig> rooms);
 
 private:
     void routes();
+    std::vector<RoomConfig> rooms() const;
 
     WebConfig cfg_;
     const StatusBoard& board_;
-    std::filesystem::path dataDir_;
+    WebContext ctx_;
+    mutable std::mutex roomsMutex_;
     std::vector<RoomConfig> rooms_;
-    std::filesystem::path webRoot_;
-    std::function<void()> onChange_;
     std::unique_ptr<httplib::Server> server_;
     std::thread thread_;
 };

@@ -62,12 +62,36 @@ const temp = (v) => (v == null ? "–" : `${v.toFixed(1)}°`);
 const price = (v) => (v == null ? "–" : v.toFixed(2));
 
 function el(tag, attrs = {}, parent, text) {
-  const svg = ["svg", "g", "path", "rect", "line", "text", "polyline"].includes(tag);
+  const svg = ["svg", "g", "path", "rect", "line", "text", "polyline", "defs", "linearGradient", "stop", "use"].includes(tag);
   const node = svg ? document.createElementNS("http://www.w3.org/2000/svg", tag) : document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) if (v != null) node.setAttribute(k, v);
   if (text != null) node.textContent = text; // untrusted strings: textContent only
   if (parent) parent.appendChild(node);
   return node;
+}
+
+function icon(name, cls = "icon") {
+  const svg = el("svg", { class: cls, "aria-hidden": "true" });
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.appendChild(use);
+  return svg;
+}
+
+function badge(name, tone) {
+  const b = el("span", { class: `badge badge-${tone}` });
+  b.appendChild(icon(name));
+  return b;
+}
+
+let toastTimer;
+function toast(message, isError = false) {
+  const t = $("toast");
+  t.textContent = message;
+  t.className = `toast${isError ? " error" : ""}`;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 8000 : 3500);
 }
 
 // Binary search: index of the last element with a[i][0] <= t, or -1.
@@ -178,8 +202,17 @@ function renderPriceChart() {
     el("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }, svg, v.toFixed(1));
   }
   drawTimeAxis(svg, x, timeTicks(t0, t1, W - m.l - m.r), m.t, H - m.b, H - 6);
-  el("path", { class: "line", d: stepPath(pts, x, y, t1, 900) }, svg);
-  if (now >= t0 && now <= t1) el("line", { class: "now", x1: x(now), x2: x(now), y1: m.t, y2: H - m.b }, svg);
+  const defs = el("defs", {}, svg);
+  const grad = el("linearGradient", { id: "price-fill", x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+  el("stop", { offset: "0", "stop-color": "#fab005", "stop-opacity": 0.35 }, grad);
+  el("stop", { offset: "1", "stop-color": "#fab005", "stop-opacity": 0.02 }, grad);
+  const line = stepPath(pts, x, y, t1, 900);
+  el("path", { class: "area", d: `${line}V${y(yMin)}H${x(pts[0][0])}Z` }, svg);
+  el("path", { class: "line", d: line }, svg);
+  if (now >= t0 && now <= t1) {
+    el("line", { class: "now", x1: x(now), x2: x(now), y1: m.t, y2: H - m.b }, svg);
+    el("text", { class: "now-label", x: x(now) + 4, y: m.t + 10 }, svg, "now");
+  }
 
   // Summary line
   const today = pts.filter((p) => dayShort(p[0]) === dayShort(now));
@@ -228,8 +261,9 @@ function renderProblems() {
   const order = { critical: 0, warning: 1, info: 2 };
   for (const p of [...problems].sort((a, b) => order[a.severity] - order[b.severity])) {
     const div = el("div", { class: `problem ${p.severity}` }, host);
-    const icon = p.severity === "critical" ? "⛔" : p.severity === "warning" ? "⚠️" : "ℹ️";
-    el("span", { class: "label" }, div, `${icon} ${p.severity === "critical" ? "Action needed" : p.severity === "warning" ? "Problem" : "Note"}`);
+    const label = el("span", { class: "label" }, div);
+    label.appendChild(icon(p.severity === "info" ? "info" : "alert"));
+    label.appendChild(document.createTextNode(p.severity === "critical" ? "Action needed" : p.severity === "warning" ? "Problem" : "Note"));
     el("span", {}, div, p.message);
   }
 }
@@ -240,16 +274,29 @@ function renderProblems() {
 function renderRooms() {
   const host = $("rooms");
   host.replaceChildren();
+  if (!state.status.rooms.length) {
+    const empty = el("div", { class: "card empty-state" }, host);
+    empty.appendChild(badge("home", "violet"));
+    el("div", { style: "font-weight:600;font-size:16px" }, empty, "No rooms yet");
+    const p = el("div", {}, empty, "Add plugs and rooms in ");
+    el("a", { href: "#settings" }, p, "Settings");
+    host.style.gridTemplateColumns = "1fr";
+    return;
+  }
+  host.style.gridTemplateColumns = "";
   for (const r of state.status.rooms) {
-    const card = el("article", { class: `card room${state.selected === r.id ? " selected" : ""}`, tabindex: 0 }, host);
+    const mood = r.on ? "heating" : "idle";
+    const card = el("article", { class: `card room ${mood}${state.selected === r.id ? " selected" : ""}`, tabindex: 0 }, host);
     card.addEventListener("click", () => selectRoom(r.id));
     card.addEventListener("keydown", (e) => { if (e.key === "Enter") selectRoom(r.id); });
 
     const top = el("div", { class: "room-top" }, card);
-    el("div", { class: "room-name" }, top, r.name);
-    const chip = el("span", { class: "state" }, top);
+    const name = el("div", { class: "room-name" }, top);
+    name.appendChild(r.on ? badge("flame", "warm") : badge("snow", "cool"));
+    name.appendChild(document.createTextNode(r.name));
+    const chip = el("span", { class: `state${r.on ? " on" : ""}` }, top);
     const cat = r.on ? reasonCat(r.reason) : null;
-    if (cat) el("span", { class: "swatch", style: `background:${catColor(cat)}` }, chip);
+    chip.appendChild(icon(r.on ? "flame" : "power"));
     chip.appendChild(document.createTextNode(r.on ? "Heating" : "Off"));
 
     const inp = r.inputs || {};
@@ -271,7 +318,9 @@ function renderRooms() {
     const plugs = el("div", { class: "plugs" }, card);
     for (const p of r.plugs || []) {
       const text = p.mode === "live" ? `${p.id} · live${p.state != null ? (p.state ? " · on" : " · off") : ""}` : `${p.id} · dry-run`;
-      el("span", { class: `chip ${p.mode}${p.error ? " error" : ""}`, title: p.error || "" }, plugs, p.error ? `${p.id} · ${p.error}` : text);
+      const chipEl = el("span", { class: `chip ${p.mode}${p.error ? " error" : ""}`, title: p.error || "" }, plugs);
+      chipEl.appendChild(icon(p.error ? "alert" : "plug"));
+      chipEl.appendChild(document.createTextNode(p.error ? `${p.id} · ${p.error}` : text));
     }
 
     const actions = el("div", { class: "actions" }, card);
@@ -501,6 +550,16 @@ async function refreshStatus() {
     const s = await api("/api/status");
     if (!s.rooms) { $("updated").textContent = "waiting for the first control step…"; return; }
     state.status = s;
+    const ce = $("config-error");
+    ce.hidden = !s.configError;
+    if (s.configError) {
+      ce.replaceChildren();
+      const label = el("span", { class: "label" }, ce);
+      label.appendChild(icon("alert"));
+      label.appendChild(document.createTextNode("Configuration problem"));
+      el("span", {}, ce, `${s.configError} `);
+      el("a", { href: "#settings" }, ce, "Open settings");
+    }
     state.tz = s.timezone || state.tz;
     $("updated").textContent = `updated ${hm(s.now)} · every ${Math.round(s.tickSeconds / 60)} min`;
     renderProblems();
@@ -529,6 +588,19 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => { if (state.status) renderPriceChart(); if (state.history) renderDetail(); }, 150);
 });
 
-refreshStatus();
-setInterval(refreshStatus, 30_000);
-setInterval(loadHistory, 60_000);
+// ---------------------------------------------------------------------------------------
+// Views: #settings or the dashboard
+// ---------------------------------------------------------------------------------------
+function route() {
+  const view = location.hash.startsWith("#settings") ? "settings" : "dashboard";
+  $("view-dashboard").hidden = view !== "dashboard";
+  $("view-settings").hidden = view !== "settings";
+  document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === view));
+  if (view === "settings" && window.Settings) window.Settings.open();
+  if (view === "dashboard" && state.status) { renderPriceChart(); if (state.history) renderDetail(); }
+}
+window.addEventListener("hashchange", route);
+
+refreshStatus().then(route);
+setInterval(() => { if (!$("view-dashboard").hidden) refreshStatus(); }, 30_000);
+setInterval(() => { if (!$("view-dashboard").hidden) loadHistory(); }, 60_000);

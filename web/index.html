@@ -4,21 +4,63 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>heatbrain</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3c3 5 8 8 8 15a8 8 0 0 1-16 0c0-4 2-6 3-8 1 3 3 4 3 4 0-5 1-8 2-11z' fill='%23eb6834'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='0' y2='0'%3E%3Cstop offset='0' stop-color='%23e8590c'/%3E%3Cstop offset='1' stop-color='%23f59f00'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M12 2c1 4 6 6 6 12a6 6 0 0 1-12 0c0-3 1.5-4.5 2.5-6 .5 2 2 3 2 3 0-4 .5-6.5 1.5-9z' fill='url(%23g)'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Icon set: simple 24px stroke icons, used as <svg class="icon"><use href="#i-name"/></svg> -->
+  <!-- Not display:none: gradients inside a display:none SVG don't render in Chrome. -->
+  <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="flame-grad" x1="0" y1="1" x2="0" y2="0">
+        <stop offset="0" stop-color="#e8590c"/><stop offset="1" stop-color="#fab005"/>
+      </linearGradient>
+    </defs>
+    <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 2.5c1 4 6 6 6 11.5a6 6 0 0 1-12 0c0-3 1.5-4.5 2.5-6 .5 2 2 3 2 3 0-4 .5-6.5 1.5-8.5z"/></symbol>
+    <symbol id="i-snow" viewBox="0 0 24 24"><path d="M12 2v20M4.9 6.5l14.2 11M4.9 17.5l14.2-11M9 3.5l3 2.5 3-2.5M9 20.5l3-2.5 3 2.5M2.8 9.8l3.7 1-1 3.6M21.2 14.2l-3.7-1 1-3.6"/></symbol>
+    <symbol id="i-thermo" viewBox="0 0 24 24"><path d="M14 14.8V4a2 2 0 0 0-4 0v10.8a4 4 0 1 0 4 0z"/><path d="M12 9v7"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V21H3zM9 21v-6h6v6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20zM12 10v4M12 17.5v.01"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2 8.5a15 15 0 0 1 20 0M5 12a10.5 10.5 0 0 1 14 0M8.5 15.5a5.5 5.5 0 0 1 7 0M12 19v.01"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M3 15a9 9 0 1 1 18 0"/><path d="m12 15 4-5"/><circle cx="12" cy="15" r="1.2"/></symbol>
+    <symbol id="i-battery" viewBox="0 0 24 24"><rect x="2" y="7" width="17" height="10" rx="2"/><path d="M22 11v2"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5zM8 3v5h7V3M8 21v-7h8v7"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+  </svg>
+
   <header class="top">
-    <div class="brand">heatbrain</div>
+    <a class="brand" href="#">
+      <svg class="logo" viewBox="0 0 24 24"><use href="#i-flame"/></svg>
+      <span>heatbrain</span>
+    </a>
+    <nav class="nav">
+      <a href="#" data-view="dashboard"><svg class="icon"><use href="#i-gauge"/></svg>Dashboard</a>
+      <a href="#settings" data-view="settings"><svg class="icon"><use href="#i-gear"/></svg>Settings</a>
+    </nav>
     <div class="updated" id="updated">connecting…</div>
   </header>
 
-  <main>
+  <main id="view-dashboard">
+    <section id="config-error" class="problem critical" hidden></section>
     <section id="problems" class="problems" hidden></section>
 
     <section class="card">
       <div class="card-head">
-        <h2>Electricity price</h2>
+        <h2><span class="badge badge-amber"><svg class="icon"><use href="#i-bolt"/></svg></span>Electricity price</h2>
         <div class="muted" id="price-summary"></div>
       </div>
       <div class="chart" id="price-chart"></div>
@@ -28,7 +70,7 @@
 
     <section class="card" id="detail" hidden>
       <div class="card-head">
-        <h2 id="detail-title"></h2>
+        <h2><span class="badge badge-violet"><svg class="icon"><use href="#i-thermo"/></svg></span><span id="detail-title"></span></h2>
         <div class="range" role="group" aria-label="Time range">
           <button data-hours="24" class="active">24 h</button>
           <button data-hours="72">3 days</button>
@@ -47,7 +89,19 @@
     </section>
   </main>
 
+  <main id="view-settings" hidden>
+    <nav class="tabs" id="settings-tabs"></nav>
+    <div id="settings-body"></div>
+    <div class="savebar" id="savebar" hidden>
+      <div class="savebar-msg" id="savebar-msg">Unsaved changes</div>
+      <button type="button" id="btn-discard"><svg class="icon"><use href="#i-undo"/></svg>Discard</button>
+      <button type="button" class="primary" id="btn-save"><svg class="icon"><use href="#i-save"/></svg>Save &amp; apply</button>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" hidden></div>
   <div class="tooltip" id="tooltip" role="status" hidden></div>
   <script src="app.js"></script>
+  <script src="settings.js"></script>
 </body>
 </html>

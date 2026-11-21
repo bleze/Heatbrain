@@ -46,6 +46,7 @@ public:
 
     const std::vector<RoomConfig>& rooms() const { return rooms_; }
     const PriceTable& prices() const { return prices_; }
+    const std::map<std::string, SensorReading>& readings() const { return readings_; }
 
 private:
     void refreshPrices(Instant now, TickResult& result);

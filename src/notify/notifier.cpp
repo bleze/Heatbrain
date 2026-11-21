@@ -75,7 +75,7 @@ NotificationConfig loadNotifications(const json& cfg, HttpClient& http) {
         if (type == "discord") {
             const std::string url = c.value("webhookUrl", "");
             if (url.empty()) {
-                log::info("Notifications: discord channel has no webhookUrl yet - skipped");
+                log::debug("Notifications: discord channel has no webhookUrl yet - skipped");
                 continue;
             }
             nc.channels.push_back(std::make_unique<DiscordNotifier>(http, url));

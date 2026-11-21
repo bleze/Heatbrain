@@ -55,7 +55,6 @@ std::unique_ptr<ControlEnv> loadControlEnv(const Args& args) {
     e->sources = hb::loadTemperatureSources(e->cfg.raw, e->internet, e->cfg.dataDir, nowSeconds);
     e->plugs = hb::loadPlugs(e->cfg.raw, e->lan);
     auto rooms = hb::parseRooms(e->cfg.raw, e->plugs);
-    if (rooms.empty()) throw std::runtime_error("No rooms configured in " + e->cfg.configFile.string());
     e->overrides = std::make_unique<hb::Overrides>(e->cfg.dataDir / "overrides.json");
     e->history = std::make_unique<hb::History>(e->cfg.dataDir / "history.db");
     if (e->cfg.raw.contains("control")) e->tick = seconds{e->cfg.raw["control"].value("tickSeconds", 300)};
@@ -139,7 +138,8 @@ int runNotifyTest(const Args& args) {
 
 namespace {
 std::atomic<bool> g_stop{false};
-std::atomic<bool> g_wake{false};  // set by the web UI after an override
+std::atomic<bool> g_wake{false};    // set by the web UI after an override: tick now
+std::atomic<bool> g_reload{false};  // set by the web UI after saving settings
 extern "C" void onSignal(int) { g_stop = true; }
 
 std::vector<fs::path> webRootCandidates() {
@@ -181,45 +181,43 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
     for (const auto& s : env.controller->prices().slots) {
         if (s.total) prices.push_back({s.start.time_since_epoch().count(), *s.total});
     }
+    json sensors = json::array();
+    for (const auto& [key, r] : env.controller->readings()) {
+        json j{{"key", key}, {"name", r.name}, {"kind", r.kind}, {"station", r.station}, {"reachable", r.reachable}};
+        if (r.temperature) j["temperature"] = *r.temperature;
+        if (r.humidity) j["humidity"] = *r.humidity;
+        if (r.batteryPercent) j["battery"] = *r.batteryPercent;
+        if (r.measuredAt) j["ageMinutes"] = duration_cast<minutes>(now - *r.measuredAt).count();
+        sensors.push_back(std::move(j));
+    }
     return json{{"now", now.time_since_epoch().count()},
                 {"tickSeconds", env.tick.count()},
                 {"timezone", env.cfg.timezone},
                 {"currency", env.cfg.currency},
+                {"configError", nullptr},
                 {"rooms", rooms},
                 {"problems", problems},
-                {"prices", prices}};
+                {"prices", prices},
+                {"sensors", sensors}};
 }
-}  // namespace
 
-int runDaemon(const Args& args) {
-    auto env = loadControlEnv(args);
-
-    // Live plugs must be refreshed well within their fail-safe pulse time.
-    for (const auto& p : env->plugs) {
-        if (p.mode == hb::PlugMode::Live && env->tick * 2 > duration_cast<seconds>(p.failsafe.pulse)) {
-            throw std::runtime_error(std::format("Plug {}: tick ({} s) must be at most half the fail-safe pulse ({} min)",
-                                                 p.id, env->tick.count(), p.failsafe.pulse.count()));
-        }
-    }
-
-    std::signal(SIGINT, onSignal);
-    std::signal(SIGTERM, onSignal);
-
-    hb::log::info("heatbrain started: {} room(s), tick every {} s, data in {}", env->controller->rooms().size(),
-                  env->tick.count(), env->cfg.dataDir.string());
-    for (const auto& p : env->plugs) {
+// The control loop for one configuration. Returns when stopping or when the config changed.
+void controlLoop(ControlEnv& env, hb::StatusBoard& board, bool announce) {
+    hb::log::info("Control: {} room(s), {} plug(s), tick every {} s", env.controller->rooms().size(), env.plugs.size(),
+                  env.tick.count());
+    for (const auto& p : env.plugs) {
         hb::log::info("  plug {} ({}) {}", p.id, p.host.empty() ? p.type : p.host,
                       p.mode == hb::PlugMode::Live ? "LIVE" : "dryrun");
     }
 
-    auto notifications = hb::loadNotifications(env->cfg.raw, env->internet);
-    hb::AlertManager alerts(notifications.policy, *env->tz);
+    auto notifications = hb::loadNotifications(env.cfg.raw, env.internet);
+    hb::AlertManager alerts(notifications.policy, *env.tz);
     hb::log::info("  notifications: {} channel(s)", notifications.channels.size());
-    if (notifications.notifyOnStart) {
+    if (announce && notifications.notifyOnStart) {
         for (auto& ch : notifications.channels) {
             try {
                 ch->sendText("heatbrain started", std::format("{} room(s), tick every {} s",
-                                                              env->controller->rooms().size(), env->tick.count()));
+                                                              env.controller->rooms().size(), env.tick.count()));
             } catch (const std::exception& e) {
                 hb::log::warn("{}: {}", ch->name(), e.what());
             }
@@ -243,17 +241,12 @@ int runDaemon(const Args& args) {
         return any;
     };
 
-    hb::StatusBoard board;
-    hb::WebServer web(hb::parseWebConfig(env->cfg.raw), board, env->cfg.dataDir, env->controller->rooms(),
-                      hb::locateWebRoot(webRootCandidates()), [] { g_wake = true; });
-    if (hb::parseWebConfig(env->cfg.raw).enabled) web.start();
-
     std::set<std::string> seenKeys;
-    while (!g_stop) {
+    while (!g_stop && !g_reload) {
         const Instant now = nowSeconds();
         hb::TickResult result;
         try {
-            result = env->controller->tick(now, /*apply=*/true);
+            result = env.controller->tick(now, /*apply=*/true);
         } catch (const std::exception& e) {
             result.problems.push_back({"controller:tick", hb::Severity::Critical,
                                        std::string("Control step failed: ") + e.what(), minutes{0}, std::nullopt});
@@ -272,13 +265,65 @@ int runDaemon(const Args& args) {
         }
         seenKeys = keys;
         alerts.update(now, result.problems, deliver);
-        board.set(buildStatus(*env, result, alerts.activeProblems(), now));
+        board.set(buildStatus(env, result, alerts.activeProblems(), now));
 
-        // Sleep until the next tick boundary, waking every second to honour Ctrl+C/SIGTERM.
-        const auto tickLen = env->tick;
+        // Sleep until the next tick boundary; wake early for Ctrl+C/SIGTERM, overrides, reloads.
+        const auto tickLen = env.tick;
         const Instant next = Instant{(now.time_since_epoch() / tickLen + 1) * tickLen};
-        while (!g_stop && !g_wake && nowSeconds() < next) std::this_thread::sleep_for(milliseconds{250});
+        while (!g_stop && !g_wake && !g_reload && nowSeconds() < next) std::this_thread::sleep_for(milliseconds{250});
         g_wake = false;
+    }
+}
+
+}  // namespace
+
+int runDaemon(const Args& args) {
+    std::signal(SIGINT, onSignal);
+    std::signal(SIGTERM, onSignal);
+
+    // The web UI runs for the whole process, even when the configuration is incomplete or
+    // invalid: that is where it gets fixed.
+    const auto initial = hb::loadConfig(resolveDataDir(args), exampleConfigCandidates());
+    hb::log::info("heatbrain started, data in {}", initial.dataDir.string());
+    hb::StatusBoard board;
+    const auto webCfg = hb::parseWebConfig(initial.raw);
+    hb::WebServer web(webCfg, board,
+                      hb::WebContext{initial.dataDir, initial.configFile, hb::locateWebRoot(webRootCandidates()),
+                                     [] { g_wake = true; }, [] { g_reload = true; }});
+    if (webCfg.enabled) web.start();
+
+    bool first = true;
+    while (!g_stop) {
+        g_reload = false;
+        std::unique_ptr<ControlEnv> env;
+        try {
+            env = loadControlEnv(args);
+            for (const auto& p : env->plugs) {
+                if (p.mode == hb::PlugMode::Live && env->tick * 2 > duration_cast<seconds>(p.failsafe.pulse)) {
+                    throw std::runtime_error(std::format(
+                        "plug {}: tick ({} s) must be at most half its fail-safe pulse ({} min)", p.id,
+                        env->tick.count(), p.failsafe.pulse.count()));
+                }
+            }
+        } catch (const std::exception& e) {
+            hb::log::error("Configuration problem: {}. Fix it in the web UI (Settings).", e.what());
+            web.setRooms({});
+            board.set(nlohmann::json{{"now", nowSeconds().time_since_epoch().count()},
+                                     {"tickSeconds", 300},
+                                     {"timezone", initial.timezone},
+                                     {"currency", initial.currency},
+                                     {"configError", e.what()},
+                                     {"rooms", nlohmann::json::array()},
+                                     {"problems", nlohmann::json::array()},
+                                     {"prices", nlohmann::json::array()},
+                                     {"sensors", nlohmann::json::array()}});
+            while (!g_stop && !g_reload) std::this_thread::sleep_for(milliseconds{250});
+            continue;
+        }
+        web.setRooms(env->controller->rooms());
+        controlLoop(*env, board, first);
+        first = false;
+        if (g_reload) hb::log::info("Configuration changed - reloading");
     }
     hb::log::info("heatbrain stopping");
     return 0;

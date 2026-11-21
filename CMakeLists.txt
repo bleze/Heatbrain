@@ -49,6 +49,7 @@ add_library(heatbrain_io STATIC
   src/app/config.cpp
   src/app/rooms.cpp
   src/app/controller.cpp
+  src/app/config_service.cpp
 )
 target_link_libraries(heatbrain_io PUBLIC
   heatbrain_core
@@ -85,6 +86,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_planner.cpp
     tests/test_controller.cpp
     tests/test_alerts.cpp
+    tests/test_config_service.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE
