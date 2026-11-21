@@ -70,6 +70,7 @@ struct PlannerInput {
     bool currentlyOn = false;  // the planner's previous decision (hysteresis)
     std::optional<ManualOverride> override;
     std::optional<AwayMode> away;  // whole-house away/holiday mode
+    std::optional<double> outdoorTemp;  // °C, recent reading of an outdoor sensor
 };
 
 // Everything a decision was based on, for the decision log.
@@ -84,6 +85,7 @@ struct DecisionInputs {
     std::optional<double> medianPrice;
     bool priceExpensive = false;
     bool priceCheapest = false;
+    std::optional<double> outdoorTemp;
 };
 
 struct Decision {
@@ -92,6 +94,10 @@ struct Decision {
     std::string detail;  // plain-language explanation
     DecisionInputs inputs;
 };
+
+// How much to scale the pre-heat boost for the outdoor temperature: colder outside means
+// the room cools faster while off, so store more heat. 1.0 when unknown.
+double outdoorFactor(double target, std::optional<double> outdoor);
 
 Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceTable& prices,
                     const TimeZone& tz);

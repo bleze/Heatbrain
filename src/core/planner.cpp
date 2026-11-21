@@ -29,6 +29,11 @@ std::string_view modeName(ProgramMode m) {
     return "?";
 }
 
+double outdoorFactor(double target, std::optional<double> outdoor) {
+    if (!outdoor) return 1.0;
+    return std::clamp((target - *outdoor) / 15.0, 0.5, 1.5);
+}
+
 std::optional<ActivePeriod> periodAt(const RoomConfig& room, int minute) {
     const auto& p = room.program;
     if (p.empty()) return std::nullopt;
@@ -173,6 +178,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     inputs.minTemp = room.minTemp;
     inputs.maxTemp = room.maxTemp;
     inputs.temperature = in.temperature;
+    inputs.outdoorTemp = in.outdoorTemp;
     if (in.measuredAt) {
         inputs.temperatureAgeMinutes = static_cast<int>(duration_cast<minutes>(in.now - *in.measuredAt).count());
     }
@@ -280,12 +286,15 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 
     // 8. Cheap now, expensive soon: pre-heat.
     if (outlook.nextExpensiveAt && *outlook.current < *outlook.nextExpensivePrice * kPreheatMaxRatio) {
-        const double ceiling = std::min(target + s.preheatBoost, room.maxTemp - h);
+        const double boost = s.preheatBoost * outdoorFactor(target, in.outdoorTemp);
+        const double ceiling = std::min(target + boost, room.maxTemp - h);
         if (t < ceiling - h || (in.currentlyOn && t < ceiling)) {
+            const std::string weather =
+                in.outdoorTemp ? std::format(", +{:.1f}° as it is {} outside", boost, temp(*in.outdoorTemp)) : "";
             return make(true, Reason::PreheatBeforePeak,
-                        std::format("Pre-heating to {} before expensive period at {} ({:.2f} vs {:.2f} {}/kWh now)",
+                        std::format("Pre-heating to {} before expensive period at {} ({:.2f} vs {:.2f} {}/kWh now{})",
                                     temp(ceiling), formatLocalHm(tz.toLocal(*outlook.nextExpensiveAt)),
-                                    *outlook.nextExpensivePrice, *outlook.current, currency),
+                                    *outlook.nextExpensivePrice, *outlook.current, currency, weather),
                         inputs);
         }
     }

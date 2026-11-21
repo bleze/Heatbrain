@@ -309,3 +309,22 @@ TEST_CASE("Away mode can be planned ahead: nothing changes before it starts") {
     later.away = in.away;
     CHECK(decide(later, r).reason == Reason::KeepSatisfied);  // 05:00: away
 }
+
+TEST_CASE("Colder outside: more pre-heating before the peak") {
+    CHECK(outdoorFactor(20, std::nullopt) == 1.0);
+    CHECK(outdoorFactor(20, 5.0) == 1.0);
+    CHECK(outdoorFactor(20, -10.0) == 1.5);  // capped
+    CHECK(outdoorFactor(20, 15.0) == 0.5);   // mild: half
+
+    auto mild = input(at(15), 19.6);
+    mild.outdoorTemp = 15.0;  // boost 0.5: ceiling 19.5 - already there
+    CHECK_FALSE(decide(mild).on);
+
+    auto cold = input(at(15), 19.6);
+    cold.outdoorTemp = -5.0;  // boost 1.5: ceiling 20.5
+    const auto d = decide(cold);
+    CHECK(d.reason == Reason::PreheatBeforePeak);
+    CHECK_THAT(d.detail, ContainsSubstring("20.5°C"));
+    CHECK_THAT(d.detail, ContainsSubstring("-5.0°C outside"));
+    CHECK(d.inputs.outdoorTemp == -5.0);
+}

@@ -714,6 +714,17 @@
       el("li", {}, ol, "Save. Your modules appear below within a minute.");
     }
 
+    const out = el("section", { class: "card" }, body);
+    sectionHead(out, "Outdoor temperature", "snow", "cool",
+      "Used to pre-heat more before expensive or off periods when it is cold outside, and less when it is mild.");
+    const outdoorOptions = [["", "Automatic (first outdoor module)"]];
+    for (const sns of state.status?.sensors || []) {
+      if (sns.kind === "outdoor") outdoorOptions.push([`${sns.key.split(":")[0]}:${sns.name}`, `${sns.name}${sns.temperature != null ? ` · ${sns.temperature.toFixed(1)}°` : ""}`]);
+    }
+    if (!S.cfg.outdoorSensor) S.cfg.outdoorSensor = undefined;
+    const og = el("div", { class: "form-grid" }, out);
+    field(og, "Outdoor sensor", sel(S.cfg, "outdoorSensor", outdoorOptions));
+
     const mods = el("section", { class: "card" }, body);
     sectionHead(mods, "Modules", "wifi", "violet");
     const sensors = state.status?.sensors || [];

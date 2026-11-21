@@ -67,6 +67,7 @@ std::unique_ptr<ControlEnv> loadControlEnv(const Args& args) {
                                                      e->overrides.get(), e->history.get());
     e->controller->setDataDir(e->cfg.dataDir);
     e->controller->setAwayStore(e->away.get());
+    e->controller->setOutdoorSensor(e->cfg.raw.value("outdoorSensor", std::string()));
     return e;
 }
 

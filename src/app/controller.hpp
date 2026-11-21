@@ -49,6 +49,7 @@ public:
     const std::map<std::string, SensorReading>& readings() const { return readings_; }
     void setDataDir(std::filesystem::path dir) { dataDir_ = std::move(dir); }
     void setAwayStore(const AwayStore* away) { away_ = away; }
+    void setOutdoorSensor(std::string ref) { outdoorSensor_ = std::move(ref); }
 
 private:
     void refreshPrices(Instant now, TickResult& result);
@@ -65,6 +66,7 @@ private:
     std::vector<RoomConfig> rooms_;
     const Overrides* overrides_;
     const AwayStore* away_ = nullptr;
+    std::string outdoorSensor_;  // "<source>:<id or name>"; empty = first outdoor sensor
     History* history_;
 
     PriceTable prices_;

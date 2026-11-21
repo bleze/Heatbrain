@@ -32,6 +32,7 @@ json toJson(const DecisionInputs& in) {
     if (in.target) j["target"] = *in.target;
     if (in.price) j["price"] = *in.price;
     if (in.medianPrice) j["medianPrice"] = *in.medianPrice;
+    if (in.outdoorTemp) j["outdoorTemp"] = *in.outdoorTemp;
     return j;
 }
 
@@ -196,6 +197,18 @@ TickResult Controller::tick(Instant now, bool apply) {
     const auto overrides = overrides_ ? overrides_->load() : std::map<std::string, ManualOverride>{};
     const auto away = away_ ? away_->load() : std::nullopt;
 
+    // Outdoor temperature: the configured sensor, else the first outdoor one; only if recent.
+    std::optional<double> outdoor;
+    {
+        const SensorReading* o = outdoorSensor_.empty() ? nullptr : findSensor(outdoorSensor_);
+        if (!o) {
+            for (const auto& [k, r] : readings_) {
+                if (r.kind == "outdoor") { o = &r; break; }
+            }
+        }
+        if (o && o->temperature && o->measuredAt && now - *o->measuredAt < hours{1}) outdoor = o->temperature;
+    }
+
     for (const auto& room : rooms_) {
         const auto prev = lastOn_.find(room.id);
         PlannerInput in;
@@ -211,6 +224,7 @@ TickResult Controller::tick(Instant now, bool apply) {
         }
         if (auto it = overrides.find(room.id); it != overrides.end()) in.override = it->second;
         in.away = away;
+        in.outdoorTemp = outdoor;
 
         RoomResult rr;
         rr.room = &room;
