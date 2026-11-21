@@ -60,6 +60,11 @@ public:
 
     void prune(Instant olderThan);
 
+    // Consistent copy of the whole database into a new file (VACUUM INTO), safe while writing.
+    void snapshotTo(const std::filesystem::path& file) const;
+    // Replaces all rows with those of another heatbrain history database, in one transaction.
+    void replaceFrom(const std::filesystem::path& file);
+
 private:
     void exec(const char* sql);
     sqlite3* db_ = nullptr;

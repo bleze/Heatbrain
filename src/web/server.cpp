@@ -20,6 +20,7 @@
 #include "plugs/plugs.hpp"
 #include "plugs/tasmota.hpp"
 #include "storage/history.hpp"
+#include "app/transfer.hpp"
 
 namespace hb {
 
@@ -263,6 +264,40 @@ void WebServer::routes() {
         // Rooms are always presented as daily programs (older configs are converted).
         const json cfg = withPrograms(readConfigFile(ctx_.configFile));
         sendJson(res, json{{"config", maskSecrets(cfg)}, {"errors", validateConfig(cfg, ctx_.dataDir)}});
+    });
+
+    // Export / import for moving heatbrain (e.g. to the NAS). POST, so a link can't trigger it.
+    s.Post("/api/export", [this](const httplib::Request& req, httplib::Response& res) {
+        const bool withHistory = req.has_param("history") && req.get_param_value("history") == "1";
+        try {
+            const json bundle = buildExport(ctx_.dataDir, ctx_.configFile, withHistory);
+            log::info("Web: exported configuration{}", withHistory ? " and history" : "");
+            res.set_header("Content-Disposition", "attachment; filename=\"heatbrain-export.json\"");
+            sendJson(res, bundle);
+        } catch (const std::exception& e) {
+            sendError(res, 500, std::string("Export failed: ") + e.what());
+        }
+    });
+
+    s.Post("/api/import", [this](const httplib::Request& req, httplib::Response& res) {
+        json bundle;
+        try {
+            bundle = json::parse(req.body);
+        } catch (const std::exception&) {
+            return sendError(res, 400, "This is not a heatbrain export file (not JSON).");
+        }
+        try {
+            const auto r = applyImport(bundle, ctx_.dataDir, ctx_.configFile);
+            log::info("Web: imported export from {} ({} files{}) - reloading", r.exportedAt, r.files,
+                      r.history ? ", history" : "");
+            if (ctx_.onConfigSaved) ctx_.onConfigSaved();
+            sendJson(res, json{{"imported", true}, {"files", r.files}, {"history", r.history}, {"exportedAt", r.exportedAt}});
+        } catch (const std::invalid_argument& e) {
+            sendError(res, 400, e.what());
+        } catch (const std::exception& e) {
+            log::warn("Web: import failed: {}", e.what());
+            sendError(res, 500, std::string("Import failed: ") + e.what());
+        }
     });
 
     s.Post("/api/config/validate", [this](const httplib::Request& req, httplib::Response& res) {

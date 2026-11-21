@@ -115,6 +115,14 @@ const HELP = {
       "Each room card shows what heatbrain intends for the coming day, worked out from the program and the known prices: heat, pre-heat before an expensive period, coast while it is expensive, a cheap boost, keep above, away or off. Whether it actually heats depends on the room's temperature at the time.",
     ],
   },
+  transfer: {
+    title: "Moving heatbrain (export and import)",
+    body: [
+      "Export downloads one file with everything heatbrain needs: the settings including passwords and the Netatmo login, plug backups and fail-safe test results, the away period, manual overrides and - if you tick it - the history behind the graphs and costs. Import on the other heatbrain (Settings → System) and it carries on where this one stopped.",
+      "Run only one heatbrain at a time: stop this one as soon as the other has imported. Netatmo replaces its login every time it is used, so two copies would log each other out - and two copies would both switch the plugs.",
+      "The file contains passwords: keep it private and delete it when the move is done.",
+    ],
+  },
   costs: {
     title: "Heating cost",
     body: [
@@ -208,7 +216,7 @@ function renderManual(host) {
     "heatbrain switches your radiators' plugs on and off from the price of electricity, the temperature in each room and the program you set. Everything here is also available as '?' next to the settings.");
   const toc = el("nav", { class: "toc" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "sensors", "prices", "away", "notifications", "costs"];
+                 "sensors", "prices", "away", "notifications", "costs", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, card);
     el("h3", {}, sec, HELP[key].title);

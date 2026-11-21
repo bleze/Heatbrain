@@ -199,6 +199,37 @@ std::vector<PricePoint> History::prices(Instant from, Instant to) const {
     return out;
 }
 
+void History::snapshotTo(const std::filesystem::path& file) const {
+    Stmt s(db_, "VACUUM INTO ?");
+    s.bind(1, file.string());
+    s.step();
+}
+
+void History::replaceFrom(const std::filesystem::path& file) {
+    {
+        Stmt a(db_, "ATTACH DATABASE ? AS src");
+        a.bind(1, file.string());
+        a.step();
+    }
+    try {
+        exec("BEGIN");
+        try {
+            for (const char* table : {"decisions", "temperatures", "prices"}) {
+                exec((std::string("DELETE FROM main.") + table).c_str());
+                exec((std::string("INSERT INTO main.") + table + " SELECT * FROM src." + table).c_str());
+            }
+            exec("COMMIT");
+        } catch (...) {
+            exec("ROLLBACK");
+            throw;
+        }
+    } catch (...) {
+        exec("DETACH DATABASE src");
+        throw;
+    }
+    exec("DETACH DATABASE src");
+}
+
 void History::prune(Instant olderThan) {
     for (const char* table : {"decisions", "temperatures"}) {
         Stmt s(db_, (std::string("DELETE FROM ") + table + " WHERE ts<?").c_str());

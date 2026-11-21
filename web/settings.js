@@ -976,6 +976,76 @@
     fw.appendChild(chk(n, "firmwareUpdates", "Tell me when a new Tasmota release is out for my plugs", true));
   }
 
+  // --- Export / import (moving heatbrain, e.g. to the NAS) ------------------------------
+  function renderTransfer(body) {
+    const card = el("section", { class: "card" }, body);
+    sectionHead(card, "Move or back up heatbrain", "save", "green",
+      "One file with everything needed to run heatbrain elsewhere - for example when moving from this PC to the NAS.", "transfer");
+    const wrap = el("div", { class: "transfer" }, card);
+
+    // Export
+    const ex = el("div", {}, wrap);
+    const eh = el("h3", {}, ex); eh.appendChild(icon("save")); eh.appendChild(document.createTextNode("Export"));
+    el("div", { class: "hint" }, ex, "Settings incl. passwords and the Netatmo login, plug backups and test results, away period and overrides. Keep the file private.");
+    const exRow = el("div", { class: "row" }, ex);
+    S.exportHistory ??= true;
+    exRow.appendChild(toggle(null, S.exportHistory, "Include history (graphs, costs)", (v) => { S.exportHistory = v; }));
+    btn(exRow, "Download export", "save", async (b) => {
+      if (dirty()) return toast("Save or discard your changes first - the export uses the saved settings.", true);
+      b.disabled = true; b.lastChild.textContent = "Exporting…";
+      try {
+        const res = await fetch(`/api/export?history=${S.exportHistory ? 1 : 0}`, { method: "POST" });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+        const blob = await res.blob();
+        const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-");
+        const a = el("a", { href: URL.createObjectURL(blob), download: `heatbrain-export-${stamp}.json` }, document.body);
+        a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        toast(`Exported (${(blob.size / 1024).toFixed(0)} KB)`);
+      } catch (e) { toast(`Export failed: ${e.message}`, true); }
+      b.disabled = false; b.lastChild.textContent = "Download export";
+    }, "primary");
+
+    // Import
+    const im = el("div", {}, wrap);
+    const ih = el("h3", {}, im); ih.appendChild(icon("undo")); ih.appendChild(document.createTextNode("Import"));
+    el("div", { class: "hint" }, im, "Replaces this heatbrain's settings and state with an export. The current settings are backed up first.");
+    const imRow = el("div", { class: "row" }, im);
+    const file = el("input", { type: "file", accept: ".json,application/json", hidden: true }, imRow);
+    btn(imRow, S.importFile ? "Choose another file" : "Choose export file", "search", () => file.click());
+    file.addEventListener("change", async () => {
+      const f = file.files[0];
+      if (!f) return;
+      try {
+        const text = await f.text();
+        const j = JSON.parse(text);
+        if (j.format !== "heatbrain-export") throw new Error("not a heatbrain export file");
+        S.importFile = { name: f.name, text, exportedAt: j.exportedAt, rooms: (j.config?.rooms || []).length,
+                         plugs: (j.config?.plugs || []).length, files: Object.keys(j.files || {}).length, history: !!j.history };
+      } catch (e) { S.importFile = null; toast(`Can't use ${f.name}: ${e.message}`, true); }
+      render();
+    });
+    const f = S.importFile;
+    if (f) {
+      const when = f.exportedAt ? new Intl.DateTimeFormat("en-GB", { timeZone: state.tz, dateStyle: "medium", timeStyle: "short" }).format(new Date(f.exportedAt)) : "unknown time";
+      el("div", { class: "file-summary" }, im,
+        `${f.name}: exported ${when} · ${f.rooms} rooms · ${f.plugs} plugs · ${f.files} state files · ${f.history ? "with history" : "no history"}`);
+      const go = el("div", { class: "row" }, im);
+      confirmBtn(go, "Import", "check",
+        `Replace this heatbrain's settings${f.history ? ", history" : ""} and state with the export of ${when}?`,
+        async () => {
+          try {
+            const res = await fetch("/api/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: f.text });
+            const r = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(r.error || `HTTP ${res.status}`);
+            S.importFile = null;
+            toast(`Imported ${r.files} files${r.history ? " and the history" : ""} - heatbrain is reloading`);
+            setTimeout(() => location.reload(), 2500);
+          } catch (e) { toast(`Import failed: ${e.message}`, true); }
+        }, "primary", "import", "Importing…");
+      btn(go, "Cancel", null, () => { S.importFile = null; render(); }, "ghost");
+    }
+  }
+
   // --- System -------------------------------------------------------------------------
   function renderSystem(body) {
     const card = el("section", { class: "card" }, body);
@@ -1006,6 +1076,8 @@
     el("div", { class: "hint" }, ap, "this browser only");
     const web = (S.cfg.web ||= {});
     field(g, "Web UI port", num(web, "port", { step: 1, min: 1, max: 65535, placeholder: "8080" }), { hint: "takes effect after a restart" });
+
+    renderTransfer(body);
 
     const raw = el("section", { class: "card" }, body);
     sectionHead(raw, "Raw configuration", "gear", "gray", "For power users. Secrets are shown as ******** and kept unless you replace them.");

@@ -65,6 +65,8 @@ struct WebContext {
 //   GET    /api/config                      config with secrets masked
 //   POST   /api/config/validate             {"errors": [...]}
 //   PUT    /api/config                      validate, back up, save, reload
+//   POST   /api/export?history=1            everything needed to move heatbrain, as one JSON file
+//   POST   /api/import                      that file: validate, back up, replace, reload
 //   GET    /api/plugs                       live status + fail-safe check of configured plugs
 //   POST   /api/plugs/<id>/provision        {"force": false}
 //   POST   /api/plugs/<id>/restore          refused while the plug is live

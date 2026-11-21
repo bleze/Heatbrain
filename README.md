@@ -191,17 +191,21 @@ Docker build) and publishes `ghcr.io/bleze/heatbrain:latest` (plus a `sha-…` t
    public (GitHub → Packages → heatbrain → Package settings), or on the NAS log in with a
    personal access token that has `read:packages`:
    `sudo docker login ghcr.io -u bleze`.
-2. **Data folder.** Create `/volume1/docker/heatbrain` and copy `heatbrain.json`,
-   `netatmo-tokens.json` and optionally `history.db` from `data/` on the dev machine.
-3. **Only one heatbrain at a time.** Netatmo rotates its refresh token on every refresh;
-   a second instance with a copy of the token file locks both out. Stop the local one first.
-4. **Container Manager → Project → Create**, paste `deploy/docker-compose.yml`, start.
+2. **Data folder.** Create `/volume1/docker/heatbrain` (empty is fine: heatbrain creates a
+   starter config on first run).
+3. **Container Manager → Project → Create**, paste `deploy/docker-compose.yml`, start.
    The web UI is at `http://<nas-ip>:8080`.
-5. Other commands run inside the container, e.g.
+4. **Move your setup.** On the old heatbrain: Settings → System → *Export* (tick "Include
+   history" to keep graphs and costs). On the NAS: Settings → System → *Import* that file.
+   It carries the config with passwords, the Netatmo login, plug backups and fail-safe test
+   results, the away period and overrides. Delete the file afterwards: it contains secrets.
+5. **Only one heatbrain at a time.** Stop the old one right after importing. Netatmo rotates
+   its refresh token on every refresh, so two copies lock each other out - and both would
+   switch the plugs.
+6. Other commands run inside the container, e.g.
    `sudo docker exec heatbrain /app/bin/heatbrain plugs`.
-6. **Going live, one plug at a time:** `docker exec heatbrain /app/bin/heatbrain plug
-   bedroom provision`, set `"mode": "live"` for that plug in `heatbrain.json`, restart the
-   container. Undo with `plug bedroom restore` and `"mode": "dryrun"`.
+7. **Going live, one plug at a time:** Settings → Plugs → *Install fail-safe*, *Test
+   fail-safe*, then switch the plug to Live and save. *Remove fail-safe* undoes it.
 
 Updating: Container Manager → Project → heatbrain → Action → Build (pulls `latest`), or
 `sudo docker compose pull && sudo docker compose up -d` in the project folder.

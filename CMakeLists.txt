@@ -32,6 +32,7 @@ add_library(heatbrain_core STATIC
   src/core/alerts.cpp
   src/core/cost.cpp
   src/core/version.cpp
+  src/core/base64.cpp
 )
 target_include_directories(heatbrain_core PUBLIC src)
 
@@ -54,6 +55,7 @@ add_library(heatbrain_io STATIC
   src/app/config_service.cpp
   src/app/cost_report.cpp
   src/app/digest.cpp
+  src/app/transfer.cpp
 )
 target_link_libraries(heatbrain_io PUBLIC
   heatbrain_core
@@ -94,6 +96,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_cost.cpp
     tests/test_version.cpp
     tests/test_digest.cpp
+    tests/test_transfer.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE
