@@ -12,7 +12,9 @@ services:
     container_name: heatbrain
     restart: unless-stopped
     ports:
-      - "8080:8080"         # web UI: http://<nas-ip>:8080
+      # NAS port : container port. If 8080 is taken on the NAS ("address already in use"),
+      # change only the first number, e.g. "8090:8080" -> http://<nas-ip>:8090
+      - "8080:8080"
     volumes:
       - /volume1/docker/heatbrain:/data
     environment:
