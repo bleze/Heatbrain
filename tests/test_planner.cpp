@@ -215,3 +215,30 @@ TEST_CASE("Decision inputs are captured for the log") {
     CHECK(d.inputs.price == 3.4);
     CHECK(d.inputs.priceExpensive);
 }
+
+TEST_CASE("No-heat windows: off even below minimum, but never below frost protection") {
+    RoomConfig r = bedroom();
+    r.noHeat = {DayWindow{17 * 60, 21 * 60}};
+    const auto peak = decide(input(at(18), 15.0), r);  // below minTemp 16
+    CHECK_FALSE(peak.on);
+    CHECK(peak.reason == Reason::AvoidWindow);
+    CHECK_THAT(peak.detail, ContainsSubstring("17:00-21:00"));
+
+    const auto frost = decide(input(at(18), 4.5), r);
+    CHECK(frost.on);
+    CHECK(frost.reason == Reason::FrostProtection);
+
+    auto stale = input(at(18), std::nullopt);  // no data: limp mode must not heat in the window
+    stale.measuredAt.reset();
+    for (int m = 0; m < 60; m += 5) {
+        stale.now = at(18, m);
+        CHECK_FALSE(decide(stale, r).on);
+    }
+
+    auto manual = input(at(18), 18.0);  // an explicit manual ON still wins
+    manual.override = ManualOverride{true, at(19)};
+    CHECK(decide(manual, r).reason == Reason::ManualOn);
+
+    CHECK(decide(input(at(21), 18.0), r).reason == Reason::BelowTarget);  // window ended
+    CHECK(decide(input(at(15), 19.2), r).reason == Reason::PreheatBeforePeak);  // pre-heat still works
+}

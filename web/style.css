@@ -266,7 +266,8 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 /* Delete icons sit at the right edge, in line with the card-level ones */
 .sched-row > .row-delete { margin-left: auto; }
 .timeline { display: flex; height: 26px; border-radius: 8px; overflow: hidden; margin-top: 10px; border: 1px solid var(--border); }
-.timeline div { display: grid; place-items: center; font-size: 11px; font-weight: 600; color: #fff; min-width: 0; overflow: hidden; white-space: nowrap; }
+.timeline div { display: grid; place-items: center; font-size: 11px; font-weight: 600; color: #fff; min-width: 0; overflow: hidden; white-space: nowrap; padding: 0 2px; }
+.timeline .tl-off { background: repeating-linear-gradient(135deg, var(--surface-2) 0 6px, var(--grid) 6px 12px); color: var(--ink-2) !important; }
 .timeline-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 2px; }
 .section-title { display: flex; align-items: center; gap: 10px; margin: 0; }
 .list { display: grid; gap: 12px; margin-top: 12px; }

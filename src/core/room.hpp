@@ -48,7 +48,8 @@ struct RoomConfig {
     std::string sensor;             // "<source>:<sensor id or name>", empty for price-only
     double minTemp = 15.0;          // always heat below this, whatever the price
     double maxTemp = 23.0;          // never heat above this
-    double frostTemp = 5.0;         // even a manual OFF heats below this
+    double frostTemp = 5.0;         // even a manual OFF or a no-heat window heats below this
+    std::vector<DayWindow> noHeat;  // never heat in these windows (e.g. 17-21 peak tariff)
     std::vector<TargetBand> schedule;
     Strategy strategy;
     std::optional<PriceOnlyConfig> priceOnly;

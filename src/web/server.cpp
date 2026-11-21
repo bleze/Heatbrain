@@ -7,6 +7,8 @@
 #include <format>
 #include <fstream>
 #include <future>
+#include <iterator>
+#include <regex>
 
 #include "app/config_service.hpp"
 #include "app/rooms.hpp"
@@ -36,10 +38,40 @@ WebConfig parseWebConfig(const json& cfg) {
 
 fs::path locateWebRoot(const std::vector<fs::path>& candidates) {
     for (const auto& c : candidates) {
-        if (fs::exists(c / "index.html")) return c;
+        if (fs::exists(c / "index.template.html")) return c;
     }
     return {};
 }
+
+namespace {
+
+std::string readWhole(const fs::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// The page with every local script/stylesheet URL fingerprinted by its contents
+// ("app.js" -> "app.js?v=1a2b3c4d"): a changed file gets a new URL, so no browser can keep
+// running an old copy, whatever its cache does.
+std::string renderIndex(const fs::path& webRoot) {
+    std::string html = readWhole(webRoot / "index.template.html");
+    static const std::regex asset(R"re((src|href)="([\w.-]+\.(?:js|css))")re");
+    std::string out;
+    auto it = html.cbegin();
+    for (std::smatch m; std::regex_search(it, html.cend(), m, asset); it = m.suffix().first) {
+        out.append(it, m[0].first);
+        std::uint32_t h = 2166136261u;  // FNV-1a
+        for (unsigned char c : readWhole(webRoot / m[2].str())) {
+            h ^= c;
+            h *= 16777619u;
+        }
+        out += std::format(R"({}="{}?v={:08x}")", m[1].str(), m[2].str(), h);
+    }
+    out.append(it, html.cend());
+    return out;
+}
+
+}  // namespace
 
 WebServer::WebServer(WebConfig cfg, const StatusBoard& board, WebContext ctx)
     : cfg_(std::move(cfg)), board_(board), ctx_(std::move(ctx)), server_(std::make_unique<httplib::Server>()) {
@@ -489,13 +521,25 @@ void WebServer::routes() {
         sendJson(res, json{{"started", action}});
     });
 
-    if (!ctx_.webRoot.empty()) s.set_mount_point("/", ctx_.webRoot.string());
+    // The page itself is rendered (asset fingerprints); everything else is served as files.
+    const auto index = [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(renderIndex(ctx_.webRoot), "text/html; charset=utf-8");
+    };
+    if (!ctx_.webRoot.empty()) {
+        s.Get("/", index);
+        s.Get("/index.html", index);
+        s.set_mount_point("/", ctx_.webRoot.string());
+    }
 
-    // Without explicit headers browsers cache the UI files heuristically and keep running an
-    // old app.js/settings.js after heatbrain is updated. Always revalidate.
+    // Never let browsers keep UI files: with heuristic caching (and even with no-cache plus
+    // 304 revalidation) Chrome kept running an old settings.js against a newer page. The
+    // files are small and travel over the LAN only, so always sending them is cheap.
     s.set_post_routing_handler([](const httplib::Request& req, httplib::Response& res) {
-        if (!req.path.starts_with("/api/") && !res.has_header("Cache-Control")) {
-            res.set_header("Cache-Control", "no-cache");
+        if (!req.path.starts_with("/api/")) {
+            res.set_header("Cache-Control", "no-store");
+            res.headers.erase("ETag");
+            res.headers.erase("Last-Modified");
         }
     });
 

@@ -363,6 +363,20 @@
     });
     drawTimeline(tl, room);
 
+    // Hard no-heat windows (e.g. the 17-21 peak tariff). Only frost protection overrides.
+    el("h3", {}, c, "Never heat between");
+    el("div", { class: "hint", style: "margin-top:-4px" }, c,
+      "Off in these hours even below the minimum - only frost protection still heats. Pre-heating warms the room beforehand.");
+    const noHeat = arr(room, "noHeat");
+    noHeat.forEach((w, i) => {
+      const r = el("div", { class: "sched-row" }, c);
+      r.appendChild(time(w, "from")); el("span", {}, r, "–"); r.appendChild(time(w, "to", true));
+      btn(r, "", "trash", () => { noHeat.splice(i, 1); changed(); render(); }, "ghost danger row-delete");
+    });
+    btn(el("div", { style: "margin-top:8px" }, c), noHeat.length ? "Add window" : "Add 17:00-21:00 (peak tariff)", "plus", () => {
+      noHeat.push({ from: "17:00", to: "21:00" }); changed(); render();
+    });
+
     const adv = section(c, `room:${room.id}`);
     el("summary", {}, adv, "Advanced: how eagerly to chase cheap prices");
     const st = (room.strategy ||= {});
@@ -383,16 +397,19 @@
     const toMin = (s) => { const [h, m] = (s || "00:00").split(":").map(Number); return h * 60 + m; };
     const bands = (room.schedule || []).map((b) => ({ from: toMin(b.from), to: b.to === "24:00" ? 1440 : toMin(b.to), t: b.target }));
     const at = (m) => bands.find((b) => (b.from <= b.to ? m >= b.from && m < b.to : m >= b.from || m < b.to));
+    const off = (room.noHeat || []).map((w) => ({ from: toMin(w.from), to: w.to === "24:00" ? 1440 : toMin(w.to) }));
+    const inOff = (m) => off.some((w) => (w.from <= w.to ? m >= w.from && m < w.to : m >= w.from || m < w.to));
     const segs = [];
     for (let m = 0; m < 1440; m += 15) {
-      const b = at(m), t = b ? b.t : null, last = segs[segs.length - 1];
+      const b = at(m), t = inOff(m) ? "off" : b ? b.t : null, last = segs[segs.length - 1];
       if (last && last.t === t) last.len += 15; else segs.push({ t, len: 15 });
     }
     const lo = room.minTemp ?? 15, hi = room.maxTemp ?? 23;
     const bar = el("div", { class: "timeline" }, host);
     for (const s of segs) {
-      const d = el("div", { style: `flex:${s.len}` }, bar, s.t == null ? "–" : s.len >= 90 ? `${s.t}°` : "");
+      const d = el("div", { style: `flex:${s.len}` }, bar, s.t == null ? "–" : s.t === "off" ? "off" : `${s.t}°`);
       if (s.t == null) { d.style.background = "var(--grid)"; d.style.color = "var(--muted)"; continue; }
+      if (s.t === "off") { d.className = "tl-off"; d.title = "never heats"; continue; }
       // Cool blue -> amber -> deep orange (two segments, so the middle never turns muddy).
       const f = Math.max(0, Math.min(1, (s.t - lo) / Math.max(1, hi - lo)));
       d.style.background = f < 0.5
@@ -403,6 +420,10 @@
     }
     const axis = el("div", { class: "timeline-axis" }, host);
     for (const h of ["00", "06", "12", "18", "24"]) el("span", {}, axis, h);
+    // Label every segment, then hide only the labels that really don't fit (depends on width).
+    requestAnimationFrame(() => {
+      for (const d of bar.children) d.style.color = d.scrollWidth > d.clientWidth ? "transparent" : d.style.color;
+    });
   }
 
   // --- Plugs --------------------------------------------------------------------------

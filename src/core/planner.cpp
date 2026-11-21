@@ -189,7 +189,21 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         return make(false, Reason::ManualOff, "Manual OFF until " + until, inputs);
     }
 
-    // 3. No trustworthy temperature: bounded duty cycle, never continuous heat.
+    // 3. No-heat windows (e.g. the 17-21 peak tariff): off, except to prevent frost.
+    //    Comes before limp mode, so missing data never heats in a window either.
+    const int nowMinute = minuteOfDay(tz.toLocal(in.now));
+    for (const auto& w : room.noHeat) {
+        if (!w.contains(nowMinute)) continue;
+        if (fresh && t < room.frostTemp) {
+            return make(true, Reason::FrostProtection,
+                        std::format("No-heat window {}, but {} is below frost protection {}", formatWindow(w), temp(t),
+                                    temp(room.frostTemp)),
+                        inputs);
+        }
+        return make(false, Reason::AvoidWindow, "No-heat window " + formatWindow(w), inputs);
+    }
+
+    // 4. No trustworthy temperature: bounded duty cycle, never continuous heat.
     if (!fresh) {
         const auto cycle = (s.limpOn + s.limpOff).count();
         const auto pos = cycle > 0 ? duration_cast<minutes>(in.now.time_since_epoch()).count() % cycle : 0;
@@ -201,13 +215,13 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                     inputs);
     }
 
-    // 4. Hard minimum, whatever the price.
+    // 5. Hard minimum, whatever the price.
     if (t < room.minTemp) {
         return make(true, Reason::BelowMin, std::format("{} is below minimum {}", temp(t), temp(room.minTemp)),
                     inputs);
     }
 
-    // 5. Expensive now: coast, unless it gets too cold.
+    // 6. Expensive now: coast, unless it gets too cold.
     if (outlook.expensive) {
         const double floor = target - s.peakAllowedDrop;
         if (t < floor || (in.currentlyOn && t < floor + h)) {
@@ -222,7 +236,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                     inputs);
     }
 
-    // 6. Cheap now, expensive soon: pre-heat.
+    // 7. Cheap now, expensive soon: pre-heat.
     if (outlook.nextExpensiveAt && *outlook.current < *outlook.nextExpensivePrice * kPreheatMaxRatio) {
         const double ceiling = std::min(target + s.preheatBoost, room.maxTemp - h);
         if (t < ceiling - h || (in.currentlyOn && t < ceiling)) {
@@ -234,7 +248,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         }
     }
 
-    // 7. Among the cheapest slots: a little extra.
+    // 8. Among the cheapest slots: a little extra.
     if (outlook.cheapest) {
         const double ceiling = std::min(target + s.cheapBoost, room.maxTemp - h);
         if (t < ceiling - h || (in.currentlyOn && t < ceiling)) {
@@ -245,7 +259,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         }
     }
 
-    // 8. Plain thermostat with hysteresis.
+    // 9. Plain thermostat with hysteresis.
     const std::string where = std::format("{} (target {} for {})", temp(t), temp(target), inputs.targetLabel);
     if (t <= target - h) return make(true, Reason::BelowTarget, "Below target: " + where, inputs);
     if (t >= target + h) return make(false, Reason::TargetReached, "Target reached: " + where, inputs);

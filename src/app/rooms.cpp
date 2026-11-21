@@ -53,6 +53,7 @@ RoomConfig parseRoom(const json& rj) {
     r.maxTemp = rj.value("maxTemp", r.maxTemp);
     r.frostTemp = rj.value("frostTemp", r.frostTemp);
     r.strategy = parseStrategy(rj.value("strategy", json::object()));
+    for (const auto& w : rj.value("noHeat", json::array())) r.noHeat.push_back(parseWindow(w));
 
     if (rj.contains("priceOnly")) {
         PriceOnlyConfig p;
