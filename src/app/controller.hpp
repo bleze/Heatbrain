@@ -47,13 +47,15 @@ public:
     const std::vector<RoomConfig>& rooms() const { return rooms_; }
     const PriceTable& prices() const { return prices_; }
     const std::map<std::string, SensorReading>& readings() const { return readings_; }
+    void setDataDir(std::filesystem::path dir) { dataDir_ = std::move(dir); }
 
 private:
     void refreshPrices(Instant now, TickResult& result);
     void readSensors(TickResult& result);
     const SensorReading* findSensor(const std::string& ref) const;
     nlohmann::json applyToPlugs(const RoomConfig& room, bool on, Instant now, TickResult& result);
-    bool failsafeVerified(Plug& plug, Instant now);
+    // Empty when the plug may be switched live; otherwise why not.
+    std::string failsafeProblem(Plug& plug, Instant now);
 
     const TimeZone& tz_;
     PriceModel& priceModel_;
@@ -66,7 +68,8 @@ private:
     PriceTable prices_;
     std::map<std::string, SensorReading> readings_;  // "<source>:<sensor id>", last good reading
     std::map<std::string, bool> lastOn_;             // room id -> previous decision
-    std::map<std::string, std::pair<bool, Instant>> failsafeChecks_;  // plug id -> (ok, checked at)
+    std::map<std::string, std::pair<std::string, Instant>> failsafeChecks_;  // plug id -> (problem, checked at)
+    std::filesystem::path dataDir_;  // firmware test records; empty = not checked
     std::optional<Instant> lastPrune_;
 };
 

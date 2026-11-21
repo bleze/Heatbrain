@@ -3,6 +3,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <map>
 
 #include "plugs/plugs.hpp"
@@ -37,6 +39,13 @@ struct FakeTasmota {
     int powerOnState = 3;
     int ruleTimer1 = 0, ruleTimer2 = 0;
     std::vector<std::string> log;
+    // Simulated time for PulseTime (seconds), advanced by the test's sleeper.
+    double clock = 0, onAt = 0;
+    bool brokenRefresh = false;  // a firmware where re-sending ON does not restart the countdown
+    double pulseSeconds() const { return pulseTime > 111 ? pulseTime - 100 : pulseTime / 10.0; }
+    void tickPulse() {
+        if (power && pulseTime > 0 && clock - onAt >= pulseSeconds()) power = false;
+    }
 
     HttpResponse handle(const std::string& url) {
         const std::string cmnd = urlDecode(url.substr(url.find("cmnd=") + 5));
@@ -50,12 +59,18 @@ struct FakeTasmota {
                  {"StatusFWR", {{"Version", "14.6.0(release-tasmota)"}, {"Hardware", "ESP8285N08"}}},
                  {"StatusSTS", {{"POWER", power ? "ON" : "OFF"}, {"Uptime", "1T02:03:04"}, {"Wifi", {{"RSSI", 78}}}}}};
         } else if (name == "Power1" || name == "Power") {
-            if (arg == "On") power = true;
+            tickPulse();
+            if (arg == "On") {
+                if (!power || !brokenRefresh) onAt = clock;
+                power = true;
+            }
             if (arg == "Off") power = false;
             r = {{"POWER", power ? "ON" : "OFF"}};
         } else if (name == "PulseTime1") {
             if (!arg.empty()) pulseTime = std::stoi(arg);
-            r = {{"PulseTime1", {{"Set", pulseTime}, {"Remaining", pulseTime}}}};
+            tickPulse();
+            const int remaining = power ? static_cast<int>(100 + pulseSeconds() - (clock - onAt)) : 192000;
+            r = {{"PulseTime1", {{"Set", pulseTime}, {"Remaining", remaining}}}};
         } else if (name == "Rule1") {
             if (arg == "1") ruleOn = true;
             else if (arg == "0") ruleOn = false;
@@ -174,4 +189,41 @@ TEST_CASE("Plugs load from config with safe defaults") {
     CHECK_THROWS(loadPlugs(json::parse(R"({"plugs":[{"id":"a","host":"x"},{"id":"a","host":"y"}]})"), http));
     CHECK_THROWS(loadPlugs(json::parse(R"({"plugs":[{"id":"a"}]})"), http));
     CHECK_THROWS(loadPlugs(json::parse(R"({"plugs":[{"id":"a","host":"x","mode":"yolo"}]})"), http));
+}
+
+TEST_CASE("Fail-safe function test passes on a correct device and restores its settings") {
+    Fixture f;
+    f.device.pulseTime = 1300;  // provisioned
+    f.device.power = true;      // was on before the test
+    std::vector<std::string> lines;
+    const bool ok = f.sw.testPulse([&](const std::string& l) { lines.push_back(l); },
+                                   [&](std::chrono::milliseconds d) { f.device.clock += d.count() / 1000.0; });
+    CHECK(ok);
+    CHECK(f.device.pulseTime == 1300);  // restored
+    CHECK(f.device.power);              // restored
+    CHECK(std::ranges::any_of(lines, [](const std::string& l) { return l.find("switched itself off") != std::string::npos; }));
+}
+
+TEST_CASE("Fail-safe function test catches firmware where a refresh does not restart the countdown") {
+    Fixture f;
+    f.device.brokenRefresh = true;
+    std::vector<std::string> lines;
+    const bool ok = f.sw.testPulse([&](const std::string& l) { lines.push_back(l); },
+                                   [&](std::chrono::milliseconds d) { f.device.clock += d.count() / 1000.0; });
+    CHECK_FALSE(ok);
+    CHECK(std::ranges::any_of(lines, [](const std::string& l) { return l.find("did not restart") != std::string::npos; }));
+    CHECK_FALSE(f.device.power);
+    CHECK(f.device.pulseTime == 0);
+}
+
+TEST_CASE("Starting an upgrade sets the OTA URL first") {
+    Fixture f;
+    f.http.handler = [&](const std::string& url) {
+        if (url.find("Upgrade") != std::string::npos) return HttpResponse{200, R"({"Upgrade":"Version 16.0.0 from http://ota.tasmota.com/tasmota/release/tasmota.bin.gz"})"};
+        if (url.find("OtaUrl") != std::string::npos) return HttpResponse{200, R"({"OtaUrl":"http://ota.tasmota.com/tasmota/release/tasmota.bin.gz"})"};
+        return f.device.handle(url);
+    };
+    f.sw.startUpgrade("http://ota.tasmota.com/tasmota/release/tasmota.bin.gz");
+    CHECK(f.http.requests.size() == 2);
+    CHECK(f.http.requests[0].url.find("OtaUrl") != std::string::npos);
 }

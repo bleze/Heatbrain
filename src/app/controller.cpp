@@ -4,6 +4,7 @@
 #include <format>
 
 #include "core/log.hpp"
+#include "core/version.hpp"
 #include "sensors/netatmo.hpp"
 
 namespace hb {
@@ -111,16 +112,29 @@ const SensorReading* Controller::findSensor(const std::string& ref) const {
     return nullptr;
 }
 
-bool Controller::failsafeVerified(Plug& plug, Instant now) {
+std::string Controller::failsafeProblem(Plug& plug, Instant now) {
     auto it = failsafeChecks_.find(plug.id);
-    if (it != failsafeChecks_.end() && it->second.first && now - it->second.second < kFailsafeRecheck) return true;
+    if (it != failsafeChecks_.end() && it->second.first.empty() && now - it->second.second < kFailsafeRecheck) return {};
+    std::string problem;
     try {
         const auto st = plug.sw->checkFailsafe();
-        failsafeChecks_[plug.id] = {st.installed(), now};
-        return st.installed();
-    } catch (const std::exception&) {
-        return false;
+        if (!st.installed()) problem = "its fail-safe is not installed (" + st.problems.front() + ")";
+        // A recorded fail-safe test must match the firmware that is running now.
+        if (problem.empty() && !dataDir_.empty()) {
+            if (const auto rec = loadFirmwareRecord(dataDir_, plug.id)) {
+                const auto status = plug.sw->status();
+                if (!rec->verified) {
+                    problem = "its last fail-safe test failed";
+                } else if (compareVersions(status.firmware, rec->version) != 0) {
+                    problem = "its firmware changed to " + status.firmware + " and the fail-safe test has not been run on it";
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        problem = std::string("its fail-safe could not be checked: ") + e.what();
     }
+    failsafeChecks_[plug.id] = {problem, now};
+    return problem;
 }
 
 json Controller::applyToPlugs(const RoomConfig& room, bool on, Instant now, TickResult& result) {
@@ -130,12 +144,12 @@ json Controller::applyToPlugs(const RoomConfig& room, bool on, Instant now, Tick
         Plug& plug = *it;
         json pj{{"id", id}, {"mode", plug.mode == PlugMode::Live ? "live" : "dryrun"}};
         if (plug.mode == PlugMode::Live) {
-            if (!failsafeVerified(plug, now)) {
+            if (const std::string problem = failsafeProblem(plug, now); !problem.empty()) {
                 pj["error"] = "fail-safe not verified: not switched";
                 add(result, "plug:" + id + ":failsafe", Severity::Critical,
-                    std::format("Plug '{}' is live but its fail-safe is not installed or not reachable, so heatbrain "
-                                "will not switch it. Run 'heatbrain plug {} provision'.",
-                                id, id));
+                    std::format("Plug '{}' is live, but {}, so heatbrain will not switch it. Fix it under "
+                                "Settings → Plugs.",
+                                id, problem));
             } else {
                 try {
                     const bool state = plug.sw->set(on);

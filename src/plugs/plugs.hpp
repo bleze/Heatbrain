@@ -38,6 +38,18 @@ std::filesystem::path saveBackup(const std::filesystem::path& dataDir, const Plu
                                  const nlohmann::json& backup);
 std::filesystem::path latestBackup(const std::filesystem::path& dataDir, const Plug& plug);
 
+// Result of the last fail-safe function test, per plug (<dataDir>/plugs/<id>/firmware.json).
+// A live plug whose firmware differs from a recorded test - or whose test failed - is not
+// switched until the test passes on the current firmware.
+struct FirmwareRecord {
+    std::string version;
+    bool verified = false;
+    std::string checkedAt;
+    std::string detail;
+};
+std::optional<FirmwareRecord> loadFirmwareRecord(const std::filesystem::path& dataDir, const std::string& plugId);
+void saveFirmwareRecord(const std::filesystem::path& dataDir, const std::string& plugId, const FirmwareRecord& r);
+
 struct DiscoveredPlug {
     std::string host;
     std::string deviceName;

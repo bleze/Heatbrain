@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <functional>
 #include <string>
 
 #include "net/http.hpp"
@@ -21,6 +23,21 @@ public:
 
     // Sends one command and returns the parsed JSON reply. Throws on failure.
     nlohmann::json command(const std::string& cmnd);
+
+    // Starts an over-the-air upgrade from otaUrl. The device downloads, flashes and
+    // restarts by itself (1 MB devices go through the minimal build: two restarts).
+    void startUpgrade(const std::string& otaUrl);
+
+    void restart();
+
+    using Log = std::function<void(const std::string&)>;
+    using Sleeper = std::function<void(std::chrono::milliseconds)>;
+
+    // Function test of the dead-man switch on the real device: ON with a 20 s PulseTime,
+    // refresh after ~8 s (the countdown must restart), then the relay must switch itself
+    // off. Restores the previous PulseTime and relay state afterwards. Returns success;
+    // details go to log. The relay is on for roughly 30 seconds.
+    bool testPulse(const Log& log, const Sleeper& sleep);
 
 private:
     HttpClient& http_;

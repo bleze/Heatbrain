@@ -137,6 +137,75 @@ void TasmotaSwitch::provision(bool overwriteRules) {
     command("RuleTimer2 0");
 }
 
+void TasmotaSwitch::startUpgrade(const std::string& otaUrl) {
+    command("OtaUrl " + otaUrl);
+    const json r = command("Upgrade 1");
+    // {"Upgrade":"Version 16.0.0 from http://..."} on success; anything else is a refusal.
+    const std::string msg = r.value("Upgrade", "");
+    if (msg.find("Version") == std::string::npos && msg.find("from") == std::string::npos) {
+        throw HttpError(host_ + ": upgrade not started: " + r.dump());
+    }
+}
+
+void TasmotaSwitch::restart() { command("Restart 1"); }
+
+bool TasmotaSwitch::testPulse(const Log& log, const Sleeper& sleep) {
+    using namespace std::chrono_literals;
+    const auto pulseState = [&] {
+        const json p = command("PulseTime1").at("PulseTime1");
+        return std::pair{p.value("Set", 0), p.value("Remaining", 0)};
+    };
+    const auto powerOn = [&] { return parseTasmotaPower(command("Power1")).value_or(false); };
+
+    const auto [prevSet, prevRemaining] = pulseState();
+    (void)prevRemaining;
+    const bool prevPower = powerOn();
+    constexpr int kTestPulse = 120;  // Tasmota encoding: 100 + 20 seconds
+    bool ok = true;
+
+    try {
+        command(std::format("PulseTime1 {}", kTestPulse));
+        log("Relay ON with a 20 s auto-off");
+        command("Power1 On");
+        sleep(8000ms);
+        const int before = pulseState().second;
+        log(std::format("After 8 s: {} s left", before - 100));
+        command("Power1 On");  // heatbrain's refresh
+        const int after = pulseState().second;
+        log(std::format("Refreshed: {} s left", after - 100));
+        if (after <= before + 3) {
+            log("FAIL: refreshing did not restart the countdown");
+            ok = false;
+        }
+        // The relay must now switch itself off ~20 s after the refresh.
+        bool off = false;
+        for (int i = 0; i < 30 && !off; ++i) {
+            sleep(1000ms);
+            off = !powerOn();
+            if (off) log(std::format("Relay switched itself off after {} s", i + 1));
+        }
+        if (!off) {
+            log("FAIL: the relay did not switch itself off");
+            ok = false;
+        }
+    } catch (const std::exception& e) {
+        log(std::string("FAIL: ") + e.what());
+        ok = false;
+    }
+
+    // Always put things back, even after a failure.
+    try {
+        command("Power1 Off");
+        command(std::format("PulseTime1 {}", prevSet));
+        if (prevPower) command("Power1 On");
+        log(std::format("Restored PulseTime {} and relay {}", prevSet, prevPower ? "ON" : "OFF"));
+    } catch (const std::exception& e) {
+        log(std::string("WARNING: could not restore settings: ") + e.what());
+        ok = false;
+    }
+    return ok;
+}
+
 void TasmotaSwitch::restore(const json& b) {
     command("RuleTimer1 0");
     command("RuleTimer2 0");

@@ -61,6 +61,7 @@ std::unique_ptr<ControlEnv> loadControlEnv(const Args& args) {
     if (e->tick < seconds{60}) throw std::runtime_error("control.tickSeconds must be at least 60");
     e->controller = std::make_unique<hb::Controller>(*e->tz, *e->prices, e->sources, e->plugs, std::move(rooms),
                                                      e->overrides.get(), e->history.get());
+    e->controller->setDataDir(e->cfg.dataDir);
     return e;
 }
 

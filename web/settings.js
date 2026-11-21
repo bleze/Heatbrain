@@ -12,7 +12,28 @@
     ["notifications", "Notifications", "bell"],
     ["system", "System", "cpu"],
   ];
-  const S = { cfg: null, saved: "", errors: [], tab: "rooms", plugStatus: null, discovered: null, newIds: new Set() };
+  const S = { cfg: null, saved: "", errors: [], tab: "rooms", plugStatus: null, discovered: null, newIds: new Set(), jobs: {} };
+  let jobTimer = null;
+  const jobRunning = () => Object.values(S.jobs).some((j) => j.state === "running");
+
+  async function refreshJobs() {
+    try { S.jobs = await api("/api/jobs"); } catch { return; }
+    const running = jobRunning();
+    if (S.tab === "plugs") render();
+    clearTimeout(jobTimer);
+    if (running) jobTimer = setTimeout(refreshJobs, 2000);
+    else if (S.wasRunning) { S.plugStatus = null; refreshPlugStatus(); }  // finished: show the new state
+    S.wasRunning = running;
+  }
+
+  async function startPlugJob(p, action) {
+    try {
+      await api(`/api/plugs/${encodeURIComponent(p.id)}/${action}`, { method: "POST" });
+      if (action === "restart") { toast(`${p.name || p.id} is restarting`); setTimeout(() => { S.plugStatus = null; refreshPlugStatus(); }, 8000); return; }
+      S.wasRunning = true;
+      refreshJobs();
+    } catch (e) { toast(e.message, true); }
+  }
 
   // Editors create empty helper objects/arrays while rendering; they don't count as changes.
   const prune = (x) => {
@@ -386,7 +407,7 @@
     btn(head, "Refresh status", "wifi", () => { S.plugStatus = null; refreshPlugStatus(); });
     const plugs = S.cfg.plugs || [];
     if (!plugs.length) el("div", { class: "empty-state" }, card, "No plugs yet: scan your network above.");
-    if (plugs.length && S.plugStatus === null) refreshPlugStatus();
+    if (plugs.length && S.plugStatus === null) { refreshPlugStatus(); refreshJobs(); }
     const list = el("div", { class: "list" }, card);
     plugs.forEach((p, idx) => renderPlug(list, p, idx));
   }
@@ -416,7 +437,7 @@
     const g = el("div", { class: "form-grid" }, c);
     if ((p.type || "tasmota") === "tasmota") field(g, "Address", txt(p, "host", { placeholder: "192.168.1.38" }));
     field(g, "Radiator power (W)", num(p, "watts", { step: 50, min: 0, placeholder: "e.g. 1500" }),
-      { hint: "from the radiator's label: used to estimate cost" });
+      { hint: "from the radiator's label" });
 
     // Live status
     const chips = el("div", { class: "plugs", style: "margin-top:12px" }, c);
@@ -431,8 +452,18 @@
       chip(st.on ? "warn" : "", "power", st.on ? "relay on" : "relay off");
       if (st.rssi != null) chip("", "wifi", `wifi ${st.rssi}%`);
       chip("", "cpu", `Tasmota ${st.firmware.split("(")[0]}`);
+      if (st.updateAvailable) {
+        const a = el("a", { class: "chip warn", href: st.latest.url, target: "_blank", rel: "noopener" }, chips);
+        a.appendChild(icon("bolt"));
+        a.appendChild(document.createTextNode(`${st.latest.version.replace(/^v/, "")} available`));
+      }
       if (st.failsafe?.installed) chip("ok", "shield", "fail-safe installed");
       else chip("error", "shield", "no fail-safe");
+      if (st.test) {
+        if (!st.test.verified) chip("error", "alert", "fail-safe test failed");
+        else if (!st.test.matchesFirmware) chip("warn", "alert", "not tested on this firmware");
+        else chip("ok", "check", `tested on ${st.test.version.split("(")[0]}`);
+      }
       if (p.mode === "live" && !st.failsafe?.installed) chip("error", "alert", "live, but not switched until the fail-safe is installed");
     }
 
@@ -451,12 +482,43 @@
             S.plugStatus = null; refreshPlugStatus();
           }, "primary");
       }
-      confirmBtn(actions, "Restore original settings", "undo", "Put back the settings from the last backup?",
+      const busy = jobRunning();
+      if (p.mode !== "live" && !busy) {
+        confirmBtn(actions, "Test fail-safe", "check",
+          "The radiator turns on for about 30 seconds to check the auto-off. Go ahead?",
+          () => startPlugJob(p, "test"));
+        if (st.updateAvailable) {
+          confirmBtn(actions, `Upgrade to ${st.latest.version.replace(/^v/, "")}`, "bolt",
+            "Takes 2-5 minutes; the plug restarts and must not lose power meanwhile. The fail-safe is tested afterwards. Start?",
+            () => startPlugJob(p, "upgrade"), "warm");
+        }
+      } else if (p.mode === "live") {
+        el("span", { class: "hint" }, actions, "Switch to dry-run and save to test or upgrade this plug.");
+      }
+      if (!busy) {
+        confirmBtn(actions, "Restart", "power", "Restart the plug now? The relay keeps its state.", () => startPlugJob(p, "restart"), "ghost");
+      }
+      confirmBtn(actions, "Restore original", "undo", "Put back the plug's settings from the last backup?",
         async () => {
           try { await api(`/api/plugs/${encodeURIComponent(p.id)}/restore`, { method: "POST" }); toast(`${p.name || p.id}: original settings restored`); }
           catch (e) { toast(e.message, true); }
           S.plugStatus = null; refreshPlugStatus();
-        });
+        }, "ghost");
+    }
+
+    const job = S.jobs[p.id];
+    if (job) {
+      const box = el("div", { class: `joblog ${job.state}` }, c);
+      const title = el("div", { class: "joblog-title" }, box);
+      title.appendChild(icon(job.state === "running" ? "clock" : job.state === "done" ? "check" : "alert"));
+      title.appendChild(document.createTextNode(
+        `${job.kind === "upgrade" ? "Firmware upgrade" : "Fail-safe test"}: ${job.state === "running" ? "in progress…" : job.state === "done" ? "completed" : "failed"}`));
+      const ol = el("ol", {}, box);
+      for (const [t, msg] of job.log) {
+        const li = el("li", {}, ol);
+        el("span", { class: "muted" }, li, `${hm(t)}  `);
+        li.appendChild(document.createTextNode(msg));
+      }
     }
 
     const adv = el("details", { class: "advanced" }, c);
@@ -517,9 +579,9 @@
 
   // --- Prices -------------------------------------------------------------------------
   const COMPONENT_TYPES = [
-    ["energidataservice.spot", "Spot price (Energi Data Service)"],
-    ["energidataservice.tariff", "Grid tariff (Datahub price list)"],
-    ["fixed", "Fixed amount per kWh"],
+    ["energidataservice.spot", "Spot price"],
+    ["energidataservice.tariff", "Grid tariff"],
+    ["fixed", "Fixed per kWh"],
     ["schedule", "Time-of-day schedule"],
   ];
 
@@ -543,12 +605,12 @@
       confirmBtn(head, "", "trash", "Remove?", () => { comps.splice(i, 1); changed(); render(); }, "ghost danger");
       const cg = el("div", { class: "form-grid" }, c);
       if (comp.type === "energidataservice.spot") {
-        field(cg, "Price area", sel(comp, "area", [["DK1", "DK1 (Jutland, Funen)"], ["DK2", "DK2 (Zealand, Copenhagen)"]]));
+        field(cg, "Price area", sel(comp, "area", [["DK1", "DK1 (West)"], ["DK2", "DK2 (East)"]]), { hint: "West: Jutland, Funen · East: Zealand" });
       } else if (comp.type === "energidataservice.tariff") {
-        field(cg, "Grid company GLN", txt(comp, "gln", { placeholder: "5790000705689" }));
+        field(cg, "Grid company GLN", txt(comp, "gln", { placeholder: "5790000705689" }), { hint: "Radius: 5790000705689" });
         const codes = el("input", { type: "text", value: [].concat(comp.codes || []).join(", ") });
         codes.addEventListener("input", () => { comp.codes = codes.value.split(",").map((x) => x.trim()).filter(Boolean); changed(); });
-        field(cg, "Charge codes", codes, { hint: "comma separated · Radius C-customers: DT_C_01" });
+        field(cg, "Charge codes", codes, { hint: "comma separated" });
       } else if (comp.type === "fixed") {
         field(cg, `Amount (${S.cfg.currency || "DKK"}/kWh)`, num(comp, "amount", { step: 0.001 }), { hint: "excluding VAT" });
       } else if (comp.type === "schedule") {

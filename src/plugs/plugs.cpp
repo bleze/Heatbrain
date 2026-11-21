@@ -94,6 +94,26 @@ fs::path latestBackup(const fs::path& dataDir, const Plug& plug) {
     return latest;
 }
 
+std::optional<FirmwareRecord> loadFirmwareRecord(const fs::path& dataDir, const std::string& plugId) {
+    const fs::path file = dataDir / "plugs" / plugId / "firmware.json";
+    if (!fs::exists(file)) return std::nullopt;
+    try {
+        std::ifstream in(file);
+        const json j = json::parse(in);
+        return FirmwareRecord{j.value("version", ""), j.value("verified", false), j.value("checkedAt", ""),
+                              j.value("detail", "")};
+    } catch (const std::exception&) {
+        return FirmwareRecord{"", false, "", "unreadable firmware record"};  // fail closed
+    }
+}
+
+void saveFirmwareRecord(const fs::path& dataDir, const std::string& plugId, const FirmwareRecord& r) {
+    const fs::path dir = dataDir / "plugs" / plugId;
+    fs::create_directories(dir);
+    std::ofstream(dir / "firmware.json")
+        << json{{"version", r.version}, {"verified", r.verified}, {"checkedAt", r.checkedAt}, {"detail", r.detail}}.dump(2);
+}
+
 std::vector<DiscoveredPlug> discoverTasmota(std::string_view subnet, HttpClient& http) {
     // Accept "a.b.c", "a.b.c.0/24" or "a.b.c.x".
     std::string prefix(subnet.substr(0, subnet.find('/')));

@@ -12,8 +12,10 @@
 #include "app/rooms.hpp"
 #include "core/cost.hpp"
 #include "core/log.hpp"
+#include "core/version.hpp"
 #include "notify/notifier.hpp"
 #include "plugs/plugs.hpp"
+#include "plugs/tasmota.hpp"
 #include "storage/history.hpp"
 
 namespace hb {
@@ -268,15 +270,30 @@ void WebServer::routes() {
         const json cfg = readConfigFile(ctx_.configFile);
         HttplibClient lan(milliseconds{2500}, milliseconds{4000});
         auto plugs = loadPlugs(cfg, lan);
+        json latest;
+        try {
+            latest = latestFirmware();
+        } catch (const std::exception& e) {
+            hb::log::debug("Latest firmware lookup failed: {}", e.what());
+        }
         std::vector<std::future<json>> futures;
         for (auto& p : plugs) {
-            futures.push_back(std::async(std::launch::async, [&p] {
+            futures.push_back(std::async(std::launch::async, [&p, &latest, this] {
                 const auto st = p.sw->status();
                 json j{{"id", p.id}, {"reachable", st.reachable}, {"firmware", st.firmware}, {"hardware", st.hardware},
                        {"deviceName", st.deviceName}, {"error", st.error}};
                 if (st.on) j["on"] = *st.on;
                 if (st.rssi) j["rssi"] = *st.rssi;
                 j["failsafe"] = st.reachable ? failsafeJson(p) : json{{"installed", false}, {"problems", json::array()}};
+                if (st.reachable && latest.is_object() && !latest.value("version", "").empty()) {
+                    j["latest"] = latest;
+                    j["updateAvailable"] = compareVersions(st.firmware, latest.value("version", "")) < 0;
+                }
+                if (const auto rec = loadFirmwareRecord(ctx_.dataDir, p.id)) {
+                    j["test"] = {{"version", rec->version}, {"verified", rec->verified}, {"checkedAt", rec->checkedAt},
+                                 {"detail", rec->detail},
+                                 {"matchesFirmware", st.reachable && compareVersions(st.firmware, rec->version) == 0}};
+                }
                 return j;
             }));
         }
@@ -345,6 +362,133 @@ void WebServer::routes() {
         sendJson(res, results);
     });
 
+    s.Get("/api/firmware/latest", [this](const httplib::Request&, httplib::Response& res) {
+        try {
+            sendJson(res, latestFirmware());
+        } catch (const std::exception& e) {
+            sendError(res, 502, std::string("Could not check for Tasmota releases: ") + e.what());
+        }
+    });
+
+    s.Get("/api/jobs", [this](const httplib::Request&, httplib::Response& res) {
+        json out = json::object();
+        std::lock_guard lock(jobsMutex_);
+        for (const auto& [id, j] : jobs_) {
+            json log = json::array();
+            for (const auto& [t, m] : j.log) log.push_back({t, m});
+            out[id] = {{"kind", j.kind}, {"state", j.state}, {"started", j.started}, {"finished", j.finished}, {"log", log}};
+        }
+        sendJson(res, out);
+    });
+
+    s.Post(R"(/api/plugs/([\w-]+)/(upgrade|test|restart))", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string id = req.matches[1];
+        const std::string action = req.matches[2];
+        const json cfg = readConfigFile(ctx_.configFile);
+        // Each job builds its own client and plug objects: nothing is shared with the control loop.
+        auto lan = std::make_shared<HttplibClient>(milliseconds{3000}, milliseconds{5000});
+        auto plugs = std::make_shared<std::vector<Plug>>(loadPlugs(cfg, *lan));
+        auto it = std::ranges::find_if(*plugs, [&](const Plug& p) { return p.id == id; });
+        if (it == plugs->end()) return sendError(res, 404, "unknown plug (save the configuration first)");
+        auto* tasmota = dynamic_cast<TasmotaSwitch*>(it->sw.get());
+        if (!tasmota) return sendError(res, 400, "only Tasmota plugs support this");
+
+        if (action == "restart") {
+            try {
+                tasmota->restart();
+            } catch (const std::exception& e) {
+                return sendError(res, 502, e.what());
+            }
+            return sendJson(res, json{{"restarting", true}});
+        }
+        if (it->mode == PlugMode::Live) {
+            return sendError(res, 409, "Switch the plug to dry-run and save first: heatbrain never tests or upgrades a plug it is controlling.");
+        }
+        const auto status = it->sw->status();
+        if (!status.reachable) return sendError(res, 502, "plug unreachable: " + status.error);
+
+        const fs::path dataDir = ctx_.dataDir;
+        const auto record = [dataDir, id](const std::string& version, bool ok, const std::string& detail) {
+            saveFirmwareRecord(dataDir, id, FirmwareRecord{version, ok, formatIsoUtc(floor<seconds>(system_clock::now())), detail});
+        };
+
+        bool started = false;
+        if (action == "test") {
+            started = startJob(id, "test", [this, lan, plugs, tasmota, status, record](const auto& log) {
+                log("Fail-safe test on Tasmota " + status.firmware + " (the relay is on for about 30 seconds)");
+                const bool ok = tasmota->testPulse(log, [this](milliseconds d) { jobSleep(d); });
+                record(status.firmware, ok, ok ? "auto-off and refresh verified" : "fail-safe test failed");
+                log(ok ? "Fail-safe works on this firmware" : "Fail-safe test FAILED: this plug will not be switched live");
+                return ok;
+            });
+        } else {
+            json latest;
+            try {
+                latest = latestFirmware();
+            } catch (const std::exception& e) {
+                return sendError(res, 502, std::string("Could not check for Tasmota releases: ") + e.what());
+            }
+            const std::string target = latest.value("version", "");
+            if (compareVersions(status.firmware, target) >= 0) {
+                return sendError(res, 409, "Already on the latest version (" + status.firmware + ")");
+            }
+            Plug* plug = &*it;
+            started = startJob(id, "upgrade", [this, lan, plugs, plug, tasmota, status, target, record, dataDir](const auto& log) {
+                log("Upgrading from " + status.firmware + " to " + target + ". Do not unplug the plug.");
+                const auto backup = saveBackup(dataDir, *plug, tasmota->backup());
+                log("Settings backed up to " + backup.filename().string());
+                const std::string url = tasmotaOtaUrl(status.firmware, status.hardware);
+                tasmota->startUpgrade(url);
+                log("Downloading " + url + " - the plug restarts by itself (twice on 1 MB devices)");
+
+                // Wait for the real target build: 1 MB devices run "minimal" in between.
+                std::string seen = status.firmware;
+                bool wentOffline = false;
+                int stable = 0;
+                const auto deadline = std::chrono::steady_clock::now() + minutes{10};
+                while (std::chrono::steady_clock::now() < deadline) {
+                    jobSleep(seconds{5});
+                    const auto st = tasmota->status();
+                    if (!st.reachable) {
+                        if (!wentOffline) log("Plug is restarting...");
+                        wentOffline = true;
+                        stable = 0;
+                        continue;
+                    }
+                    if (st.firmware != seen) {
+                        log("Plug is back running " + st.firmware);
+                        seen = st.firmware;
+                    }
+                    const bool minimal = st.firmware.find("minimal") != std::string::npos;
+                    stable = (!minimal && compareVersions(st.firmware, target) == 0) ? stable + 1 : 0;
+                    if (stable >= 2) break;
+                }
+                if (stable < 2) {
+                    log("FAILED: the plug did not come back on " + target + " within 10 minutes (last seen: " + seen + ")");
+                    record(seen, false, "upgrade did not complete");
+                    return false;
+                }
+                log("Upgrade complete: now on " + seen);
+
+                const auto fsCheck = tasmota->checkFailsafe();
+                if (fsCheck.installed()) {
+                    log("Fail-safe settings survived the upgrade");
+                } else {
+                    for (const auto& p : fsCheck.problems) log("Note: " + p);
+                }
+
+                log("Running the fail-safe test (the relay is on for about 30 seconds)");
+                const bool ok = tasmota->testPulse(log, [this](milliseconds d) { jobSleep(d); });
+                record(seen, ok, ok ? "verified after upgrade" : "fail-safe test failed after upgrade");
+                log(ok ? "All good: fail-safe verified on " + seen
+                       : "Fail-safe test FAILED on " + seen + ": this plug will not be switched live");
+                return ok;
+            });
+        }
+        if (!started) return sendError(res, 409, "Another plug operation is running - wait for it to finish");
+        sendJson(res, json{{"started", action}});
+    });
+
     if (!ctx_.webRoot.empty()) s.set_mount_point("/", ctx_.webRoot.string());
 
     s.set_exception_handler([](const httplib::Request&, httplib::Response& res, std::exception_ptr ep) {
@@ -368,8 +512,66 @@ void WebServer::start() {
 }
 
 void WebServer::stop() {
+    stopping_ = true;
     if (server_) server_->stop();
     if (thread_.joinable()) thread_.join();
+    for (auto& w : workers_) {
+        if (w.joinable()) w.join();
+    }
+    workers_.clear();
+}
+
+void WebServer::jobSleep(std::chrono::milliseconds d) const {
+    const auto until = std::chrono::steady_clock::now() + d;
+    while (std::chrono::steady_clock::now() < until) {
+        if (stopping_) throw std::runtime_error("heatbrain is stopping");
+        std::this_thread::sleep_for(std::chrono::milliseconds{250});
+    }
+}
+
+bool WebServer::startJob(const std::string& plugId, const std::string& kind,
+                         std::function<bool(const std::function<void(const std::string&)>&)> fn) {
+    const auto nowEpoch = [] { return static_cast<long long>(system_clock::now().time_since_epoch() / seconds{1}); };
+    {
+        std::lock_guard lock(jobsMutex_);
+        // One device operation at a time: upgrades are risky enough one by one.
+        for (const auto& [id, j] : jobs_) {
+            if (j.state == "running") return false;
+        }
+        Job job;
+        job.plugId = plugId;
+        job.kind = kind;
+        job.started = nowEpoch();
+        jobs_[plugId] = job;
+    }
+    workers_.emplace_back([this, plugId, kind, fn = std::move(fn), nowEpoch] {
+        const auto log = [&](const std::string& msg) {
+            hb::log::info("Plug {} {}: {}", plugId, kind, msg);
+            std::lock_guard lock(jobsMutex_);
+            jobs_[plugId].log.emplace_back(nowEpoch(), msg);
+        };
+        bool ok = false;
+        try {
+            ok = fn(log);
+        } catch (const std::exception& e) {
+            log(std::string("FAILED: ") + e.what());
+        }
+        std::lock_guard lock(jobsMutex_);
+        jobs_[plugId].state = ok ? "done" : "failed";
+        jobs_[plugId].finished = nowEpoch();
+    });
+    return true;
+}
+
+json WebServer::latestFirmware() {
+    // GitHub allows 60 unauthenticated requests per hour: cache for 12 h.
+    HttplibClient internet;
+    CachingHttpClient cache(internet, ctx_.dataDir / "cache");
+    const json j = json::parse(cache.get("https://api.github.com/repos/arendst/Tasmota/releases/latest", hours{12}).body);
+    return json{{"version", j.value("tag_name", "")},
+                {"name", j.value("name", "")},
+                {"publishedAt", j.value("published_at", "")},
+                {"url", j.value("html_url", "")}};
 }
 
 }  // namespace hb

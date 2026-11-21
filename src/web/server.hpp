@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <filesystem>
+#include <map>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -68,6 +70,22 @@ struct WebContext {
 //   POST   /api/plugs/<id>/restore          refused while the plug is live
 //   POST   /api/discover                    {"subnet": "192.168.1.0/24"}
 //   POST   /api/notify/test
+//   GET    /api/firmware/latest             newest Tasmota release (cached 12 h)
+//   POST   /api/plugs/<id>/upgrade          background job: OTA upgrade + fail-safe test
+//   POST   /api/plugs/<id>/test             background job: fail-safe function test
+//   POST   /api/plugs/<id>/restart
+//   GET    /api/jobs                        progress of running/finished jobs per plug
+
+// A long-running device operation with a progress log, polled by the UI.
+struct Job {
+    std::string plugId;
+    std::string kind;              // "upgrade" | "test"
+    std::string state = "running"; // running | done | failed
+    std::vector<std::pair<long long, std::string>> log;  // (unix time, message)
+    long long started = 0;
+    long long finished = 0;
+};
+
 class WebServer {
 public:
     WebServer(WebConfig cfg, const StatusBoard& board, WebContext ctx);
@@ -80,6 +98,11 @@ public:
 private:
     void routes();
     std::vector<RoomConfig> rooms() const;
+    nlohmann::json latestFirmware();
+    // Starts fn on a worker thread as the job for plugId; false if any job is running.
+    bool startJob(const std::string& plugId, const std::string& kind,
+                  std::function<bool(const std::function<void(const std::string&)>& log)> fn);
+    void jobSleep(std::chrono::milliseconds d) const;  // throws when the server stops
 
     WebConfig cfg_;
     const StatusBoard& board_;
@@ -88,6 +111,11 @@ private:
     std::vector<RoomConfig> rooms_;
     std::unique_ptr<httplib::Server> server_;
     std::thread thread_;
+
+    mutable std::mutex jobsMutex_;
+    std::map<std::string, Job> jobs_;
+    std::vector<std::thread> workers_;
+    std::atomic<bool> stopping_{false};
 };
 
 // Finds the frontend files: <source>/web in dev builds, /app/web in Docker, ./web otherwise.

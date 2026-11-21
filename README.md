@@ -62,6 +62,19 @@ countdown:
    the last-resort cap.
 5. `PowerOnState 0`: after a power cut, plugs start OFF until heatbrain takes over.
 
+### Firmware and fail-safe test (Settings → Plugs)
+
+- **Test fail-safe**: switches the relay on with a 20 s auto-off, refreshes it once (the
+  countdown must restart) and checks the relay turns itself off; then restores the plug's
+  settings. The result is recorded per firmware version.
+- **Upgrade**: shown when GitHub has a newer Tasmota release. Only for dry-run plugs, one
+  at a time: backs up the plug's settings, starts the over-the-air upgrade from
+  ota.tasmota.com (same build variant; 1 MB devices pass through the minimal build), waits
+  for the plug to come back on the new version, then runs the fail-safe test.
+- A **live** plug is not switched if its firmware differs from the last version that passed
+  the test, or if the test failed.
+- **Restart** restarts the plug.
+
 ### Plug commands
 
 ```powershell
