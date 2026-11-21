@@ -203,7 +203,7 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
 }
 
 // The control loop for one configuration. Returns when stopping or when the config changed.
-void controlLoop(ControlEnv& env, hb::StatusBoard& board, bool announce) {
+void controlLoop(ControlEnv& env, hb::StatusBoard& board, std::unique_ptr<hb::AlertManager>& alertsPtr, bool announce) {
     hb::log::info("Control: {} room(s), {} plug(s), tick every {} s", env.controller->rooms().size(), env.plugs.size(),
                   env.tick.count());
     for (const auto& p : env.plugs) {
@@ -212,7 +212,10 @@ void controlLoop(ControlEnv& env, hb::StatusBoard& board, bool announce) {
     }
 
     auto notifications = hb::loadNotifications(env.cfg.raw, env.internet);
-    hb::AlertManager alerts(notifications.policy, *env.tz);
+    // Kept across reloads, so saving settings does not re-send alerts already delivered.
+    if (!alertsPtr) alertsPtr = std::make_unique<hb::AlertManager>(notifications.policy, *env.tz);
+    else alertsPtr->reconfigure(notifications.policy, *env.tz);
+    hb::AlertManager& alerts = *alertsPtr;
     hb::log::info("  notifications: {} channel(s)", notifications.channels.size());
     if (announce && notifications.notifyOnStart) {
         for (auto& ch : notifications.channels) {
@@ -294,6 +297,7 @@ int runDaemon(const Args& args) {
     if (webCfg.enabled) web.start();
 
     bool first = true;
+    std::unique_ptr<hb::AlertManager> alerts;
     while (!g_stop) {
         g_reload = false;
         std::unique_ptr<ControlEnv> env;
@@ -322,7 +326,7 @@ int runDaemon(const Args& args) {
             continue;
         }
         web.setRooms(env->controller->rooms());
-        controlLoop(*env, board, first);
+        controlLoop(*env, board, alerts, first);
         first = false;
         if (g_reload) hb::log::info("Configuration changed - reloading");
     }

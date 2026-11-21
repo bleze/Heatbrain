@@ -89,6 +89,16 @@ void Controller::readSensors(TickResult& result) {
                         std::format("Sensor '{}' battery is at {}% - replace soon", r.name, *r.batteryPercent),
                         minutes{0}, hours{24});
                 }
+                // An offline module reports no temperature at all. Keep the last good one
+                // with its measurement time: the planner's age check (stale after 30 min)
+                // then rides out a short restart instead of switching to limp mode at once.
+                if (!r.temperature) {
+                    if (auto it = readings_.find(key); it != readings_.end() && it->second.temperature) {
+                        r.temperature = it->second.temperature;
+                        r.humidity = it->second.humidity;
+                        r.measuredAt = it->second.measuredAt;
+                    }
+                }
                 readings_[key] = std::move(r);
             }
         } catch (const netatmo::AuthError& e) {
@@ -191,7 +201,7 @@ TickResult Controller::tick(Instant now, bool apply) {
         in.now = now;
         in.currentlyOn = prev != lastOn_.end() && prev->second;
         const SensorReading* reading = room.sensor.empty() ? nullptr : findSensor(room.sensor);
-        if (reading && reading->reachable) {
+        if (reading) {
             in.temperature = reading->temperature;
             in.measuredAt = reading->measuredAt;
         } else if (!room.sensor.empty() && !reading && !sources_.empty()) {

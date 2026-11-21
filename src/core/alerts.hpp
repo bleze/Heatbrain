@@ -45,7 +45,13 @@ class AlertManager {
 public:
     using Deliver = std::function<bool(const Alert&)>;  // false = not delivered, retry later
 
-    AlertManager(AlertPolicy policy, const TimeZone& tz) : policy_(std::move(policy)), tz_(tz) {}
+    AlertManager(AlertPolicy policy, TimeZone tz) : policy_(std::move(policy)), tz_(std::move(tz)) {}
+
+    // After a configuration reload: new policy/time zone, same memory of what was sent.
+    void reconfigure(AlertPolicy policy, TimeZone tz) {
+        policy_ = std::move(policy);
+        tz_ = std::move(tz);
+    }
 
     // Returns the alerts that were delivered.
     std::vector<Alert> update(Instant now, const std::vector<Problem>& active, const Deliver& deliver);
@@ -61,7 +67,7 @@ private:
     bool quiet(Instant now) const;
 
     AlertPolicy policy_;
-    const TimeZone& tz_;
+    TimeZone tz_;
     std::map<std::string, State> states_;
 };
 

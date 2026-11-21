@@ -198,3 +198,22 @@ TEST_CASE("Old schedules with no-heat windows become an equivalent program") {
         {"at":"23:00","mode":"heat","target":16.0}])"));
     CHECK(roomWithProgram(converted) == converted);  // already converted: unchanged
 }
+
+TEST_CASE("A module restarting does not put the room in limp mode straight away") {
+    Fixture f;
+    f.controller->tick(f.now, true);  // bedroom 18.0, measured 2 min ago
+    // The module goes offline: Netatmo reports it unreachable and without dashboard data.
+    f.sensors->readings[0].reachable = false;
+    f.sensors->readings[0].temperature.reset();
+    f.sensors->readings[0].measuredAt.reset();
+    f.now += minutes{5};
+    auto r = f.controller->tick(f.now, true);
+    CHECK(r.rooms[0].decision.reason != Reason::StaleDataLimp);  // last reading (7 min old) still used
+    CHECK(r.rooms[0].decision.inputs.temperature == 18.0);
+    CHECK(std::ranges::any_of(r.problems, [](const Problem& p) { return p.key.ends_with(":offline"); }));
+    CHECK_FALSE(std::ranges::any_of(r.problems, [](const Problem& p) { return p.key == "room:bedroom:limp"; }));
+
+    f.now += minutes{30};  // still offline: the last reading is now too old
+    r = f.controller->tick(f.now, true);
+    CHECK(r.rooms[0].decision.reason == Reason::StaleDataLimp);
+}
