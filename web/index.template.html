@@ -74,24 +74,6 @@
 
     <section class="rooms" id="rooms"></section>
 
-    <section class="card" id="costs" hidden>
-      <div class="card-head">
-        <h2><span class="badge badge-green"><svg class="icon"><use href="#i-coin"/></svg></span>Heating cost <span class="muted" style="font-weight:400;font-size:13px">estimated</span></h2>
-        <div class="range" role="group" aria-label="Cost period" id="cost-range">
-          <button data-days="7" class="active">7 days</button>
-          <button data-days="30">30 days</button>
-        </div>
-      </div>
-      <div class="tiles" id="cost-tiles"></div>
-      <div class="chart" id="cost-chart"></div>
-      <div class="table-wrap">
-        <table class="events">
-          <thead><tr><th>Room</th><th class="num">On</th><th class="num">Energy</th><th class="num">Cost</th><th class="num">Avg price paid</th><th class="num">Saved</th><th></th></tr></thead>
-          <tbody id="cost-table"></tbody>
-        </table>
-      </div>
-      <div class="hint" id="cost-note"></div>
-    </section>
 
     <section class="card" id="detail" hidden>
       <div class="card-head">
@@ -111,6 +93,25 @@
           <tbody id="events"></tbody>
         </table>
       </div>
+    </section>
+
+    <section class="card" id="costs" hidden>
+      <div class="card-head">
+        <h2><span class="badge badge-green"><svg class="icon"><use href="#i-coin"/></svg></span>Heating cost <span class="muted" style="font-weight:400;font-size:13px">estimated</span></h2>
+        <div class="range" role="group" aria-label="Cost period" id="cost-range">
+          <button data-days="7" class="active">7 days</button>
+          <button data-days="30">30 days</button>
+        </div>
+      </div>
+      <div class="tiles" id="cost-tiles"></div>
+      <div class="chart" id="cost-chart"></div>
+      <div class="table-wrap">
+        <table class="events">
+          <thead><tr><th>Room</th><th class="num">On</th><th class="num">Energy</th><th class="num">Cost</th><th class="num">Avg price paid</th><th class="num">Saved</th><th></th></tr></thead>
+          <tbody id="cost-table"></tbody>
+        </table>
+      </div>
+      <div class="hint" id="cost-note"></div>
     </section>
   </main>
 
