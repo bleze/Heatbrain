@@ -12,7 +12,7 @@
     ["notifications", "Notifications", "bell"],
     ["system", "System", "cpu"],
   ];
-  const S = { cfg: null, saved: "", errors: [], tab: "rooms", plugStatus: null, discovered: null, newIds: new Set(), jobs: {}, confirming: new Set(), openDetails: new Set() };
+  const S = { cfg: null, saved: "", errors: [], tab: "rooms", plugStatus: null, discovered: null, newIds: new Set(), jobs: {}, confirming: new Set(), pending: new Set(), openDetails: new Set() };
   let jobTimer = null;
   const jobRunning = () => Object.values(S.jobs).some((j) => j.state === "running");
 
@@ -189,16 +189,21 @@
       el("span", {}, wrap, question);
       btn(wrap, "Yes", "check", async (b) => {
         b.disabled = true;
-        b.lastChild.textContent = "Starting…";
-        if (key) S.confirming.delete(key);
-        await onYes();
-        show();
+        b.lastChild.textContent = "Working…";
+        if (key) { S.confirming.delete(key); S.pending.add(key); }
+        try { await onYes(); } finally { if (key) S.pending.delete(key); }
+        if (wrap.isConnected) show();
       }, "primary");
       btn(wrap, "Cancel", null, () => { if (key) S.confirming.delete(key); show(); });
     };
     const show = () => {
       wrap.replaceChildren();
       wrap.classList.remove("asking");
+      if (key && S.pending.has(key)) {
+        const b = btn(wrap, `${label ? label + ": " : ""}working…`, "clock", () => {}, cls);
+        b.disabled = true;
+        return;
+      }
       btn(wrap, label, iconName, ask, cls);
     };
     if (key && S.confirming.has(key)) ask(); else show();
@@ -487,10 +492,15 @@
   }
 
   // --- Plugs --------------------------------------------------------------------------
-  async function refreshPlugStatus() {
-    try { S.plugStatus = await api("/api/plugs"); }
-    catch (e) { toast(`Plug status: ${e.message}`, true); S.plugStatus = []; }
-    if (S.tab === "plugs") render();
+  let plugStatusLoading = null;
+  function refreshPlugStatus() {
+    plugStatusLoading ||= (async () => {
+      try { S.plugStatus = await api("/api/plugs"); }
+      catch (e) { toast(`Plug status: ${e.message}`, true); S.plugStatus = []; }
+      plugStatusLoading = null;
+      if (S.tab === "plugs") render();
+    })();
+    return plugStatusLoading;
   }
 
   function guessSubnet() {
@@ -540,7 +550,7 @@
     btn(head, "Refresh status", "wifi", () => { S.plugStatus = null; refreshPlugStatus(); });
     const plugs = S.cfg.plugs || [];
     if (!plugs.length) el("div", { class: "empty-state" }, card, "No plugs yet: scan your network above.");
-    if (plugs.length && S.plugStatus === null) { refreshPlugStatus(); refreshJobs(); }
+    if (plugs.length && S.plugStatus === null && !plugStatusLoading) { refreshPlugStatus(); refreshJobs(); }
     const list = el("div", { class: "list" }, card);
     plugs.forEach((p, idx) => renderPlug(list, p, idx));
   }
@@ -657,8 +667,8 @@
           async () => {
             try { await api(`/api/plugs/${encodeURIComponent(p.id)}/provision`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); toast(`${p.name || p.id}: fail-safe installed`); }
             catch (e) { toast(e.message, true); }
-            S.plugStatus = null; refreshPlugStatus();
-          }, "primary");
+            S.plugStatus = null; await refreshPlugStatus();
+          }, "primary", `${p.id}:provision`);
       }
       const busy = jobRunning();
       if (p.mode !== "live" && !busy) {
@@ -680,8 +690,8 @@
         async () => {
           try { await api(`/api/plugs/${encodeURIComponent(p.id)}/restore`, { method: "POST" }); toast(`${p.name || p.id}: original settings restored`); }
           catch (e) { toast(e.message, true); }
-          S.plugStatus = null; refreshPlugStatus();
-        }, "ghost");
+          S.plugStatus = null; await refreshPlugStatus();
+        }, "ghost", `${p.id}:restore`);
     }
 
     renderJob(c, p);
