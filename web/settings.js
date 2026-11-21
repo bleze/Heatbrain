@@ -102,6 +102,10 @@
     const minus = el("button", { type: "button", class: "step", "aria-label": "Decrease", tabindex: -1 }, wrap);
     minus.appendChild(icon("minus"));
     wrap.appendChild(i);
+    if (opts.unit) {
+      wrap.classList.add("has-unit");
+      el("span", { class: "unit" }, wrap, opts.unit);
+    }
     const plus = el("button", { type: "button", class: "step", "aria-label": "Increase", tabindex: -1 }, wrap);
     plus.appendChild(icon("plus"));
     minus.addEventListener("click", (e) => { e.preventDefault(); bump(-1); });
@@ -327,7 +331,7 @@
 
     if (room.priceOnly) {
       const g = el("div", { class: "form-grid" }, c);
-      field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1 }), { hint: "heats only in those hours" });
+      field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1, unit: "h" }), { hint: "heats only in those hours" });
       el("h3", {}, c, "Never heat between");
       const avoid = arr(room.priceOnly, "avoid");
       avoid.forEach((w, i) => {
@@ -342,9 +346,9 @@
     const g = el("div", { class: "form-grid" }, c);
     field(g, "Temperature sensor", sel(room, "sensor", sensorOptions()),
       { hint: (state.status?.sensors || []).length ? "" : "No sensors yet: set up Netatmo on the Sensors tab" });
-    field(g, "Never below (°C)", num(room, "minTemp", { step: 0.5 }), { hint: "heats whatever the price" });
-    field(g, "Never above (°C)", num(room, "maxTemp", { step: 0.5 }), { hint: "hard stop, even when manual" });
-    field(g, "Frost protection (°C)", num(room, "frostTemp", { step: 0.5, placeholder: "5" }));
+    field(g, "Never below", num(room, "minTemp", { step: 0.5, unit: "°C" }), { hint: "heats whatever the price" });
+    field(g, "Never above", num(room, "maxTemp", { step: 0.5, unit: "°C" }), { hint: "hard stop, even when manual" });
+    field(g, "Frost protection", num(room, "frostTemp", { step: 0.5, placeholder: "5", unit: "°C" }));
 
     el("h3", {}, c, "Daily program");
     el("div", { class: "hint", style: "margin-top:-4px" }, c,
@@ -371,8 +375,7 @@
         render();
       }));
       if (pt.mode !== "off") {
-        r.appendChild(num(pt, "target", { step: 0.5, onChange: () => drawTimeline(tl, room) }));
-        el("span", { class: "muted" }, r, "°C");
+        r.appendChild(num(pt, "target", { step: 0.5, unit: "°C", onChange: () => drawTimeline(tl, room) }));
       }
       const next = program[(i + 1) % program.length];
       el("span", { class: "muted" }, r, program.length === 1 ? "all day" : `until ${next.at}`);
@@ -412,14 +415,25 @@
     el("summary", {}, adv, "Advanced: how eagerly to chase cheap prices");
     const st = (room.strategy ||= {});
     const ag = el("div", { class: "form-grid" }, adv);
-    field(ag, "Peak coasting −°C", num(st, "peakAllowedDrop", { step: 0.1, placeholder: "1.0" }), { hint: "below target in expensive hours" });
-    field(ag, "Pre-heat +°C", num(st, "preheatBoost", { step: 0.1, placeholder: "1.0" }), { hint: "above target before a peak" });
-    field(ag, "Peak look-ahead (min)", num(st, "preheatMinutes", { step: 15, placeholder: "180" }), { hint: "how early to start pre-heating" });
-    field(ag, "Cheap boost +°C", num(st, "cheapBoost", { step: 0.1, placeholder: "0.5" }), { hint: "extra in the cheapest hours" });
-    field(ag, "Hysteresis ±°C", num(st, "hysteresis", { step: 0.1, placeholder: "0.3" }), { hint: "avoids rapid on/off" });
-    field(ag, "Stale after (min)", num(st, "staleMinutes", { step: 5, placeholder: "30" }), { hint: "older readings are not trusted" });
-    field(ag, "Limp mode ON (min)", num(st, "limpOnMinutes", { step: 5, placeholder: "10" }), { hint: "when the temperature is unknown" });
-    field(ag, "Limp mode OFF (min)", num(st, "limpOffMinutes", { step: 5, placeholder: "50" }), { hint: "then off for this long" });
+    field(ag, "Peak coasting", num(st, "peakAllowedDrop", { step: 0.1, placeholder: "1.0", unit: "−°C" }), { hint: "below target in expensive hours" });
+    field(ag, "Pre-heat", num(st, "preheatBoost", { step: 0.1, placeholder: "1.0", unit: "+°C" }), { hint: "above target before a peak" });
+    field(ag, "Peak look-ahead", num(st, "preheatMinutes", { step: 15, placeholder: "180", unit: "min" }), { hint: "how early to start pre-heating" });
+    field(ag, "Cheap boost", num(st, "cheapBoost", { step: 0.1, placeholder: "0.5", unit: "+°C" }), { hint: "extra in the cheapest hours" });
+    field(ag, "Hysteresis", num(st, "hysteresis", { step: 0.1, placeholder: "0.3", unit: "±°C" }), { hint: "avoids rapid on/off" });
+    field(ag, "Stale after", num(st, "staleMinutes", { step: 5, placeholder: "30", unit: "min" }), { hint: "older readings are not trusted" });
+    field(ag, "Limp mode ON", num(st, "limpOnMinutes", { step: 5, placeholder: "10", unit: "min" }), { hint: "when the temperature is unknown" });
+    field(ag, "Limp mode OFF", num(st, "limpOffMinutes", { step: 5, placeholder: "50", unit: "min" }), { hint: "then off for this long" });
+  }
+
+  // Cool -> warm ramp through nearby stops only (blending blue straight into amber passes
+  // through pink or mud, depending on the colour space).
+  const TEMP_STOPS = [[0, "#2a78d6"], [0.35, "#9ec5f4"], [0.5, "#f2d27a"], [0.75, "#f59f00"], [1, "#e8590c"]];
+  function tempColor(f) {
+    for (let k = 1; k < TEMP_STOPS.length; k++) {
+      const [f1, c1] = TEMP_STOPS[k - 1], [f2, c2] = TEMP_STOPS[k];
+      if (f <= f2) return `color-mix(in oklab, ${c1} ${Math.round((1 - (f - f1) / (f2 - f1)) * 100)}%, ${c2})`;
+    }
+    return TEMP_STOPS[TEMP_STOPS.length - 1][1];
   }
 
   // 24 h preview of the program: heat in blue (cool) to orange (warm), keep-above as a
@@ -447,18 +461,15 @@
       }
       const label = st.mode === "keep" ? `≥${st.target}°` : `${st.target}°`;
       const d = el("div", { style: `flex:${sg.len}`, title: st.mode === "keep" ? `keep above ${st.target}°C` : `heat to ${st.target}°C` }, bar, label);
-      // Cool blue -> amber -> deep orange (two segments, so the middle never turns muddy).
       const f = Math.max(0, Math.min(1, ((st.target ?? lo) - lo) / Math.max(1, hi - lo)));
-      const color = f < 0.5
-        ? `color-mix(in oklch, #2a78d6 ${Math.round((1 - f * 2) * 100)}%, #f59f00)`
-        : `color-mix(in oklch, #f59f00 ${Math.round((2 - f * 2) * 100)}%, #e8590c)`;
+      const color = tempColor(f);
       if (st.mode === "keep") {
         d.className = "tl-keep";
         d.style.background = `color-mix(in oklch, ${color} 35%, var(--surface-2))`;
         d.style.color = "var(--ink)";
       } else {
         d.style.background = color;
-        d.style.color = f > 0.3 && f < 0.7 ? "#0b0b0b" : "#fff";
+        d.style.color = f > 0.25 && f < 0.8 ? "#0b0b0b" : "#fff";
       }
     }
     const axis = el("div", { class: "timeline-axis" }, host);
@@ -596,7 +607,7 @@
 
     const g = el("div", { class: "form-grid" }, c);
     if ((p.type || "tasmota") === "tasmota") field(g, "Address", txt(p, "host", { placeholder: "192.168.1.38" }));
-    field(g, "Radiator power (W)", num(p, "watts", { step: 50, min: 0, placeholder: "e.g. 1500" }),
+    field(g, "Radiator power", num(p, "watts", { step: 50, min: 0, placeholder: "1500", unit: "W" }),
       { hint: "from the radiator's label" });
 
     // Live status
@@ -672,10 +683,10 @@
     el("summary", {}, adv, "Advanced: fail-safe timing and password");
     const fs = (p.failsafe ||= {});
     const ag = el("div", { class: "form-grid" }, adv);
-    field(ag, "Auto-off (min)", num(fs, "pulseMinutes", { step: 1, placeholder: "20" }), { hint: "if heatbrain stops refreshing it" });
-    field(ag, "Limp mode after (min)", num(fs, "watchdogMinutes", { step: 1, placeholder: "30" }), { hint: "of silence from heatbrain" });
-    field(ag, "Limp mode ON (min)", num(fs, "limpOnMinutes", { step: 1, placeholder: "10" }), { hint: "0 = stay off" });
-    field(ag, "Limp mode OFF (min)", num(fs, "limpOffMinutes", { step: 1, placeholder: "50" }));
+    field(ag, "Auto-off after", num(fs, "pulseMinutes", { step: 1, placeholder: "20", unit: "min" }), { hint: "if heatbrain stops refreshing it" });
+    field(ag, "Limp mode after", num(fs, "watchdogMinutes", { step: 1, placeholder: "30", unit: "min" }), { hint: "of silence from heatbrain" });
+    field(ag, "Limp mode ON", num(fs, "limpOnMinutes", { step: 1, placeholder: "10", unit: "min" }), { hint: "0 = stay off" });
+    field(ag, "Limp mode OFF", num(fs, "limpOffMinutes", { step: 1, placeholder: "50", unit: "min" }));
     field(ag, "Tasmota web password", secret(p, "password", "none"));
   }
 
@@ -759,7 +770,7 @@
         codes.addEventListener("input", () => { comp.codes = codes.value.split(",").map((x) => x.trim()).filter(Boolean); changed(); });
         field(cg, "Charge codes", codes, { hint: "comma separated" });
       } else if (comp.type === "fixed") {
-        field(cg, `Amount (${S.cfg.currency || "DKK"}/kWh)`, num(comp, "amount", { step: 0.01 }), { hint: "excluding VAT" });
+        field(cg, "Amount", num(comp, "amount", { step: 0.01, unit: `${S.cfg.currency === "DKK" || !S.cfg.currency ? "kr" : S.cfg.currency}/kWh` }), { hint: "excluding VAT" });
       } else if (comp.type === "schedule") {
         const ta = el("textarea", { rows: 8 });
         ta.value = JSON.stringify(comp.seasons || [], null, 2);
@@ -792,8 +803,7 @@
       const box = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, slist);
       const r = el("div", { class: "sched-row", style: "margin-top:0" }, box);
       r.appendChild(txt(s, "name", { placeholder: "Moms" }));
-      r.appendChild(num(s, "percent", { step: 1 }));
-      el("span", { class: "muted" }, r, "%");
+      r.appendChild(num(s, "percent", { step: 1, unit: "%" }));
       btn(r, "", "trash", () => { surcharges.splice(i, 1); changed(); render(); }, "ghost danger row-delete");
     });
     btn(el("div", { style: "margin-top:8px" }, sc), "Add surcharge", "plus", () => { surcharges.push({ name: "Moms", percent: 25 }); changed(); render(); });
@@ -829,7 +839,7 @@
     sectionHead(rules, "When to notify", "bell", "amber",
       "Problems must last a while before you hear about them; you also get a message when they are resolved.");
     const rg = el("div", { class: "form-grid" }, rules);
-    field(rg, "Reminder interval (hours)", num(n, "repeatHours", { step: 1, min: 1, placeholder: "6" }), { hint: "for problems that are still ongoing" });
+    field(rg, "Reminder interval", num(n, "repeatHours", { step: 1, min: 1, placeholder: "6", unit: "h" }), { hint: "for problems that are still ongoing" });
     const quietOn = !!n.quietHours;
     const qwrap = el("div", { class: "field span2" }, rg);
     el("span", {}, qwrap, "Quiet hours");
@@ -852,7 +862,7 @@
     if (!S.cfg.timezone) S.cfg.timezone = "Europe/Copenhagen";
     field(g, "Time zone", sel(S.cfg, "timezone", zones));
     const control = (S.cfg.control ||= {});
-    field(g, "Control interval (s)", num(control, "tickSeconds", { step: 60, min: 60, max: 3600, placeholder: "300" }),
+    field(g, "Control interval", num(control, "tickSeconds", { step: 60, min: 60, max: 3600, placeholder: "300", unit: "s" }),
       { hint: "at most half of each live plug's auto-off time" });
     // Appearance: stored in this browser only, applied immediately (not part of the config).
     const ap = el("div", { class: "field" }, g);
