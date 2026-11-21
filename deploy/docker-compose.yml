@@ -1,11 +1,11 @@
 # heatbrain on a Synology NAS (Container Manager -> Project -> Create, paste this file).
 #
-# Before the first start:
-#   1. Create the folder /volume1/docker/heatbrain on the NAS.
-#   2. Copy heatbrain.json, netatmo-tokens.json and (optionally) history.db from your
-#      development machine's data/ folder into it.
-#   3. STOP any other running heatbrain first. Netatmo rotates its refresh token: two
-#      instances sharing one token will lock each other out.
+# 1. Create the folder /volume1/docker/heatbrain on the NAS (File Station). Leave it empty:
+#    heatbrain creates a starter configuration on first start and does nothing until set up.
+# 2. Start this project; the web UI is at http://<nas-ip>:8080
+# 3. Moving from another heatbrain: there, Settings -> System -> Export (with history);
+#    here, Settings -> System -> Import. Then STOP the other heatbrain right away: Netatmo
+#    rotates its login token, so two copies lock each other out (and both would switch plugs).
 services:
   heatbrain:
     image: ghcr.io/bleze/heatbrain:latest
