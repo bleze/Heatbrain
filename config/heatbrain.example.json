@@ -148,6 +148,21 @@
       }
     }
   ],
+  "notifications": {
+    "_comment": "Discord: Edit Channel -> Integrations -> Webhooks -> New Webhook -> Copy URL. Test with 'heatbrain notify-test'.",
+    "channels": [
+      {
+        "type": "discord",
+        "webhookUrl": ""
+      }
+    ],
+    "repeatHours": 6,
+    "quietHours": {
+      "from": "23:00",
+      "to": "07:00"
+    },
+    "notifyOnStart": true
+  },
   "_example_schedule_component": {
     "_comment": "For grid companies without an API: describe the tariff directly.",
     "type": "schedule",

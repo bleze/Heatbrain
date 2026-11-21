@@ -4,6 +4,7 @@
 #include <format>
 
 #include "core/log.hpp"
+#include "sensors/netatmo.hpp"
 
 namespace hb {
 
@@ -13,6 +14,13 @@ using namespace std::chrono;
 namespace {
 constexpr auto kFailsafeRecheck = hours{1};
 constexpr auto kHistoryRetention = days{90};
+constexpr int kLowBatteryPercent = 20;
+constexpr int kTomorrowPricesExpectedHour = 15;  // published ~13:00; alert if still missing at 15
+
+void add(TickResult& r, std::string key, Severity sev, std::string msg, minutes debounce = minutes{0},
+         std::optional<minutes> repeat = std::nullopt) {
+    r.problems.push_back(Problem{std::move(key), sev, std::move(msg), debounce, repeat});
+}
 }  // namespace
 
 json toJson(const DecisionInputs& in) {
@@ -48,17 +56,46 @@ void Controller::refreshPrices(Instant now, TickResult& result) {
     // From the start of the current hour to the end of tomorrow. Providers cache, so this
     // rarely touches the network.
     PriceTable fresh = priceModel_.build(floor<hours>(now), startOfLocalDay(tz_, now + hours{50}));
-    for (const auto& e : fresh.errors) result.errors.push_back("Prices: " + e);
+    for (const auto& e : fresh.errors) {
+        add(result, "prices:error", Severity::Warning, "Price data problem: " + e, minutes{30});
+    }
     prices_ = std::move(fresh);
+
+    const auto local = tz_.toLocal(now);
+    if (hourOfDay(local) >= kTomorrowPricesExpectedHour) {
+        const Instant tomorrowNoon = tz_.toInstant(floor<days>(local) + days{1} + hours{12});
+        const bool known = std::ranges::any_of(prices_.slots, [&](const PriceSlot& s) {
+            return s.start == tomorrowNoon && s.total.has_value();
+        });
+        if (!known) {
+            add(result, "prices:tomorrow", Severity::Warning,
+                "Tomorrow's electricity prices are still missing. Planning falls back to the current day's data.");
+        }
+    }
 }
 
 void Controller::readSensors(TickResult& result) {
     for (auto& src : sources_) {
         try {
-            for (auto& r : src->read()) readings_[src->id() + ":" + r.sensorId] = std::move(r);
+            for (auto& r : src->read()) {
+                const std::string key = src->id() + ":" + r.sensorId;
+                if (!r.reachable) {
+                    add(result, "sensor:" + key + ":offline", Severity::Warning,
+                        std::format("Sensor '{}' is offline (no contact with the station)", r.name), minutes{30});
+                }
+                if (r.batteryPercent && *r.batteryPercent <= kLowBatteryPercent) {
+                    add(result, "sensor:" + key + ":battery", Severity::Info,
+                        std::format("Sensor '{}' battery is at {}% - replace soon", r.name, *r.batteryPercent),
+                        minutes{0}, hours{24});
+                }
+                readings_[key] = std::move(r);
+            }
+        } catch (const netatmo::AuthError& e) {
+            add(result, "source:" + src->id() + ":auth", Severity::Critical, e.what());
         } catch (const std::exception& e) {
             // Keep the previous readings: they age, and the planner stops trusting them.
-            result.errors.push_back("Temperature source " + src->id() + ": " + e.what());
+            add(result, "source:" + src->id() + ":error", Severity::Warning,
+                std::format("Temperature source '{}' failed: {}", src->id(), e.what()), minutes{15});
         }
     }
 }
@@ -80,14 +117,9 @@ bool Controller::failsafeVerified(Plug& plug, Instant now) {
     try {
         const auto st = plug.sw->checkFailsafe();
         failsafeChecks_[plug.id] = {st.installed(), now};
-        if (!st.installed()) {
-            log::error("{}: live, but the fail-safe is not installed ({}). Not switching it. "
-                       "Run 'heatbrain plug {} provision'.",
-                       plug.id, st.problems.front(), plug.id);
-        }
         return st.installed();
     } catch (const std::exception&) {
-        return false;  // unreachable: reported by the switch attempt path
+        return false;
     }
 }
 
@@ -100,19 +132,25 @@ json Controller::applyToPlugs(const RoomConfig& room, bool on, Instant now, Tick
         if (plug.mode == PlugMode::Live) {
             if (!failsafeVerified(plug, now)) {
                 pj["error"] = "fail-safe not verified: not switched";
-                result.errors.push_back(std::format("Plug {}: fail-safe not verified, not switched", id));
+                add(result, "plug:" + id + ":failsafe", Severity::Critical,
+                    std::format("Plug '{}' is live but its fail-safe is not installed or not reachable, so heatbrain "
+                                "will not switch it. Run 'heatbrain plug {} provision'.",
+                                id, id));
             } else {
                 try {
                     const bool state = plug.sw->set(on);
                     pj["state"] = state;
                     if (state != on) {
                         pj["error"] = "device reports a different state";
-                        result.errors.push_back(std::format("Plug {}: commanded {} but device reports {}", id,
-                                                            on ? "ON" : "OFF", state ? "ON" : "OFF"));
+                        add(result, "plug:" + id + ":mismatch", Severity::Warning,
+                            std::format("Plug '{}' was switched {} but reports {}", id, on ? "ON" : "OFF",
+                                        state ? "ON" : "OFF"),
+                            minutes{10});
                     }
                 } catch (const std::exception& e) {
                     pj["error"] = e.what();
-                    result.errors.push_back(std::format("Plug {} unreachable: {}", id, e.what()));
+                    add(result, "plug:" + id + ":unreachable", Severity::Warning,
+                        std::format("Plug '{}' ({}) is unreachable: {}", id, plug.host, e.what()), minutes{10});
                     failsafeChecks_.erase(id);  // re-verify once it is back
                 }
             }
@@ -127,7 +165,7 @@ TickResult Controller::tick(Instant now, bool apply) {
     try {
         refreshPrices(now, result);
     } catch (const std::exception& e) {
-        result.errors.push_back(std::string("Prices: ") + e.what());  // keep the previous table
+        add(result, "prices:error", Severity::Warning, std::string("Price data problem: ") + e.what(), minutes{30});
     }
     readSensors(result);
 
@@ -142,8 +180,9 @@ TickResult Controller::tick(Instant now, bool apply) {
         if (reading && reading->reachable) {
             in.temperature = reading->temperature;
             in.measuredAt = reading->measuredAt;
-        } else if (!room.sensor.empty() && !reading) {
-            result.errors.push_back(std::format("Room {}: sensor '{}' not found", room.id, room.sensor));
+        } else if (!room.sensor.empty() && !reading && !sources_.empty()) {
+            add(result, "room:" + room.id + ":sensor", Severity::Warning,
+                std::format("Room '{}': sensor '{}' not found", room.name, room.sensor));
         }
         if (auto it = overrides.find(room.id); it != overrides.end()) in.override = it->second;
 
@@ -151,6 +190,18 @@ TickResult Controller::tick(Instant now, bool apply) {
         rr.room = &room;
         rr.decision = decideRoom(room, in, prices_, tz_);
         rr.changed = prev == lastOn_.end() || prev->second != rr.decision.on;
+
+        if (rr.decision.reason == Reason::StaleDataLimp) {
+            add(result, "room:" + room.id + ":limp", Severity::Warning,
+                std::format("Room '{}' is in limp mode: {}", room.name, rr.decision.detail));
+        }
+        if (rr.decision.on && rr.decision.inputs.temperature && *rr.decision.inputs.temperature < room.minTemp) {
+            add(result, "room:" + room.id + ":not-warming", Severity::Warning,
+                std::format("Room '{}' is {:.1f}°C, below its minimum {:.1f}°C, despite heating for an hour. "
+                            "Window open, or radiator switched off?",
+                            room.name, *rr.decision.inputs.temperature, room.minTemp),
+                minutes{60});
+        }
 
         if (apply) {
             rr.plugs = applyToPlugs(room, rr.decision.on, now, result);
@@ -182,7 +233,7 @@ TickResult Controller::tick(Instant now, bool apply) {
                 lastPrune_ = now;
             }
         } catch (const std::exception& e) {
-            result.errors.push_back(std::string("History: ") + e.what());
+            add(result, "history:error", Severity::Warning, std::string("Could not write history: ") + e.what());
         }
     }
     return result;

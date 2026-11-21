@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include "app/rooms.hpp"
+#include "core/alerts.hpp"
 #include "core/planner.hpp"
 #include "plugs/plugs.hpp"
 #include "providers/price_model.hpp"
@@ -27,7 +28,7 @@ struct RoomResult {
 
 struct TickResult {
     std::vector<RoomResult> rooms;
-    std::vector<std::string> errors;
+    std::vector<Problem> problems;  // fed to the AlertManager
 };
 
 nlohmann::json toJson(const DecisionInputs& in);

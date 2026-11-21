@@ -78,5 +78,6 @@ int runPlan(const Args& args);
 int runDaemon(const Args& args);
 int runHistory(const Args& args);
 int runOverride(const Args& args);
+int runNotifyTest(const Args& args);
 
 }  // namespace hbcli

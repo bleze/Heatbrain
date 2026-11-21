@@ -86,7 +86,8 @@ TEST_CASE("Live plugs are never switched without a verified fail-safe") {
     CHECK(r.rooms[0].decision.on);  // 18.0 < 19: wants heat
     CHECK_FALSE(f.plugOn("bedroom"));
     CHECK(r.rooms[0].plugs[0].contains("error"));
-    CHECK_THAT(r.errors.front(), ContainsSubstring("fail-safe"));
+    CHECK(r.problems.front().key == "plug:bedroom:failsafe");
+    CHECK(r.problems.front().severity == Severity::Critical);
 
     f.plug("bedroom").sw->provision(false);
     f.now += minutes{5};
@@ -142,7 +143,10 @@ TEST_CASE("Sensor outage: readings age out and the room goes to limp mode") {
     f.now += minutes{40};
     const auto r = f.controller->tick(f.now, true);
     CHECK(r.rooms[0].decision.reason == Reason::StaleDataLimp);
-    CHECK_THAT(r.errors.front(), ContainsSubstring("cloud down"));
+    CHECK(std::ranges::any_of(r.problems, [](const Problem& p) {
+        return p.key == "source:netatmo:error" && p.message.find("cloud down") != std::string::npos;
+    }));
+    CHECK(std::ranges::any_of(r.problems, [](const Problem& p) { return p.key == "room:bedroom:limp"; }));
 }
 
 TEST_CASE("A restarted controller continues from the last recorded decision") {

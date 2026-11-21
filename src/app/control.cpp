@@ -14,6 +14,7 @@
 #include "app/controller.hpp"
 #include "app/rooms.hpp"
 #include "core/log.hpp"
+#include "notify/notifier.hpp"
 #include "sensors/sensors.hpp"
 
 namespace hbcli {
@@ -104,8 +105,33 @@ int runPlan(const Args& args) {
         }
         std::cout << "    plugs: " << plugs << "\n\n";
     }
-    for (const auto& e : result.errors) std::cout << "WARNING: " << e << "\n";
+    for (const auto& p : result.problems) {
+        std::cout << std::format("{}: {}  [{}]\n", p.severity == hb::Severity::Critical ? "CRITICAL" : "WARNING",
+                                 p.message, p.key);
+    }
     return 0;
+}
+
+int runNotifyTest(const Args& args) {
+    const auto cfg = hb::loadConfig(resolveDataDir(args), exampleConfigCandidates());
+    hb::HttplibClient http;
+    auto nc = hb::loadNotifications(cfg.raw, http);
+    if (nc.channels.empty()) {
+        std::cout << "No notification channels configured (notifications.channels in "
+                  << cfg.configFile.string() << ")\n";
+        return 1;
+    }
+    int failures = 0;
+    for (auto& ch : nc.channels) {
+        try {
+            ch->sendText("heatbrain test", "If you can read this, notifications work. 🔥");
+            std::cout << ch->name() << ": sent\n";
+        } catch (const std::exception& e) {
+            ++failures;
+            std::cout << ch->name() << ": FAILED - " << e.what() << "\n";
+        }
+    }
+    return failures ? 1 : 0;
 }
 
 // --- run ---------------------------------------------------------------------------------
@@ -136,14 +162,46 @@ int runDaemon(const Args& args) {
                       p.mode == hb::PlugMode::Live ? "LIVE" : "dryrun");
     }
 
-    std::set<std::string> activeErrors;
+    auto notifications = hb::loadNotifications(env->cfg.raw, env->internet);
+    hb::AlertManager alerts(notifications.policy, *env->tz);
+    hb::log::info("  notifications: {} channel(s)", notifications.channels.size());
+    if (notifications.notifyOnStart) {
+        for (auto& ch : notifications.channels) {
+            try {
+                ch->sendText("heatbrain started", std::format("{} room(s), tick every {} s",
+                                                              env->controller->rooms().size(), env->tick.count()));
+            } catch (const std::exception& e) {
+                hb::log::warn("{}: {}", ch->name(), e.what());
+            }
+        }
+    }
+    const auto deliver = [&](const hb::Alert& a) {
+        const char* kind = a.kind == hb::Alert::Kind::Resolved   ? "RESOLVED"
+                           : a.kind == hb::Alert::Kind::Reminder ? "REMINDER"
+                                                                 : "ALERT";
+        hb::log::warn("{} [{}] {}", kind, a.key, a.message);
+        if (notifications.channels.empty()) return true;  // logging is the delivery
+        bool any = false;
+        for (auto& ch : notifications.channels) {
+            try {
+                ch->send(a);
+                any = true;
+            } catch (const std::exception& e) {
+                hb::log::warn("{}: {}", ch->name(), e.what());
+            }
+        }
+        return any;
+    };
+
+    std::set<std::string> seenKeys;
     while (!g_stop) {
         const Instant now = nowSeconds();
         hb::TickResult result;
         try {
             result = env->controller->tick(now, /*apply=*/true);
         } catch (const std::exception& e) {
-            result.errors.push_back(std::string("Tick failed: ") + e.what());
+            result.problems.push_back({"controller:tick", hb::Severity::Critical,
+                                       std::string("Control step failed: ") + e.what(), minutes{0}, std::nullopt});
         }
         for (const auto& r : result.rooms) {
             const std::string line = std::format("{}: {} {} - {}", r.room->id, r.decision.on ? "ON " : "OFF",
@@ -151,15 +209,14 @@ int runDaemon(const Args& args) {
             if (r.changed) hb::log::info("{}", line);
             else hb::log::debug("{}", line);
         }
-        // Log problems when they appear and when they clear, not every tick.
-        const std::set<std::string> errors(result.errors.begin(), result.errors.end());
-        for (const auto& e : errors) {
-            if (!activeErrors.contains(e)) hb::log::warn("{}", e);
+        // Problems are logged as soon as they appear; alerts follow the debounce policy.
+        std::set<std::string> keys;
+        for (const auto& p : result.problems) {
+            keys.insert(p.key);
+            if (!seenKeys.contains(p.key)) hb::log::info("Problem seen [{}] {}", p.key, p.message);
         }
-        for (const auto& e : activeErrors) {
-            if (!errors.contains(e)) hb::log::info("Resolved: {}", e);
-        }
-        activeErrors = errors;
+        seenKeys = keys;
+        alerts.update(now, result.problems, deliver);
 
         // Sleep until the next tick boundary, waking every second to honour Ctrl+C/SIGTERM.
         const auto tickLen = env->tick;

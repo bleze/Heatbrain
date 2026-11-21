@@ -29,6 +29,7 @@ add_library(heatbrain_core STATIC
   src/core/price.cpp
   src/core/failsafe.cpp
   src/core/planner.cpp
+  src/core/alerts.cpp
 )
 target_include_directories(heatbrain_core PUBLIC src)
 
@@ -43,6 +44,7 @@ add_library(heatbrain_io STATIC
   src/sensors/netatmo.cpp
   src/sensors/sensors.cpp
   src/storage/history.cpp
+  src/notify/notifier.cpp
   src/app/config.cpp
   src/app/rooms.cpp
   src/app/controller.cpp
@@ -80,6 +82,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_netatmo.cpp
     tests/test_planner.cpp
     tests/test_controller.cpp
+    tests/test_alerts.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE
