@@ -14,8 +14,8 @@ It runs as a single C++ process with a web UI, in Docker on a NAS or locally whi
 | 2. Tasmota plugs + on-plug fail-safe (`discover`, `plugs`, `plug`) | done |
 | 3. Netatmo temperatures (OAuth, rotating tokens) + `temps` | done |
 | 4. Planner + scheduler loop + history (`plan`, `run`, `history`, `override`) | done |
-| 5. Notifications (Discord) + web UI | next |
-| 6. Docker image + GitHub Actions, deploy to Synology | |
+| 5. Notifications (Discord) + web UI | done |
+| 6. Docker image + GitHub Actions, deploy to Synology | next |
 
 ## Architecture
 
@@ -112,8 +112,16 @@ heatbrain override bedroom on 60     # manual ON for 60 min (picked up by a runn
 heatbrain override bedroom clear
 ```
 
-The web UI will show per room: temperature over time with the target band, ON periods as
-bars coloured by reason, and price as a secondary series, plus a filterable event log.
+## Web UI
+
+`heatbrain run` serves a web UI on port 8080 (`web` in config; no login, keep it on your
+home network): problems banner, price chart for today and tomorrow, a card per room
+(temperature, decision and reason, plugs, "Heat 1 h" / "Off 2 h" / "Back to auto"), and
+per room a chart of temperature + target, heating periods coloured by reason category
+(comfort / price-driven / safety-manual) and price, with the hours ahead, plus the switch
+event table. Overrides from the UI are applied immediately. Light and dark mode follow the
+OS. The frontend is plain HTML/JS in `web/` (no build step); in dev builds it is served
+straight from the source folder, so edits only need a browser refresh.
 
 ## Notifications
 

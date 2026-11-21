@@ -45,6 +45,7 @@ public:
     TickResult tick(Instant now, bool apply);
 
     const std::vector<RoomConfig>& rooms() const { return rooms_; }
+    const PriceTable& prices() const { return prices_; }
 
 private:
     void refreshPrices(Instant now, TickResult& result);

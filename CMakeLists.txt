@@ -45,6 +45,7 @@ add_library(heatbrain_io STATIC
   src/sensors/sensors.cpp
   src/storage/history.cpp
   src/notify/notifier.cpp
+  src/web/server.cpp
   src/app/config.cpp
   src/app/rooms.cpp
   src/app/controller.cpp
@@ -65,6 +66,7 @@ if(HEATBRAIN_DEV_DEFAULTS)
 endif()
 install(TARGETS heatbrain RUNTIME DESTINATION bin)
 install(DIRECTORY config/ DESTINATION config)
+install(DIRECTORY web/ DESTINATION web)
 
 if(HEATBRAIN_BUILD_TESTS)
   enable_testing()

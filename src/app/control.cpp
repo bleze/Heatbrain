@@ -16,6 +16,7 @@
 #include "core/log.hpp"
 #include "notify/notifier.hpp"
 #include "sensors/sensors.hpp"
+#include "web/server.hpp"
 
 namespace hbcli {
 
@@ -138,7 +139,56 @@ int runNotifyTest(const Args& args) {
 
 namespace {
 std::atomic<bool> g_stop{false};
+std::atomic<bool> g_wake{false};  // set by the web UI after an override
 extern "C" void onSignal(int) { g_stop = true; }
+
+std::vector<fs::path> webRootCandidates() {
+    std::vector<fs::path> c;
+#ifdef HEATBRAIN_SOURCE_DIR
+    c.push_back(fs::path(HEATBRAIN_SOURCE_DIR) / "web");
+#endif
+    c.push_back("/app/web");
+    c.push_back("web");
+    return c;
+}
+
+// Snapshot for the web UI, rebuilt after every tick.
+nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
+                           const std::vector<hb::Problem>& active, Instant now) {
+    using nlohmann::json;
+    const auto overrides = env.overrides->load();
+    json rooms = json::array();
+    for (const auto& r : result.rooms) {
+        json room{{"id", r.room->id},
+                  {"name", r.room->name},
+                  {"on", r.decision.on},
+                  {"reason", hb::reasonCode(r.decision.reason)},
+                  {"detail", r.decision.detail},
+                  {"inputs", hb::toJson(r.decision.inputs)},
+                  {"plugs", r.plugs},
+                  {"priceOnly", r.room->priceOnly.has_value()},
+                  {"override", nullptr}};
+        if (auto it = overrides.find(r.room->id); it != overrides.end() && it->second.until > now) {
+            room["override"] = {{"on", it->second.on}, {"until", it->second.until.time_since_epoch().count()}};
+        }
+        rooms.push_back(std::move(room));
+    }
+    json problems = json::array();
+    for (const auto& p : active) {
+        problems.push_back({{"key", p.key}, {"severity", hb::severityName(p.severity)}, {"message", p.message}});
+    }
+    json prices = json::array();
+    for (const auto& s : env.controller->prices().slots) {
+        if (s.total) prices.push_back({s.start.time_since_epoch().count(), *s.total});
+    }
+    return json{{"now", now.time_since_epoch().count()},
+                {"tickSeconds", env.tick.count()},
+                {"timezone", env.cfg.timezone},
+                {"currency", env.cfg.currency},
+                {"rooms", rooms},
+                {"problems", problems},
+                {"prices", prices}};
+}
 }  // namespace
 
 int runDaemon(const Args& args) {
@@ -193,6 +243,11 @@ int runDaemon(const Args& args) {
         return any;
     };
 
+    hb::StatusBoard board;
+    hb::WebServer web(hb::parseWebConfig(env->cfg.raw), board, env->cfg.dataDir, env->controller->rooms(),
+                      hb::locateWebRoot(webRootCandidates()), [] { g_wake = true; });
+    if (hb::parseWebConfig(env->cfg.raw).enabled) web.start();
+
     std::set<std::string> seenKeys;
     while (!g_stop) {
         const Instant now = nowSeconds();
@@ -217,11 +272,13 @@ int runDaemon(const Args& args) {
         }
         seenKeys = keys;
         alerts.update(now, result.problems, deliver);
+        board.set(buildStatus(*env, result, alerts.activeProblems(), now));
 
         // Sleep until the next tick boundary, waking every second to honour Ctrl+C/SIGTERM.
         const auto tickLen = env->tick;
         const Instant next = Instant{(now.time_since_epoch() / tickLen + 1) * tickLen};
-        while (!g_stop && nowSeconds() < next) std::this_thread::sleep_for(seconds{1});
+        while (!g_stop && !g_wake && nowSeconds() < next) std::this_thread::sleep_for(milliseconds{250});
+        g_wake = false;
     }
     hb::log::info("heatbrain stopping");
     return 0;

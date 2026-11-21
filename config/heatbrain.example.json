@@ -163,6 +163,12 @@
     },
     "notifyOnStart": true
   },
+  "web": {
+    "_comment": "Web UI. No login: keep it on your home network.",
+    "enabled": true,
+    "bind": "0.0.0.0",
+    "port": 8080
+  },
   "_example_schedule_component": {
     "_comment": "For grid companies without an API: describe the tariff directly.",
     "type": "schedule",

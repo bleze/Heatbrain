@@ -1,0 +1,534 @@
+"use strict";
+
+// ---------------------------------------------------------------------------------------
+// Reason codes from the planner -> human label + heating category (colour).
+// Three categories only: the validated palette is safe for 3 colours in any adjacency.
+// ---------------------------------------------------------------------------------------
+const REASONS = {
+  BELOW_TARGET: ["Below target", "comfort"],
+  HOLD_ON: ["Heating to target", "comfort"],
+  BELOW_COMFORT_DURING_PEAK: ["Too cold to coast", "comfort"],
+  PREHEAT_BEFORE_PEAK: ["Pre-heating before peak", "price"],
+  CHEAP_BOOST: ["Cheap-price boost", "price"],
+  CHEAP_HOURS: ["Cheapest hours", "price"],
+  BELOW_MIN: ["Below minimum", "safety"],
+  FROST_PROTECTION: ["Frost protection", "safety"],
+  STALE_DATA_LIMP: ["No temperature: limp mode", "safety"],
+  MANUAL_ON: ["Manual on", "safety"],
+  NO_PRICES_FALLBACK: ["No prices: fallback", "safety"],
+  PEAK_AVOID: ["Avoiding peak price", null],
+  TARGET_REACHED: ["Target reached", null],
+  HOLD_OFF: ["Within target band", null],
+  ABOVE_MAX: ["Above maximum", null],
+  MANUAL_OFF: ["Manual off", null],
+  NOT_CHEAP_HOURS: ["Waiting for cheap hours", null],
+  AVOID_WINDOW: ["No-heat window", null],
+};
+const CATEGORIES = {
+  comfort: "Heating: comfort",
+  price: "Heating: price-driven",
+  safety: "Heating: safety / manual",
+};
+const reasonLabel = (code) => (REASONS[code] || [code])[0];
+const reasonCat = (code) => (REASONS[code] || [null, null])[1];
+const catColor = (cat) => `var(--cat-${cat})`;
+
+// ---------------------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------------------
+const state = { status: null, selected: null, hours: 24, history: null, tz: "Europe/Copenhagen" };
+const $ = (id) => document.getElementById(id);
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+
+// ---------------------------------------------------------------------------------------
+// Formatting (always in the house's time zone, not the browser's)
+// ---------------------------------------------------------------------------------------
+const fmtCache = {};
+function fmt(opts) {
+  const key = JSON.stringify(opts) + state.tz;
+  return (fmtCache[key] ||= new Intl.DateTimeFormat("en-GB", { timeZone: state.tz, ...opts }));
+}
+const hm = (ts) => fmt({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts * 1000);
+const dayHm = (ts) => fmt({ weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts * 1000);
+const dayShort = (ts) => fmt({ weekday: "short", day: "numeric" }).format(ts * 1000);
+const localHour = (ts) => Number(fmt({ hour: "2-digit", hourCycle: "h23" }).format(ts * 1000));
+const temp = (v) => (v == null ? "–" : `${v.toFixed(1)}°`);
+const price = (v) => (v == null ? "–" : v.toFixed(2));
+
+function el(tag, attrs = {}, parent, text) {
+  const svg = ["svg", "g", "path", "rect", "line", "text", "polyline"].includes(tag);
+  const node = svg ? document.createElementNS("http://www.w3.org/2000/svg", tag) : document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) node.setAttribute(k, v);
+  if (text != null) node.textContent = text; // untrusted strings: textContent only
+  if (parent) parent.appendChild(node);
+  return node;
+}
+
+// Binary search: index of the last element with a[i][0] <= t, or -1.
+function lastAtOrBefore(arr, t) {
+  let lo = 0, hi = arr.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid][0] <= t) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return ans;
+}
+
+// ---------------------------------------------------------------------------------------
+// Tooltip
+// ---------------------------------------------------------------------------------------
+const tooltip = $("tooltip");
+function showTooltip(evt, title, rows) {
+  tooltip.replaceChildren();
+  el("div", { class: "t-time" }, tooltip, title);
+  for (const r of rows) {
+    const row = el("div", { class: "t-row" }, tooltip);
+    const key = el("span", { class: "t-key" }, row);
+    const swatch = el("i", {}, key);
+    if (r.color) swatch.style.background = r.color;
+    if (r.box) { swatch.style.height = "8px"; swatch.style.width = "8px"; swatch.style.borderRadius = "2px"; }
+    key.appendChild(document.createTextNode(r.label));
+    el("b", {}, row, r.value);
+  }
+  tooltip.hidden = false;
+  const pad = 14, w = tooltip.offsetWidth, h = tooltip.offsetHeight;
+  let x = evt.clientX + pad, y = evt.clientY + pad;
+  if (x + w > window.innerWidth - 8) x = evt.clientX - w - pad;
+  if (y + h > window.innerHeight - 8) y = evt.clientY - h - pad;
+  tooltip.style.left = `${Math.max(8, x)}px`;
+  tooltip.style.top = `${Math.max(8, y)}px`;
+}
+const hideTooltip = () => { tooltip.hidden = true; };
+
+// ---------------------------------------------------------------------------------------
+// Time axis shared by the charts
+// ---------------------------------------------------------------------------------------
+function timeTicks(t0, t1, widthPx) {
+  const pxPerHour = widthPx / ((t1 - t0) / 3600);
+  const step = [1, 2, 3, 6, 12, 24].find((h) => h * pxPerHour >= 64) || 24; // labels ~64px apart
+  const ticks = [];
+  for (let t = Math.ceil(t0 / 3600) * 3600; t <= t1; t += 3600) {
+    const h = localHour(t);
+    if (h % step === 0) ticks.push({ t, label: h === 0 ? dayShort(t) : `${String(h).padStart(2, "0")}:00`, major: h === 0 });
+  }
+  return ticks;
+}
+
+function drawTimeAxis(g, x, ticks, top, bottom, labelY) {
+  for (const tk of ticks) {
+    el("line", { class: "grid", x1: x(tk.t), x2: x(tk.t), y1: top, y2: bottom, opacity: tk.major ? 1 : 0.6 }, g);
+    if (labelY != null) el("text", { x: x(tk.t), y: labelY, "text-anchor": "middle" }, g, tk.label);
+  }
+}
+
+function niceTicks(min, max, count) {
+  const span = max - min || 1;
+  const raw = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
+  // Ticks must enclose the data: the domain is [first tick, last tick].
+  const out = [];
+  const end = Math.ceil(max / step - 1e-9) * step;
+  for (let v = Math.floor(min / step + 1e-9) * step; v <= end + 1e-9; v += step) out.push(+v.toFixed(6));
+  return out;
+}
+
+// Step path for [t, value] series where each value holds until the next point.
+function stepPath(points, x, y, tEnd, maxGap) {
+  let d = "";
+  for (let i = 0; i < points.length; i++) {
+    const [t, v] = points[i];
+    if (v == null) continue;
+    const next = i + 1 < points.length ? points[i + 1][0] : tEnd;
+    const end = next - t > maxGap ? t + maxGap : next;
+    const prevOk = i > 0 && points[i - 1][1] != null && t - points[i - 1][0] <= maxGap;
+    d += `${prevOk ? "L" : "M"}${x(t).toFixed(1)},${y(v).toFixed(1)}H${x(end).toFixed(1)}`;
+  }
+  return d;
+}
+
+// ---------------------------------------------------------------------------------------
+// Price chart (single series: no legend, the title names it)
+// ---------------------------------------------------------------------------------------
+function renderPriceChart() {
+  const host = $("price-chart");
+  const s = state.status;
+  const pts = s.prices;
+  host.replaceChildren();
+  if (!pts.length) { $("price-summary").textContent = "no price data yet"; return; }
+
+  const now = s.now;
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0] + 900;
+  const W = host.clientWidth, H = 150, m = { l: 40, r: 8, t: 8, b: 22 };
+  const vals = pts.map((p) => p[1]);
+  const yTicks = niceTicks(Math.min(0, ...vals), Math.max(...vals), 3);
+  const yMin = yTicks[0], yMax = yTicks[yTicks.length - 1];
+  const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
+  const y = (v) => m.t + (1 - (v - yMin) / (yMax - yMin)) * (H - m.t - m.b);
+
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": "Electricity price per 15 minutes" }, host);
+  for (const v of yTicks) {
+    el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }, svg);
+    el("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }, svg, v.toFixed(1));
+  }
+  drawTimeAxis(svg, x, timeTicks(t0, t1, W - m.l - m.r), m.t, H - m.b, H - 6);
+  el("path", { class: "line", d: stepPath(pts, x, y, t1, 900) }, svg);
+  if (now >= t0 && now <= t1) el("line", { class: "now", x1: x(now), x2: x(now), y1: m.t, y2: H - m.b }, svg);
+
+  // Summary line
+  const today = pts.filter((p) => dayShort(p[0]) === dayShort(now));
+  const cur = pts[lastAtOrBefore(pts, now)];
+  const pieces = [];
+  if (cur) pieces.push(`now ${price(cur[1])} ${s.currency}/kWh`);
+  if (today.length) {
+    const lo = today.reduce((a, b) => (b[1] < a[1] ? b : a));
+    const hi = today.reduce((a, b) => (b[1] > a[1] ? b : a));
+    pieces.push(`today low ${price(lo[1])} at ${hm(lo[0])}`, `high ${price(hi[1])} at ${hm(hi[0])}`);
+  }
+  $("price-summary").textContent = pieces.join(" · ");
+
+  addCrosshair(svg, x, t0, t1, m.t, H - m.b, W, (t, evt) => {
+    const i = lastAtOrBefore(pts, t);
+    if (i < 0) return hideTooltip();
+    showTooltip(evt, `${dayHm(pts[i][0])}–${hm(pts[i][0] + 900)}`, [{ label: `${s.currency}/kWh`, value: price(pts[i][1]) }]);
+  });
+}
+
+function addCrosshair(svg, x, t0, t1, top, bottom, W, onMove) {
+  const cross = el("line", { class: "cross", y1: top, y2: bottom, visibility: "hidden" }, svg);
+  const hit = el("rect", { x: 0, y: 0, width: W, height: bottom + 4, fill: "transparent" }, svg);
+  const toT = (evt) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((evt.clientX - r.left) / r.width) * W;
+    return t0 + ((px - x(t0)) / (x(t1) - x(t0))) * (t1 - t0);
+  };
+  hit.addEventListener("pointermove", (evt) => {
+    const t = Math.min(t1, Math.max(t0, toT(evt)));
+    cross.setAttribute("x1", x(t)); cross.setAttribute("x2", x(t));
+    cross.setAttribute("visibility", "visible");
+    onMove(t, evt);
+  });
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTooltip(); });
+}
+
+// ---------------------------------------------------------------------------------------
+// Problems banner
+// ---------------------------------------------------------------------------------------
+function renderProblems() {
+  const host = $("problems");
+  const problems = state.status.problems || [];
+  host.hidden = problems.length === 0;
+  host.replaceChildren();
+  const order = { critical: 0, warning: 1, info: 2 };
+  for (const p of [...problems].sort((a, b) => order[a.severity] - order[b.severity])) {
+    const div = el("div", { class: `problem ${p.severity}` }, host);
+    const icon = p.severity === "critical" ? "⛔" : p.severity === "warning" ? "⚠️" : "ℹ️";
+    el("span", { class: "label" }, div, `${icon} ${p.severity === "critical" ? "Action needed" : p.severity === "warning" ? "Problem" : "Note"}`);
+    el("span", {}, div, p.message);
+  }
+}
+
+// ---------------------------------------------------------------------------------------
+// Room cards
+// ---------------------------------------------------------------------------------------
+function renderRooms() {
+  const host = $("rooms");
+  host.replaceChildren();
+  for (const r of state.status.rooms) {
+    const card = el("article", { class: `card room${state.selected === r.id ? " selected" : ""}`, tabindex: 0 }, host);
+    card.addEventListener("click", () => selectRoom(r.id));
+    card.addEventListener("keydown", (e) => { if (e.key === "Enter") selectRoom(r.id); });
+
+    const top = el("div", { class: "room-top" }, card);
+    el("div", { class: "room-name" }, top, r.name);
+    const chip = el("span", { class: "state" }, top);
+    const cat = r.on ? reasonCat(r.reason) : null;
+    if (cat) el("span", { class: "swatch", style: `background:${catColor(cat)}` }, chip);
+    chip.appendChild(document.createTextNode(r.on ? "Heating" : "Off"));
+
+    const inp = r.inputs || {};
+    // Price-only rooms have no temperature: the current price is what drives them.
+    const hero = el("div", { class: "hero" }, card, r.priceOnly ? price(inp.price) : temp(inp.temperature));
+    if (r.priceOnly) el("small", {}, hero, `${state.status.currency}/kWh · no sensor`);
+    else if (inp.target != null) el("small", {}, hero, `target ${temp(inp.target)}`);
+
+    const reason = el("div", { class: "reason" }, card);
+    if (cat) el("span", { class: "swatch", style: `background:${catColor(cat)}` }, reason);
+    reason.appendChild(document.createTextNode(reasonLabel(r.reason)));
+    el("div", { class: "detail" }, card, r.detail);
+
+    // Only when something outranks the override (e.g. above max); otherwise the reason says it.
+    if (r.override && !["MANUAL_ON", "MANUAL_OFF"].includes(r.reason)) {
+      el("div", { class: "override-note" }, card, `Manual ${r.override.on ? "ON" : "OFF"} until ${hm(r.override.until)}`);
+    }
+
+    const plugs = el("div", { class: "plugs" }, card);
+    for (const p of r.plugs || []) {
+      const text = p.mode === "live" ? `${p.id} · live${p.state != null ? (p.state ? " · on" : " · off") : ""}` : `${p.id} · dry-run`;
+      el("span", { class: `chip ${p.mode}${p.error ? " error" : ""}`, title: p.error || "" }, plugs, p.error ? `${p.id} · ${p.error}` : text);
+    }
+
+    const actions = el("div", { class: "actions" }, card);
+    const act = (label, fn) => {
+      const b = el("button", { type: "button" }, actions, label);
+      b.addEventListener("click", (e) => { e.stopPropagation(); fn(b); });
+    };
+    act("Heat 1 h", (b) => setOverride(r.id, true, 60, b));
+    act("Off 2 h", (b) => setOverride(r.id, false, 120, b));
+    if (r.override) act("Back to auto", (b) => clearOverride(r.id, b));
+  }
+}
+
+async function setOverride(id, on, minutes, button) {
+  button.disabled = true;
+  try {
+    await api(`/api/rooms/${encodeURIComponent(id)}/override`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on, minutes }),
+    });
+    setTimeout(refreshStatus, 1500);
+  } catch (e) { alertInline(e); } finally { button.disabled = false; }
+}
+
+async function clearOverride(id, button) {
+  button.disabled = true;
+  try {
+    await api(`/api/rooms/${encodeURIComponent(id)}/override`, { method: "DELETE" });
+    setTimeout(refreshStatus, 1500);
+  } catch (e) { alertInline(e); } finally { button.disabled = false; }
+}
+
+function alertInline(e) { $("updated").textContent = `error: ${e.message}`; }
+
+// ---------------------------------------------------------------------------------------
+// Room detail: temperature + heating strip + price, one shared time axis, no dual axes.
+// ---------------------------------------------------------------------------------------
+async function selectRoom(id, scroll = true) {
+  state.selected = id;
+  renderRooms();
+  $("detail").hidden = false;
+  await loadHistory();
+  if (scroll) $("detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function loadHistory() {
+  if (!state.selected) return;
+  $("room-chart").classList.add("loading"); // refetch keeps the frame
+  try {
+    state.history = await api(`/api/rooms/${encodeURIComponent(state.selected)}/history?hours=${state.hours}`);
+    renderDetail();
+  } catch (e) { alertInline(e); } finally { $("room-chart").classList.remove("loading"); }
+}
+
+function heatingSegments(decisions, tick, tEnd) {
+  const segs = [];
+  for (let i = 0; i < decisions.length; i++) {
+    const [t, on, reason] = decisions[i];
+    const next = i + 1 < decisions.length ? decisions[i + 1][0] : Math.min(tEnd, t + tick);
+    const end = next - t > 3 * tick ? t + tick : next; // controller was down: don't bridge
+    if (!on) continue;
+    const cat = reasonCat(reason) || "comfort";
+    const last = segs[segs.length - 1];
+    if (last && last.cat === cat && Math.abs(last.end - t) < 1) last.end = end;
+    else segs.push({ start: t, end, cat, reason });
+  }
+  return segs;
+}
+
+function renderLegend(room, segs) {
+  const host = $("legend");
+  host.replaceChildren();
+  if (!room.priceOnly) {
+    const a = el("span", {}, host); el("i", { class: "key-line" }, a); a.appendChild(document.createTextNode("Temperature"));
+    const b = el("span", {}, host); el("i", { class: "key-dash" }, b); b.appendChild(document.createTextNode("Target"));
+  }
+  for (const [cat, label] of Object.entries(CATEGORIES)) {
+    const s = el("span", {}, host);
+    el("i", { class: "swatch", style: `background:${catColor(cat)}` }, s);
+    s.appendChild(document.createTextNode(label));
+  }
+}
+
+function renderDetail() {
+  const h = state.history;
+  const room = h.room;
+  $("detail-title").textContent = room.name;
+  const tick = state.status?.tickSeconds || 300;
+  const host = $("room-chart");
+  host.replaceChildren();
+
+  // Show a third of the range ahead of now, as far as prices are known: you see what's coming.
+  const t0 = h.from;
+  const lastPrice = h.prices.length ? h.prices[h.prices.length - 1][0] + 900 : h.to;
+  const t1 = Math.max(h.to, Math.min(h.to + (h.to - h.from) / 3, lastPrice));
+  const temps = h.temperatures, decisions = h.decisions;
+  const prices = h.prices.filter((p) => p[0] >= t0 - 900 && p[0] <= t1);
+  const targets = decisions.map((d) => [d[0], d[3]]);
+  const segs = heatingSegments(decisions, tick, h.to);
+  renderLegend(room, segs);
+
+  const W = host.clientWidth, m = { l: 40, r: 8 };
+  const showTemp = !room.priceOnly;
+  const tempTop = 18, tempH = showTemp ? 190 : 0;
+  const stripTop = tempTop + tempH + (showTemp ? 34 : 0), stripH = 12;
+  const priceTop = stripTop + stripH + 30, priceH = 90;
+  const H = priceTop + priceH + 24;
+  const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": `${room.name}: temperature, heating and price` }, host);
+  const ticks = timeTicks(t0, t1, W - m.l - m.r);
+
+  // The future: a faint wash with a label, so planned prices aren't mistaken for history.
+  if (t1 > h.to + 60) {
+    el("rect", { x: x(h.to), y: tempTop, width: x(t1) - x(h.to), height: priceTop + priceH - tempTop, fill: "var(--grid)", opacity: 0.35 }, svg);
+    el("text", { x: x(h.to) + 6, y: tempTop + 12 }, svg, "ahead");
+  }
+
+  // Temperature panel
+  let yT = null;
+  if (showTemp) {
+    el("text", { class: "panel-label", x: m.l, y: 12 }, svg, "Temperature °C");
+    const vals = [...temps.map((p) => p[1]), ...targets.map((p) => p[1]).filter((v) => v != null)];
+    if (!vals.length) vals.push(room.minTemp, room.maxTemp);
+    const yTicks = niceTicks(Math.min(...vals) - 0.5, Math.max(...vals) + 0.5, 4);
+    const lo = yTicks[0], hi = yTicks[yTicks.length - 1];
+    yT = (v) => tempTop + (1 - (v - lo) / (hi - lo)) * tempH;
+    // Heating periods as a faint wash behind the line
+    for (const s of segs) {
+      el("rect", { x: x(s.start), y: tempTop, width: Math.max(1, x(s.end) - x(s.start)), height: tempH, fill: catColor(s.cat), "fill-opacity": 0.1 }, svg);
+    }
+    for (const v of yTicks) {
+      el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: yT(v), y2: yT(v) }, svg);
+      el("text", { x: m.l - 6, y: yT(v) + 4, "text-anchor": "end" }, svg, v.toFixed(v % 1 ? 1 : 0));
+    }
+    drawTimeAxis(svg, x, ticks, tempTop, tempTop + tempH, null);
+    el("path", { class: "target", d: stepPath(targets, x, yT, t1, 3 * tick) }, svg);
+    // Temperature line, broken where readings are missing for > 30 min
+    let d = "";
+    temps.forEach(([t, v], i) => {
+      const gap = i === 0 || t - temps[i - 1][0] > 1800;
+      d += `${gap ? "M" : "L"}${x(t).toFixed(1)},${yT(v).toFixed(1)}`;
+    });
+    el("path", { class: "line", d }, svg);
+    if (!temps.length) el("text", { class: "empty", x: W / 2, y: tempTop + tempH / 2, "text-anchor": "middle" }, svg, "No temperatures recorded yet");
+  }
+
+  // Heating strip: the exact on/off periods, coloured by why
+  el("text", { class: "panel-label", x: m.l, y: stripTop - 4 }, svg, "Heating");
+  el("rect", { x: m.l, y: stripTop, width: W - m.l - m.r, height: stripH, fill: "var(--grid)", rx: 3, opacity: 0.5 }, svg);
+  for (const s of segs) {
+    const x0 = x(s.start) + 1, w = Math.max(2, x(s.end) - x(s.start) - 2); // 2px surface gap between fills
+    el("rect", { x: x0, y: stripTop, width: w, height: stripH, rx: 3, fill: catColor(s.cat) }, svg);
+  }
+
+  // Price panel (its own y-scale: separate chart, shared x)
+  el("text", { class: "panel-label", x: m.l, y: priceTop - 8 }, svg, `Price ${state.status?.currency || ""}/kWh`);
+  if (prices.length) {
+    const pv = prices.map((p) => p[1]);
+    const pTicks = niceTicks(Math.min(0, ...pv), Math.max(...pv), 2);
+    const plo = pTicks[0], phi = pTicks[pTicks.length - 1];
+    const yP = (v) => priceTop + (1 - (v - plo) / (phi - plo)) * priceH;
+    for (const v of pTicks) {
+      el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: yP(v), y2: yP(v) }, svg);
+      el("text", { x: m.l - 6, y: yP(v) + 4, "text-anchor": "end" }, svg, v.toFixed(1));
+    }
+    drawTimeAxis(svg, x, ticks, priceTop, priceTop + priceH, H - 6);
+    el("path", { class: "line", d: stepPath(prices, x, yP, t1, 900), "stroke-width": 1.5 }, svg);
+  } else {
+    drawTimeAxis(svg, x, ticks, priceTop, priceTop + priceH, H - 6);
+  }
+  const nowT = state.status?.now;
+  if (nowT && nowT >= t0 && nowT <= t1) el("line", { class: "now", x1: x(nowT), x2: x(nowT), y1: tempTop, y2: priceTop + priceH }, svg);
+
+  // One crosshair, one tooltip listing every series at that time
+  addCrosshair(svg, x, t0, t1, tempTop, priceTop + priceH, W, (t, evt) => {
+    const rows = [];
+    if (showTemp) {
+      const i = lastAtOrBefore(temps, t);
+      const near = i >= 0 && t - temps[i][0] < 1800 ? temps[i][1] : null;
+      rows.push({ label: "Temperature", value: temp(near), color: "var(--ink)" });
+      const di = lastAtOrBefore(targets, t);
+      rows.push({ label: "Target", value: temp(di >= 0 ? targets[di][1] : null), color: "var(--muted)" });
+    }
+    const si = lastAtOrBefore(decisions, t);
+    if (si >= 0 && t - decisions[si][0] <= 3 * tick) {
+      const [, on, reason] = decisions[si];
+      const cat = on ? reasonCat(reason) || "comfort" : null;
+      rows.push({ label: on ? "Heating" : "Off", value: reasonLabel(reason), color: cat ? catColor(cat) : "var(--grid)", box: true });
+    }
+    const pi = lastAtOrBefore(prices, t);
+    if (pi >= 0 && t - prices[pi][0] < 900) rows.push({ label: `${state.status?.currency || ""}/kWh`, value: price(prices[pi][1]) });
+    showTooltip(evt, dayHm(t), rows);
+  });
+
+  renderEvents(h);
+}
+
+function renderEvents(h) {
+  const body = $("events");
+  body.replaceChildren();
+  const events = [...h.events].reverse();
+  if (!events.length) {
+    const tr = el("tr", {}, body);
+    el("td", { colspan: 7, class: "muted" }, tr, "No switch events in this period.");
+    return;
+  }
+  for (const e of events) {
+    const tr = el("tr", {}, body);
+    el("td", {}, tr, dayHm(e.ts));
+    const st = el("td", {}, tr);
+    const cat = e.on ? reasonCat(e.reason) || "comfort" : null;
+    if (cat) el("span", { class: "swatch", style: `background:${catColor(cat)};margin-right:6px` }, st);
+    st.appendChild(document.createTextNode(e.on ? "ON" : "OFF"));
+    el("td", {}, tr, reasonLabel(e.reason));
+    el("td", { class: "num" }, tr, temp(e.inputs?.temperature));
+    el("td", { class: "num" }, tr, temp(e.inputs?.target));
+    el("td", { class: "num" }, tr, price(e.inputs?.price));
+    const why = el("td", { class: "why" }, tr, e.detail);
+    for (const p of e.plugs || []) if (p.error) el("div", { style: "color:var(--critical)" }, why, `⚠️ ${p.id}: ${p.error}`);
+  }
+}
+
+// ---------------------------------------------------------------------------------------
+// Refresh loop
+// ---------------------------------------------------------------------------------------
+async function refreshStatus() {
+  try {
+    const s = await api("/api/status");
+    if (!s.rooms) { $("updated").textContent = "waiting for the first control step…"; return; }
+    state.status = s;
+    state.tz = s.timezone || state.tz;
+    $("updated").textContent = `updated ${hm(s.now)} · every ${Math.round(s.tickSeconds / 60)} min`;
+    renderProblems();
+    renderRooms();
+    renderPriceChart();
+    if (state.selected) {
+      if (!state.history) await loadHistory();
+    } else if (s.rooms.length) {
+      await selectRoom(s.rooms[0].id, false);
+    }
+  } catch (e) {
+    $("updated").textContent = `offline: ${e.message}`;
+  }
+}
+
+document.querySelectorAll(".range button").forEach((b) =>
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".range button").forEach((x) => x.classList.toggle("active", x === b));
+    state.hours = Number(b.dataset.hours);
+    loadHistory();
+  }));
+
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (state.status) renderPriceChart(); if (state.history) renderDetail(); }, 150);
+});
+
+refreshStatus();
+setInterval(refreshStatus, 30_000);
+setInterval(loadHistory, 60_000);
