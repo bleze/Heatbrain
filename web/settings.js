@@ -12,7 +12,7 @@
     ["notifications", "Notifications", "bell"],
     ["system", "System", "cpu"],
   ];
-  const S = { cfg: null, saved: "", errors: [], tab: "rooms", plugStatus: null, discovered: null, newIds: new Set(), jobs: {} };
+  const S = { cfg: null, saved: "", errors: [], tab: "rooms", plugStatus: null, discovered: null, newIds: new Set(), jobs: {}, confirming: new Set() };
   let jobTimer = null;
   const jobRunning = () => Object.values(S.jobs).some((j) => j.state === "running");
 
@@ -29,6 +29,10 @@
   async function startPlugJob(p, action) {
     try {
       await api(`/api/plugs/${encodeURIComponent(p.id)}/${action}`, { method: "POST" });
+      if (action !== "restart") {
+        S.jobs[p.id] = { kind: action, state: "running", log: [[Math.floor(Date.now() / 1000), "Starting…"]] };
+        toast(`${p.name || p.id}: ${action === "upgrade" ? "firmware upgrade" : "fail-safe test"} started - progress is shown under the plug`);
+      }
       if (action === "restart") { toast(`${p.name || p.id} is restarting`); setTimeout(() => { S.plugStatus = null; refreshPlugStatus(); }, 8000); return; }
       S.wasRunning = true;
       refreshJobs();
@@ -157,19 +161,30 @@
     b.addEventListener("click", (e) => { e.preventDefault(); onClick(b); });
     return b;
   }
-  // Two-step confirmation without browser dialogs.
-  function confirmBtn(parent, label, iconName, question, onYes, cls = "") {
+  // Two-step confirmation without browser dialogs. With a key, an open question survives
+  // re-renders (the plugs tab redraws when status or job progress arrives).
+  function confirmBtn(parent, label, iconName, question, onYes, cls = "", key = null) {
     const wrap = el("span", { class: "confirm" }, parent);
+    const ask = () => {
+      if (key) S.confirming.add(key);
+      wrap.replaceChildren();
+      wrap.classList.add("asking");
+      el("span", {}, wrap, question);
+      btn(wrap, "Yes", "check", async (b) => {
+        b.disabled = true;
+        b.lastChild.textContent = "Starting…";
+        if (key) S.confirming.delete(key);
+        await onYes();
+        show();
+      }, "primary");
+      btn(wrap, "Cancel", null, () => { if (key) S.confirming.delete(key); show(); });
+    };
     const show = () => {
       wrap.replaceChildren();
-      btn(wrap, label, iconName, () => {
-        wrap.replaceChildren();
-        el("span", {}, wrap, question);
-        btn(wrap, "Yes", "check", async (b) => { b.disabled = true; await onYes(); show(); }, "primary");
-        btn(wrap, "Cancel", null, show);
-      }, cls);
+      wrap.classList.remove("asking");
+      btn(wrap, label, iconName, ask, cls);
     };
-    show();
+    if (key && S.confirming.has(key)) ask(); else show();
     return wrap;
   }
   function slug(name, taken) {
@@ -492,7 +507,7 @@
     const actions = el("div", { class: "actions" }, c);
     const savedHasPlug = (JSON.parse(S.saved).plugs || []).some((x) => x.id === p.id);
     if (dirty() || !savedHasPlug) {
-      el("span", { class: "hint" }, actions, "Save first to provision or restore this plug.");
+      el("span", { class: "hint" }, actions, "Save or discard your changes first: device actions (fail-safe, test, upgrade) use the saved settings.");
     } else if (st?.reachable) {
       if (!st.failsafe?.installed) {
         confirmBtn(actions, "Install fail-safe", "shield",
@@ -507,17 +522,17 @@
       if (p.mode !== "live" && !busy) {
         confirmBtn(actions, "Test fail-safe", "check",
           "The radiator turns on for about 30 seconds to check the auto-off. Go ahead?",
-          () => startPlugJob(p, "test"));
+          () => startPlugJob(p, "test"), "", `${p.id}:test`);
         if (st.updateAvailable) {
           confirmBtn(actions, `Upgrade to ${st.latest.version.replace(/^v/, "")}`, "bolt",
             "Takes 2-5 minutes; the plug restarts and must not lose power meanwhile. The fail-safe is tested afterwards. Start?",
-            () => startPlugJob(p, "upgrade"), "warm");
+            () => startPlugJob(p, "upgrade"), "warm", `${p.id}:upgrade`);
         }
       } else if (p.mode === "live") {
         el("span", { class: "hint" }, actions, "Switch to dry-run and save to test or upgrade this plug.");
       }
       if (!busy) {
-        confirmBtn(actions, "Restart", "power", "Restart the plug now? The relay keeps its state.", () => startPlugJob(p, "restart"), "ghost");
+        confirmBtn(actions, "Restart", "power", "Restart the plug now? The relay keeps its state.", () => startPlugJob(p, "restart"), "ghost", `${p.id}:restart`);
       }
       confirmBtn(actions, "Restore original", "undo", "Put back the plug's settings from the last backup?",
         async () => {

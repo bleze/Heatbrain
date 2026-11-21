@@ -264,6 +264,7 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 .list { display: grid; gap: 12px; margin-top: 12px; }
 .item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .confirm { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.confirm.asking { flex-wrap: wrap; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 10px; padding: 6px 8px 6px 12px; font-weight: 500; }
 .errors { margin-top: 12px; }
 .errors li { color: var(--critical); }
 .savebar {

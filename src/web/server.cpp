@@ -491,6 +491,14 @@ void WebServer::routes() {
 
     if (!ctx_.webRoot.empty()) s.set_mount_point("/", ctx_.webRoot.string());
 
+    // Without explicit headers browsers cache the UI files heuristically and keep running an
+    // old app.js/settings.js after heatbrain is updated. Always revalidate.
+    s.set_post_routing_handler([](const httplib::Request& req, httplib::Response& res) {
+        if (!req.path.starts_with("/api/") && !res.has_header("Cache-Control")) {
+            res.set_header("Cache-Control", "no-cache");
+        }
+    });
+
     s.set_exception_handler([](const httplib::Request&, httplib::Response& res, std::exception_ptr ep) {
         try {
             std::rethrow_exception(ep);
