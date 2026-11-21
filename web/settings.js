@@ -325,7 +325,7 @@
       avoid.forEach((w, i) => {
         const r = el("div", { class: "sched-row" }, c);
         r.appendChild(time(w, "from")); el("span", {}, r, "–"); r.appendChild(time(w, "to", true));
-        btn(r, "", "trash", () => { avoid.splice(i, 1); changed(); render(); }, "ghost danger");
+        btn(r, "", "trash", () => { avoid.splice(i, 1); changed(); render(); }, "ghost danger row-delete");
       });
       btn(el("div", { style: "margin-top:8px" }, c), "Add window", "plus", () => { avoid.push({ from: "17:00", to: "21:00" }); changed(); render(); });
       return;
@@ -348,7 +348,7 @@
       const t = num(b, "target", { step: 0.5, onChange: () => drawTimeline(tl, room) });
       r.appendChild(t); el("span", { class: "muted" }, r, "°C");
       allDayNote(r, b);
-      btn(r, "", "trash", () => { sched.splice(i, 1); changed(); render(); }, "ghost danger");
+      btn(r, "", "trash", () => { sched.splice(i, 1); changed(); render(); }, "ghost danger row-delete");
     });
     btn(el("div", { style: "margin-top:8px" }, c), "Add period", "plus", () => {
       sched.push({ from: "06:00", to: "08:00", target: 20 }); changed(); render();
@@ -682,7 +682,7 @@
       if (comp.type === "energidataservice.spot") {
         field(cg, "Price area", sel(comp, "area", [["DK1", "DK1 (West)"], ["DK2", "DK2 (East)"]]), { hint: "West: Jutland, Funen · East: Zealand" });
       } else if (comp.type === "energidataservice.tariff") {
-        field(cg, "Grid company GLN", txt(comp, "gln", { placeholder: "5790000705689" }), { hint: "Radius: 5790000705689" });
+        field(cg, "Grid company GLN", txt(comp, "gln", { placeholder: "5790000705689" }), { hint: "13-digit company number" });
         const codes = el("input", { type: "text", value: [].concat(comp.codes || []).join(", ") });
         codes.addEventListener("input", () => { comp.codes = codes.value.split(",").map((x) => x.trim()).filter(Boolean); changed(); });
         field(cg, "Charge codes", codes, { hint: "comma separated" });
@@ -714,12 +714,15 @@
     const sc = el("section", { class: "card" }, body);
     sectionHead(sc, "Surcharges", "plus", "amber", "Percentages applied on top, in order (VAT).");
     const surcharges = arr(price, "surcharges");
+    // Same nested card as the price parts, so the delete icons line up.
+    const slist = el("div", { class: "list" }, sc);
     surcharges.forEach((s, i) => {
-      const r = el("div", { class: "sched-row" }, sc);
+      const box = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, slist);
+      const r = el("div", { class: "sched-row", style: "margin-top:0" }, box);
       r.appendChild(txt(s, "name", { placeholder: "Moms" }));
       r.appendChild(num(s, "percent", { step: 1 }));
       el("span", { class: "muted" }, r, "%");
-      btn(r, "", "trash", () => { surcharges.splice(i, 1); changed(); render(); }, "ghost danger");
+      btn(r, "", "trash", () => { surcharges.splice(i, 1); changed(); render(); }, "ghost danger row-delete");
     });
     btn(el("div", { style: "margin-top:8px" }, sc), "Add surcharge", "plus", () => { surcharges.push({ name: "Moms", percent: 25 }); changed(); render(); });
   }
