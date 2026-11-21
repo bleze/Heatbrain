@@ -1,0 +1,57 @@
+{
+  "body": {
+    "devices": [
+      {
+        "_id": "70:ee:50:00:00:01",
+        "station_name": "Home (Living room)",
+        "module_name": "Living room",
+        "type": "NAMain",
+        "reachable": true,
+        "dashboard_data": {
+          "time_utc": 1795287095,
+          "Temperature": 20.7,
+          "CO2": 725,
+          "Humidity": 55,
+          "Pressure": 1012.4
+        },
+        "modules": [
+          {
+            "_id": "02:00:00:00:00:02",
+            "type": "NAModule1",
+            "module_name": "Carport",
+            "reachable": true,
+            "battery_percent": 55,
+            "dashboard_data": { "time_utc": 1795287070, "Temperature": 1.4, "Humidity": 81 }
+          },
+          {
+            "_id": "03:00:00:00:00:03",
+            "type": "NAModule4",
+            "module_name": "Bedroom",
+            "reachable": true,
+            "battery_percent": 48,
+            "dashboard_data": { "time_utc": 1795287080, "Temperature": 18.9, "CO2": 704, "Humidity": 56 }
+          },
+          {
+            "_id": "03:00:00:00:00:04",
+            "type": "NAModule4",
+            "module_name": "Basement",
+            "reachable": false,
+            "battery_percent": 5,
+            "last_seen": 1795200000
+          },
+          {
+            "_id": "05:00:00:00:00:05",
+            "type": "NAModule3",
+            "module_name": "Rain gauge",
+            "reachable": true,
+            "dashboard_data": { "time_utc": 1795287080, "Rain": 0 }
+          }
+        ]
+      }
+    ],
+    "user": { "mail": "redacted@example.com" }
+  },
+  "status": "ok",
+  "time_exec": 0.05,
+  "time_server": 1795287100
+}

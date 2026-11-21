@@ -1,9 +1,7 @@
 {
   "_comment": "Copied to <data-dir>/heatbrain.json on first run. Edit that copy, not this file.",
-
   "timezone": "Europe/Copenhagen",
   "currency": "DKK",
-
   "price": {
     "_comment": "Additive components (per kWh, excl. VAT), then surcharges applied in order.",
     "components": [
@@ -16,14 +14,19 @@
         "type": "energidataservice.tariff",
         "name": "Nettarif (Radius C)",
         "gln": "5790000705689",
-        "codes": [ "DT_C_01" ]
+        "codes": [
+          "DT_C_01"
+        ]
       },
       {
         "type": "energidataservice.tariff",
         "name": "Energinet",
         "_comment": "40000 = Transmissions nettarif, 41000 = Systemtarif",
         "gln": "5790000432752",
-        "codes": [ "40000", "41000" ]
+        "codes": [
+          "40000",
+          "41000"
+        ]
       },
       {
         "type": "fixed",
@@ -39,10 +42,12 @@
       }
     ],
     "surcharges": [
-      { "name": "Moms", "percent": 25 }
+      {
+        "name": "Moms",
+        "percent": 25
+      }
     ]
   },
-
   "plugs": [
     {
       "_comment": "Find plugs with 'heatbrain discover 192.168.1.0/24'. mode: dryrun (never switched) or live.",
@@ -66,19 +71,51 @@
       "mode": "live"
     }
   ],
-
+  "temperatureSources": [
+    {
+      "_comment": "Create an app at https://dev.netatmo.com/apps, then use the app page's Token generator with scope read_station. refreshToken is only used once: heatbrain stores the rotating tokens in data/netatmo-tokens.json.",
+      "id": "netatmo",
+      "type": "netatmo",
+      "clientId": "",
+      "clientSecret": "",
+      "refreshToken": ""
+    }
+  ],
   "_example_schedule_component": {
     "_comment": "For grid companies without an API: describe the tariff directly.",
     "type": "schedule",
     "name": "Grid tariff",
     "seasons": [
       {
-        "months": [ 10, 11, 12, 1, 2, 3 ],
+        "months": [
+          10,
+          11,
+          12,
+          1,
+          2,
+          3
+        ],
         "bands": [
-          { "from": "00:00", "to": "06:00", "amount": 0.106 },
-          { "from": "06:00", "to": "17:00", "amount": 0.319 },
-          { "from": "17:00", "to": "21:00", "amount": 0.956 },
-          { "from": "21:00", "to": "24:00", "amount": 0.319 }
+          {
+            "from": "00:00",
+            "to": "06:00",
+            "amount": 0.106
+          },
+          {
+            "from": "06:00",
+            "to": "17:00",
+            "amount": 0.319
+          },
+          {
+            "from": "17:00",
+            "to": "21:00",
+            "amount": 0.956
+          },
+          {
+            "from": "21:00",
+            "to": "24:00",
+            "amount": 0.319
+          }
         ]
       }
     ]

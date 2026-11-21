@@ -12,8 +12,8 @@ It runs as a single C++ process with a web UI, in Docker on a NAS or locally whi
 |---|---|
 | 1. Price model (configurable providers) + `prices` command | done |
 | 2. Tasmota plugs + on-plug fail-safe (`discover`, `plugs`, `plug`) | done |
-| 3. Netatmo temperatures (OAuth) | next |
-| 4. Planner + scheduler loop | |
+| 3. Netatmo temperatures (OAuth, rotating tokens) + `temps` | done |
+| 4. Planner + scheduler loop + history (SQLite) | next |
 | 5. Web UI | |
 | 6. Docker image + GitHub Actions, deploy to Synology | |
 

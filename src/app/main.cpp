@@ -18,6 +18,7 @@
 #include "net/http.hpp"
 #include "plugs/plugs.hpp"
 #include "providers/price_model.hpp"
+#include "sensors/sensors.hpp"
 
 namespace fs = std::filesystem;
 using namespace std::chrono;
@@ -35,6 +36,7 @@ Usage:
   heatbrain plug <id> provision       Back up plug settings, install the fail-safe and
                                       disable the plug's own timers  [--force]
   heatbrain plug <id> restore         Put back the settings from the latest backup
+  heatbrain temps                     Current readings of all temperature sensors
   heatbrain help
 
 Options:
@@ -320,6 +322,54 @@ int runPlug(const Args& args) {
     return 0;
 }
 
+// --- Temperatures -----------------------------------------------------------------------
+
+template <class T>
+std::string fmtOpt(const std::optional<T>& v, const char* fmt) {
+    return v ? std::vformat(fmt, std::make_format_args(*v)) : "-";
+}
+
+int runTemps(const Args& args) {
+    const auto cfg = hb::loadConfig(resolveDataDir(args), exampleConfigCandidates());
+    hb::HttplibClient http;
+    const auto now = [] { return floor<seconds>(system_clock::now()); };
+    auto sources = hb::loadTemperatureSources(cfg.raw, http, cfg.dataDir, now);
+    if (sources.empty()) {
+        std::cout << "No temperatureSources configured in " << cfg.configFile.string() << "\n";
+        return 0;
+    }
+    int failures = 0;
+    for (auto& src : sources) {
+        std::cout << "Source '" << src->id() << "'\n";
+        try {
+            const auto readings = src->read();
+            std::size_t wName = 4, wStation = 7;
+            for (const auto& r : readings) {
+                wName = std::max(wName, r.name.size());
+                wStation = std::max(wStation, r.station.size());
+            }
+            const auto row = [&](const auto& id, const auto& name, const auto& kind, const auto& temp,
+                                 const auto& hum, const auto& co2, const auto& age, const auto& batt,
+                                 const auto& station) {
+                std::cout << std::format("  {:<18} {:<{}} {:<7} {:>6} {:>5} {:>6} {:>8} {:>7}  {}\n", id, name,
+                                         wName, kind, temp, hum, co2, age, batt, station);
+            };
+            row("Sensor id", "Name", "Kind", "Temp", "Hum%", "CO2", "Age", "Battery", "Station");
+            for (const auto& r : readings) {
+                std::string age = "-";
+                if (r.measuredAt) age = std::format("{} min", duration_cast<minutes>(now() - *r.measuredAt).count());
+                if (!r.reachable) age = "OFFLINE";
+                row(r.sensorId, r.name, r.kind, fmtOpt(r.temperature, "{:.1f}"), fmtOpt(r.humidity, "{:.0f}"),
+                    fmtOpt(r.co2, "{}"), age, fmtOpt(r.batteryPercent, "{}%"), r.station);
+            }
+        } catch (const std::exception& e) {
+            ++failures;
+            std::cout << "  ERROR: " << e.what() << "\n";
+        }
+    }
+    return failures ? 1 : 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -333,6 +383,7 @@ int main(int argc, char** argv) {
         if (args.command == "discover") return runDiscover(args);
         if (args.command == "plugs") return runPlugs(args);
         if (args.command == "plug") return runPlug(args);
+        if (args.command == "temps") return runTemps(args);
         if (args.command == "help") {
             std::cout << kUsage;
             return 0;

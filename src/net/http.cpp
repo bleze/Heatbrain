@@ -18,7 +18,17 @@ namespace hb {
 
 namespace fs = std::filesystem;
 
-HttpResponse HttplibClient::get(const std::string& url) {
+std::string formEncode(const std::vector<std::pair<std::string, std::string>>& fields) {
+    std::string out;
+    for (const auto& [k, v] : fields) {
+        if (!out.empty()) out += '&';
+        out += urlEncode(k) + "=" + urlEncode(v);
+    }
+    return out;
+}
+
+HttpResponse HttplibClient::send(const HttpRequest& req) {
+    const std::string& url = req.url;
     const auto schemeEnd = url.find("://");
     if (schemeEnd == std::string::npos) throw HttpError("Invalid URL: " + url);
     const auto pathStart = url.find('/', schemeEnd + 3);
@@ -35,9 +45,19 @@ HttpResponse HttplibClient::get(const std::string& url) {
     client.set_path_encode(false);
     client.set_default_headers({{"User-Agent", "heatbrain/0.1"}});
 
-    auto res = client.Get(path);
+    httplib::Headers headers;
+    for (const auto& [k, v] : req.headers) headers.emplace(k, v);
+
+    httplib::Result res;
+    if (req.method == "GET") {
+        res = client.Get(path, headers);
+    } else if (req.method == "POST") {
+        res = client.Post(path, headers, req.body, req.contentType);
+    } else {
+        throw HttpError("Unsupported HTTP method " + req.method);
+    }
     if (!res) {
-        throw HttpError(std::format("GET {} failed: {}", origin, httplib::to_string(res.error())));
+        throw HttpError(std::format("{} {} failed: {}", req.method, origin, httplib::to_string(res.error())));
     }
     HttpResponse out{res->status, res->body, std::nullopt};
     if (res->has_header("Retry-After")) {

@@ -38,6 +38,8 @@ add_library(heatbrain_io STATIC
   src/providers/price_model.cpp
   src/plugs/tasmota.cpp
   src/plugs/plugs.cpp
+  src/sensors/netatmo.cpp
+  src/sensors/sensors.cpp
   src/app/config.cpp
 )
 target_link_libraries(heatbrain_io PUBLIC
@@ -69,6 +71,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_failsafe.cpp
     tests/test_tasmota.cpp
     tests/test_http_client.cpp
+    tests/test_netatmo.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE

@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace hb {
 
@@ -21,13 +23,26 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+struct HttpRequest {
+    std::string method = "GET";  // GET or POST
+    std::string url;              // fully encoded
+    std::vector<std::pair<std::string, std::string>> headers;
+    std::string body;
+    std::string contentType;
+};
+
 // Minimal HTTP client interface so providers can be tested with fakes.
 class HttpClient {
 public:
     virtual ~HttpClient() = default;
     // Throws HttpError on transport failure. Non-2xx statuses are returned, not thrown.
-    virtual HttpResponse get(const std::string& url) = 0;
+    virtual HttpResponse send(const HttpRequest& req) = 0;
+
+    HttpResponse get(const std::string& url) { return send(HttpRequest{"GET", url, {}, {}, {}}); }
 };
+
+// application/x-www-form-urlencoded body from key/value pairs.
+std::string formEncode(const std::vector<std::pair<std::string, std::string>>& fields);
 
 // Real client (cpp-httplib + OpenSSL).
 // Stateless and thread-safe: each request uses its own connection.
@@ -37,7 +52,7 @@ public:
                            std::chrono::milliseconds readTimeout = std::chrono::seconds{30})
         : connectTimeout_(connectTimeout), readTimeout_(readTimeout) {}
 
-    HttpResponse get(const std::string& url) override;
+    HttpResponse send(const HttpRequest& req) override;
 
 private:
     std::chrono::milliseconds connectTimeout_;

@@ -6,6 +6,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "net/http.hpp"
 
@@ -39,14 +40,17 @@ private:
 
 class FakeHttp final : public HttpClient {
 public:
-    std::function<HttpResponse(const std::string&)> handler;
+    std::function<HttpResponse(const std::string&)> handler;           // by URL
+    std::function<HttpResponse(const HttpRequest&)> requestHandler;    // full request, wins if set
     int calls = 0;
     std::string lastUrl;
+    std::vector<HttpRequest> requests;
 
-    HttpResponse get(const std::string& url) override {
+    HttpResponse send(const HttpRequest& req) override {
         ++calls;
-        lastUrl = url;
-        return handler(url);
+        lastUrl = req.url;
+        requests.push_back(req);
+        return requestHandler ? requestHandler(req) : handler(req.url);
     }
 };
 
