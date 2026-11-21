@@ -45,6 +45,7 @@
     <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5zM8 3v5h7V3M8 21v-7h8v7"/></symbol>
     <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></symbol>
     <symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M14.8 9.2c-.4-1-1.5-1.7-2.8-1.7-1.6 0-2.9.9-2.9 2.1 0 2.9 5.9 1.6 5.9 4.6 0 1.2-1.3 2.1-3 2.1-1.4 0-2.5-.7-2.9-1.8M12 5.5v2M12 16.5v2"/></symbol>
+    <symbol id="i-plane" viewBox="0 0 24 24"><path d="M10.5 3.5c0-.8.7-1.5 1.5-1.5s1.5.7 1.5 1.5V9l8 4.5v2l-8-2.5v5l2.5 2v1.5L12 20.5 8 21.5V20l2.5-2v-5l-8 2.5v-2l8-4.5z"/></symbol>
     <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
   </svg>
 
@@ -58,11 +59,13 @@
       <a href="#settings" data-view="settings"><svg class="icon"><use href="#i-gear"/></svg>Settings</a>
     </nav>
     <div class="updated" id="updated">connecting…</div>
+    <button type="button" id="away-btn" class="away-btn" hidden><svg class="icon"><use href="#i-plane"/></svg>Away</button>
   </header>
 
   <main id="view-dashboard">
     <section id="config-error" class="problem critical" hidden></section>
     <section id="problems" class="problems" hidden></section>
+    <section id="away-bar" class="card away-bar" hidden></section>
 
     <section class="rooms" id="rooms"></section>
 

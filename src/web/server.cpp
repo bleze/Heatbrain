@@ -204,6 +204,28 @@ void WebServer::routes() {
         sendJson(res, json{{"room", id}, {"cleared", true}});
     });
 
+    // Away/holiday period: {"from": unix seconds (default now), "until": unix seconds, "keepAbove": 12}
+    s.Post("/api/away", [this](const httplib::Request& req, httplib::Response& res) {
+        const json body = parseBody(req);
+        const auto now = floor<seconds>(system_clock::now());
+        const Instant from{seconds{body.value("from", now.time_since_epoch().count())}};
+        const Instant until{seconds{body.value("until", 0LL)}};
+        const double keepAbove = body.value("keepAbove", 12.0);
+        if (until <= now || until > now + days{90}) return sendError(res, 400, "The end must be within the next 90 days");
+        if (from >= until) return sendError(res, 400, "The start must be before the end");
+        if (keepAbove < 5 || keepAbove > 20) return sendError(res, 400, "Keep above must be 5..20 °C");
+        AwayStore(ctx_.dataDir / "away.json").set(AwayMode{keepAbove, from, until});
+        log::info("Web: away {} - {} (keep above {:.1f} °C)", formatIsoUtc(from), formatIsoUtc(until), keepAbove);
+        if (ctx_.onOverride) ctx_.onOverride();
+        sendJson(res, json{{"from", epoch(from)}, {"until", epoch(until)}, {"keepAbove", keepAbove}});
+    });
+    s.Delete("/api/away", [this](const httplib::Request&, httplib::Response& res) {
+        AwayStore(ctx_.dataDir / "away.json").clear();
+        log::info("Web: away mode ended");
+        if (ctx_.onOverride) ctx_.onOverride();
+        sendJson(res, json{{"away", nullptr}});
+    });
+
     // Energy and cost per room and day, from the decision log, stored prices and each plug's
     // wattage. "saved" compares with paying each day's average price for the same energy.
     s.Get("/api/costs", [this](const httplib::Request& req, httplib::Response& res) {

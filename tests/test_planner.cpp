@@ -270,3 +270,42 @@ TEST_CASE("Keep above: a floor only, ignores price, no pre-heat or boost") {
     CHECK_FALSE(decide(input(at(12), 15.3, /*on=*/true), r).on);
     CHECK(decide(input(at(12), 15.0), r).inputs.mode == "keep");
 }
+
+TEST_CASE("Away mode: keep above the away level, overriding the program incl. off periods") {
+    RoomConfig r = bedroom();
+    r.program = {{0, ProgramMode::Heat, 20.0}, {17 * 60, ProgramMode::Off, 0}, {21 * 60, ProgramMode::Heat, 20.0}};
+    auto in = input(at(12), 15.0);  // would heat (target 20)
+    in.away = AwayMode{12.0, at(11), at(23)};
+    auto d = decide(in, r);
+    CHECK_FALSE(d.on);
+    CHECK(d.reason == Reason::KeepSatisfied);
+    CHECK(d.inputs.mode == "away");
+    CHECK_THAT(d.inputs.targetLabel, ContainsSubstring("away until"));
+
+    auto peak = input(at(18), 11.0);  // inside the program's off period: away keeps the house above 12
+    peak.away = in.away;
+    CHECK(decide(peak, r).reason == Reason::KeepAbove);
+
+    auto back = input(at(23, 30), 17.0);  // away ended: back to the program
+    back.away = in.away;
+    CHECK(decide(back, r).reason == Reason::BelowTarget);
+
+    RoomConfig shed;
+    shed.id = "shed";
+    shed.priceOnly = PriceOnlyConfig{24, {}};
+    auto s = input(at(3), std::nullopt);
+    s.away = AwayMode{12.0, at(1), at(23)};
+    CHECK(decide(s, shed).reason == Reason::AwayOff);
+}
+
+TEST_CASE("Away mode can be planned ahead: nothing changes before it starts") {
+    RoomConfig r = bedroom();
+    r.program = {{0, ProgramMode::Heat, 20.0}};
+    auto in = input(at(3), 18.0);
+    in.away = AwayMode{12.0, at(4), at(23)};  // e.g. set the evening before a 04:00 flight
+    CHECK(decide(in, r).on);  // 03:00: still at home, heating normally (cheap hours)
+    CHECK(decide(in, r).inputs.mode == "heat");
+    auto later = input(at(5), 18.0);
+    later.away = in.away;
+    CHECK(decide(later, r).reason == Reason::KeepSatisfied);  // 05:00: away
+}

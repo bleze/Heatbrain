@@ -48,6 +48,7 @@ public:
     const PriceTable& prices() const { return prices_; }
     const std::map<std::string, SensorReading>& readings() const { return readings_; }
     void setDataDir(std::filesystem::path dir) { dataDir_ = std::move(dir); }
+    void setAwayStore(const AwayStore* away) { away_ = away; }
 
 private:
     void refreshPrices(Instant now, TickResult& result);
@@ -63,6 +64,7 @@ private:
     std::vector<Plug>& plugs_;
     std::vector<RoomConfig> rooms_;
     const Overrides* overrides_;
+    const AwayStore* away_ = nullptr;
     History* history_;
 
     PriceTable prices_;

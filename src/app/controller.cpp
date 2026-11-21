@@ -194,6 +194,7 @@ TickResult Controller::tick(Instant now, bool apply) {
     readSensors(result);
 
     const auto overrides = overrides_ ? overrides_->load() : std::map<std::string, ManualOverride>{};
+    const auto away = away_ ? away_->load() : std::nullopt;
 
     for (const auto& room : rooms_) {
         const auto prev = lastOn_.find(room.id);
@@ -209,6 +210,7 @@ TickResult Controller::tick(Instant now, bool apply) {
                 std::format("Room '{}': sensor '{}' not found", room.name, room.sensor));
         }
         if (auto it = overrides.find(room.id); it != overrides.end()) in.override = it->second;
+        in.away = away;
 
         RoomResult rr;
         rr.room = &room;

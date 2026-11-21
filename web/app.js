@@ -23,6 +23,7 @@ const REASONS = {
   MANUAL_OFF: ["Manual off", null],
   NOT_CHEAP_HOURS: ["Waiting for cheap hours", null],
   AVOID_WINDOW: ["No-heat window", null],
+  AWAY_OFF: ["Away", null],
   SCHEDULED_OFF: ["Off by program", null],
   KEEP_ABOVE: ["Keeping above the floor", "comfort"],
   KEEP_SATISFIED: ["Above the floor", null],
@@ -272,6 +273,81 @@ function renderProblems() {
 }
 
 // ---------------------------------------------------------------------------------------
+// Away / holiday mode
+// ---------------------------------------------------------------------------------------
+let awayFormOpen = false;
+function renderAway() {
+  const bar = $("away-bar"), headerBtn = $("away-btn");
+  const away = state.status?.away;
+  headerBtn.hidden = !!away || !state.status?.rooms?.length;
+  bar.replaceChildren();
+  if (away) {
+    bar.hidden = false;
+    bar.appendChild(badge("plane", "violet"));
+    const t = el("div", { class: "grow" }, bar);
+    if (away.active) {
+      el("b", {}, t, `Away until ${dayHm(away.until)}`);
+      el("div", { class: "muted" }, t, `Every room keeps above ${temp(away.keepAbove)}C; programs resume afterwards.`);
+    } else {
+      el("b", {}, t, `Away planned: ${dayHm(away.from)} → ${dayHm(away.until)}`);
+      el("div", { class: "muted" }, t, `Starts by itself; every room will keep above ${temp(away.keepAbove)}C.`);
+    }
+    const end = el("button", { type: "button", class: away.active ? "primary" : "" }, bar);
+    end.appendChild(icon(away.active ? "home" : "trash"));
+    end.appendChild(document.createTextNode(away.active ? "I'm home - end now" : "Cancel plan"));
+    end.addEventListener("click", async () => {
+      end.disabled = true;
+      try {
+        await api("/api/away", { method: "DELETE" });
+        toast(away.active ? "Welcome home - programs are back" : "Away plan cancelled");
+        setTimeout(refreshStatus, 1200);
+      } catch (e) { toast(e.message, true); end.disabled = false; }
+    });
+    return;
+  }
+  bar.hidden = !awayFormOpen;
+  if (!awayFormOpen) return;
+  bar.appendChild(badge("plane", "violet"));
+  const t = el("div", { class: "grow" }, bar);
+  el("b", {}, t, "Going away?");
+  el("div", { class: "muted" }, t, "Plan it ahead: it starts and ends by itself. Every room only keeps above the temperature you choose.");
+  const local = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const fromLabel = el("label", { class: "field" }, bar);
+  el("span", {}, fromLabel, "From");
+  const from = el("input", { type: "datetime-local", "aria-label": "Away from" }, fromLabel);
+  const f = new Date(); f.setMinutes(0, 0, 0); f.setHours(f.getHours() + 1);
+  from.value = local(f);
+  const untilLabel = el("label", { class: "field" }, bar);
+  el("span", {}, untilLabel, "Until");
+  const until = el("input", { type: "datetime-local", "aria-label": "Away until" }, untilLabel);
+  const d = new Date(); d.setDate(d.getDate() + 2); d.setHours(18, 0, 0, 0);
+  until.value = local(d);
+  const keepLabel = el("label", { class: "field" }, bar);
+  el("span", {}, keepLabel, "Keep above");
+  const keepRow = el("span", { class: "row" }, keepLabel);
+  const keep = el("input", { type: "number", min: 5, max: 20, step: 0.5, value: 12, style: "width:70px", "aria-label": "Keep above" }, keepRow);
+  el("span", { class: "muted" }, keepRow, "°C");
+  const start = el("button", { type: "button", class: "primary" }, bar);
+  start.appendChild(icon("plane"));
+  start.appendChild(document.createTextNode("Save away period"));
+  start.addEventListener("click", async () => {
+    const fromTs = Math.floor(new Date(from.value).getTime() / 1000);
+    const untilTs = Math.floor(new Date(until.value).getTime() / 1000);
+    start.disabled = true;
+    try {
+      await api("/api/away", { method: "POST", headers: { "Content-Type": "application/json" },
+                               body: JSON.stringify({ from: fromTs, until: untilTs, keepAbove: Number(keep.value) }) });
+      awayFormOpen = false;
+      toast(fromTs * 1000 > Date.now() ? "Away mode planned" : "Away mode started");
+      setTimeout(refreshStatus, 1200);
+    } catch (e) { toast(e.message, true); start.disabled = false; }
+  });
+  const cancel = el("button", { type: "button", class: "ghost" }, bar, "Cancel");
+  cancel.addEventListener("click", () => { awayFormOpen = false; renderAway(); });
+}
+$("away-btn").addEventListener("click", () => { awayFormOpen = true; renderAway(); });
+
+// ---------------------------------------------------------------------------------------
 // Room cards
 // ---------------------------------------------------------------------------------------
 function renderRooms() {
@@ -306,6 +382,7 @@ function renderRooms() {
     // Price-only rooms have no temperature: the current price is what drives them.
     const hero = el("div", { class: "hero" }, card, r.priceOnly ? price(inp.price) : temp(inp.temperature));
     if (r.priceOnly) el("small", {}, hero, `${state.status.currency}/kWh · no sensor`);
+    else if (inp.mode === "away") el("small", {}, hero, `away · keep above ${temp(inp.target)}`);
     else if (inp.mode === "off") el("small", {}, hero, `off ${inp.targetLabel || ""}`.trim());
     else if (inp.mode === "keep") el("small", {}, hero, `keep above ${temp(inp.target)}`);
     else if (inp.target != null) el("small", {}, hero, `target ${temp(inp.target)}`);
@@ -570,6 +647,7 @@ async function refreshStatus() {
     state.tz = s.timezone || state.tz;
     $("updated").textContent = `updated ${hm(s.now)} · every ${Math.round(s.tickSeconds / 60)} min`;
     renderProblems();
+    renderAway();
     renderRooms();
     renderPriceChart();
     window.Costs?.load();

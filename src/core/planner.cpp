@@ -71,6 +71,7 @@ std::string_view reasonCode(Reason r) {
         case Reason::ScheduledOff: return "SCHEDULED_OFF";
         case Reason::KeepAbove: return "KEEP_ABOVE";
         case Reason::KeepSatisfied: return "KEEP_SATISFIED";
+        case Reason::AwayOff: return "AWAY_OFF";
         case Reason::NoPricesFallback: return "NO_PRICES_FALLBACK";
     }
     return "UNKNOWN";
@@ -117,6 +118,10 @@ Decision decidePriceOnly(const RoomConfig& room, const PlannerInput& in, const P
                          const TimeZone& tz, DecisionInputs inputs) {
     const auto& cfg = *room.priceOnly;
     const auto local = tz.toLocal(in.now);
+    if (in.away && in.away->activeAt(in.now)) {
+        inputs.mode = "away";
+        return make(false, Reason::AwayOff, "Away until " + formatLocalHm(tz.toLocal(in.away->until)) + ": off", inputs);
+    }
     for (const auto& s : prices.slots) {
         if (s.start == floorToSlot(in.now)) inputs.price = s.total;  // logged even when not used
     }
@@ -181,11 +186,19 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     inputs.priceCheapest = outlook.cheapest;
 
     const auto period = periodAt(room, minuteOfDay(tz.toLocal(in.now)));
-    const ProgramMode mode = period ? period->point.mode : ProgramMode::Off;
-    const double target = period ? period->point.target : room.minTemp;
-    if (mode != ProgramMode::Off) inputs.target = target;
+    ProgramMode mode = period ? period->point.mode : ProgramMode::Off;
+    double target = period ? period->point.target : room.minTemp;
     inputs.targetLabel = period ? period->label : "no program";
-    inputs.mode = std::string(modeName(mode));
+    // Away/holiday replaces the program (off periods too): only keep above the away level.
+    const bool away = in.away && in.away->activeAt(in.now);
+    if (away) {
+        mode = ProgramMode::Keep;
+        target = in.away->keepAbove;
+        inputs.targetLabel = "away until " + formatLocalDate(tz.toLocal(in.away->until)).substr(5) + " " +
+                             formatLocalHm(tz.toLocal(in.away->until));
+    }
+    if (mode != ProgramMode::Off) inputs.target = target;
+    inputs.mode = away ? "away" : std::string(modeName(mode));
 
     const bool fresh = in.temperature && in.measuredAt && in.now - *in.measuredAt <= s.staleAfter;
     const double t = in.temperature.value_or(0.0);

@@ -120,6 +120,11 @@ a { color: var(--accent); }
 .nav a:hover { background: var(--surface-2); }
 .nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .updated { margin-left: auto; color: var(--muted); font-size: 13px; }
+.away-btn { border-radius: 999px; }
+.away-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-color: var(--accent);
+  background: linear-gradient(90deg, var(--accent-soft), transparent 70%), var(--surface); }
+.away-bar .grow { flex: 1; min-width: 200px; }
+.away-bar input[type="datetime-local"] { width: 210px; }
 
 .card {
   background: var(--surface);

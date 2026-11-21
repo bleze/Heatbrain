@@ -32,6 +32,7 @@ enum class Reason {
     KeepAbove,              // "keep above" period: below the floor, heating
     KeepSatisfied,          // "keep above" period: above the floor, off
     NoPricesFallback,       // price-only room without prices: heat outside avoid windows
+    AwayOff,                // price-only room while away
 };
 
 std::string_view reasonCode(Reason r);  // "PREHEAT_BEFORE_PEAK", stable for storage/UI
@@ -53,12 +54,22 @@ struct ManualOverride {
     Instant until;
 };
 
+// Away/holiday, planned as a period: from `from` until `until` every temperature room only
+// keeps above `keepAbove`; price-only rooms stay off.
+struct AwayMode {
+    double keepAbove = 12.0;
+    Instant from;
+    Instant until;
+    bool activeAt(Instant t) const { return t >= from && t < until; }
+};
+
 struct PlannerInput {
     Instant now;
     std::optional<double> temperature;
     std::optional<Instant> measuredAt;
     bool currentlyOn = false;  // the planner's previous decision (hysteresis)
     std::optional<ManualOverride> override;
+    std::optional<AwayMode> away;  // whole-house away/holiday mode
 };
 
 // Everything a decision was based on, for the decision log.

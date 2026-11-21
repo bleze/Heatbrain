@@ -42,6 +42,7 @@ struct ControlEnv {
     std::vector<std::unique_ptr<hb::TemperatureSource>> sources;
     std::vector<hb::Plug> plugs;
     std::unique_ptr<hb::Overrides> overrides;
+    std::unique_ptr<hb::AwayStore> away;
     std::unique_ptr<hb::History> history;
     std::unique_ptr<hb::Controller> controller;
     seconds tick{300};
@@ -58,12 +59,14 @@ std::unique_ptr<ControlEnv> loadControlEnv(const Args& args) {
     e->plugs = hb::loadPlugs(e->cfg.raw, e->lan);
     auto rooms = hb::parseRooms(e->cfg.raw, e->plugs);
     e->overrides = std::make_unique<hb::Overrides>(e->cfg.dataDir / "overrides.json");
+    e->away = std::make_unique<hb::AwayStore>(e->cfg.dataDir / "away.json");
     e->history = std::make_unique<hb::History>(e->cfg.dataDir / "history.db");
     if (e->cfg.raw.contains("control")) e->tick = seconds{e->cfg.raw["control"].value("tickSeconds", 300)};
     if (e->tick < seconds{60}) throw std::runtime_error("control.tickSeconds must be at least 60");
     e->controller = std::make_unique<hb::Controller>(*e->tz, *e->prices, e->sources, e->plugs, std::move(rooms),
                                                      e->overrides.get(), e->history.get());
     e->controller->setDataDir(e->cfg.dataDir);
+    e->controller->setAwayStore(e->away.get());
     return e;
 }
 
@@ -193,7 +196,13 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
         if (r.measuredAt) j["ageMinutes"] = duration_cast<minutes>(now - *r.measuredAt).count();
         sensors.push_back(std::move(j));
     }
+    json away = nullptr;
+    if (const auto a = env.away->load()) {
+        away = {{"keepAbove", a->keepAbove}, {"from", a->from.time_since_epoch().count()},
+                {"until", a->until.time_since_epoch().count()}, {"active", a->activeAt(now)}};
+    }
     return json{{"now", now.time_since_epoch().count()},
+                {"away", away},
                 {"tickSeconds", env.tick.count()},
                 {"timezone", env.cfg.timezone},
                 {"currency", env.cfg.currency},

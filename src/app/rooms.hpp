@@ -27,6 +27,18 @@ nlohmann::json roomWithProgram(const nlohmann::json& room);
 // The whole config with every room in program form (what the settings UI edits).
 nlohmann::json withPrograms(nlohmann::json cfg);
 
+// Away/holiday mode, stored in <dataDir>/away.json (set from the web UI).
+class AwayStore {
+public:
+    explicit AwayStore(std::filesystem::path file) : file_(std::move(file)) {}
+    std::optional<AwayMode> load() const;  // planned or active; nullopt when not set or over
+    void set(const AwayMode& a) const;
+    void clear() const;
+
+private:
+    std::filesystem::path file_;
+};
+
 // Manual overrides, stored in <dataDir>/overrides.json so the CLI can set them while
 // `heatbrain run` is running (it re-reads the file every tick).
 class Overrides {

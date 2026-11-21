@@ -179,6 +179,34 @@ std::vector<RoomConfig> parseRooms(const json& cfg, const std::vector<Plug>& plu
 
 // ---------------------------------------------------------------------------------------
 
+std::optional<AwayMode> AwayStore::load() const {
+    if (!fs::exists(file_)) return std::nullopt;
+    try {
+        std::ifstream in(file_);
+        const json j = json::parse(in);
+        AwayMode a{j.at("keepAbove").get<double>(), Instant{seconds{j.value("from", 0LL)}},
+                   Instant{seconds{j.at("until").get<long long>()}}};
+        if (a.until <= floor<seconds>(system_clock::now())) return std::nullopt;
+        return a;
+    } catch (const std::exception&) {
+        return std::nullopt;  // a broken file must never stop heating control
+    }
+}
+
+void AwayStore::set(const AwayMode& a) const {
+    fs::path tmp = file_;
+    tmp += ".tmp";
+    std::ofstream(tmp) << json{{"keepAbove", a.keepAbove},
+                               {"from", a.from.time_since_epoch().count()},
+                               {"until", a.until.time_since_epoch().count()}}.dump(2);
+    fs::rename(tmp, file_);
+}
+
+void AwayStore::clear() const {
+    std::error_code ec;
+    fs::remove(file_, ec);
+}
+
 std::map<std::string, ManualOverride> Overrides::load() const {
     std::map<std::string, ManualOverride> out;
     if (!fs::exists(file_)) return out;
