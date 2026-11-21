@@ -292,6 +292,9 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 .joblog.running .joblog-title .icon { animation: spin 2s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .joblog ol { margin: 6px 0 0; padding-left: 20px; font-size: 13px; }
+.joblog .row { align-items: flex-start; }
+.joblog details.advanced { margin-top: 0; flex: 1; }
+.joblog details.advanced summary { font-size: 13px; }
 .joblog li { margin: 2px 0; }
 a.chip { text-decoration: none; }
 

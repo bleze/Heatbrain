@@ -455,6 +455,51 @@
     plugs.forEach((p, idx) => renderPlug(list, p, idx));
   }
 
+  // Job log: full while running; afterwards one summary line with the log behind "Show log".
+  // Successful jobs hide themselves after an hour; failed ones stay until dismissed.
+  const DISMISSED_KEY = "heatbrain-dismissed-jobs";
+  const dismissed = () => { try { return new Set(JSON.parse(localStorage.getItem(DISMISSED_KEY) || "[]")); } catch { return new Set(); } };
+  function dismissJob(id) {
+    const d = dismissed(); d.add(id);
+    try { localStorage.setItem(DISMISSED_KEY, JSON.stringify([...d].slice(-50))); } catch {}
+  }
+
+  function renderJob(parent, p) {
+    const job = S.jobs[p.id];
+    if (!job) return;
+    const jobId = `${p.id}:${job.started}`;
+    const what = job.kind === "upgrade" ? "Firmware upgrade" : "Fail-safe test";
+    const finishedAgo = job.finished ? Date.now() / 1000 - job.finished : 0;
+    if (job.state !== "running" && (dismissed().has(jobId) || (job.state === "done" && finishedAgo > 3600))) return;
+
+    const box = el("div", { class: `joblog ${job.state}` }, parent);
+    const title = el("div", { class: "joblog-title" }, box);
+    title.appendChild(icon(job.state === "running" ? "clock" : job.state === "done" ? "check" : "alert"));
+    const list = () => {
+      const ol = el("ol", {});
+      for (const [t, msg] of job.log) {
+        const li = el("li", {}, ol);
+        el("span", { class: "muted" }, li, `${hm(t)}  `);
+        li.appendChild(document.createTextNode(msg));
+      }
+      return ol;
+    };
+    if (job.state === "running") {
+      title.appendChild(document.createTextNode(`${what}: in progress…`));
+      box.appendChild(list());
+      return;
+    }
+    const last = job.log.length ? job.log[job.log.length - 1][1] : "";
+    title.appendChild(document.createTextNode(
+      job.state === "done" ? `${what} completed at ${hm(job.finished)}` : `${what} failed at ${hm(job.finished)}`));
+    if (job.state === "failed" && last) el("div", { class: "hint" }, box, last);
+    const row = el("div", { class: "row", style: "margin-top:4px" }, box);
+    const log = section(row, `job:${jobId}`);
+    el("summary", {}, log, "Show log");
+    log.appendChild(list());
+    btn(row, "Dismiss", null, () => { dismissJob(jobId); render(); }, "ghost");
+  }
+
   function renderPlug(list, p, idx) {
     const st = (S.plugStatus || []).find((x) => x.id === p.id);
     const c = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, list);
@@ -549,20 +594,7 @@
         }, "ghost");
     }
 
-    const job = S.jobs[p.id];
-    if (job) {
-      const box = el("div", { class: `joblog ${job.state}` }, c);
-      const title = el("div", { class: "joblog-title" }, box);
-      title.appendChild(icon(job.state === "running" ? "clock" : job.state === "done" ? "check" : "alert"));
-      title.appendChild(document.createTextNode(
-        `${job.kind === "upgrade" ? "Firmware upgrade" : "Fail-safe test"}: ${job.state === "running" ? "in progress…" : job.state === "done" ? "completed" : "failed"}`));
-      const ol = el("ol", {}, box);
-      for (const [t, msg] of job.log) {
-        const li = el("li", {}, ol);
-        el("span", { class: "muted" }, li, `${hm(t)}  `);
-        li.appendChild(document.createTextNode(msg));
-      }
-    }
+    renderJob(c, p);
 
     const adv = section(c, `plug:${p.id}`);
     el("summary", {}, adv, "Advanced: fail-safe timing and password");
