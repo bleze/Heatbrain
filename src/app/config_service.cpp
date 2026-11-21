@@ -68,7 +68,10 @@ json maskSecrets(const json& cfg) {
         for (auto& p : out["plugs"]) maskField(p, "password");
     }
     if (out.contains("notifications") && out["notifications"].contains("channels")) {
-        for (auto& c : out["notifications"]["channels"]) maskField(c, "webhookUrl");
+        for (auto& c : out["notifications"]["channels"]) {
+            maskField(c, "webhookUrl");
+            maskField(c, "token");
+        }
     }
     return out;
 }
@@ -95,6 +98,7 @@ json unmaskSecrets(json incoming, const json& stored) {
         for (std::size_t i = 0; i < channels.size(); ++i) {
             const json* old = storedChannels && i < storedChannels->size() ? &(*storedChannels)[i] : nullptr;
             restoreField(channels[i], old, "webhookUrl");
+            restoreField(channels[i], old, "token");
         }
     }
     return incoming;

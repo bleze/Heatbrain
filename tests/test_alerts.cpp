@@ -125,3 +125,26 @@ TEST_CASE("Discord payload") {
     http.requestHandler = [](const HttpRequest&) { return HttpResponse{429, R"({"retry_after":1.5})"}; };
     CHECK_THROWS_AS(d.send(a), HttpError);
 }
+
+TEST_CASE("ntfy payload and publishing") {
+    const Alert crit{Alert::Kind::Raised, "source:netatmo:auth", Severity::Critical, "Netatmo needs a new token", at(12)};
+    const auto j = ntfyPayload(crit, "heatbrain-abc123xyz");
+    CHECK(j["topic"] == "heatbrain-abc123xyz");
+    CHECK(j["priority"] == 5);  // breaks through Focus on the phone
+    CHECK(j["message"] == "Netatmo needs a new token");
+    const Alert done{Alert::Kind::Resolved, "plug:x:unreachable", Severity::Warning, "Plug x is unreachable", at(12)};
+    CHECK(ntfyPayload(done, "t")["priority"] == 2);
+
+    test::FakeHttp http;
+    http.requestHandler = [](const HttpRequest& req) {
+        CHECK(req.method == "POST");
+        CHECK(req.url == "https://ntfy.sh/");
+        CHECK(req.contentType == "application/json");
+        return HttpResponse{200, "{}"};
+    };
+    NtfyNotifier n(http, "https://ntfy.sh/", "heatbrain-abc123xyz", "");
+    n.send(crit);
+    CHECK(http.calls == 1);
+    CHECK_THROWS(NtfyNotifier(http, "https://ntfy.sh", "short", ""));
+    CHECK_THROWS(NtfyNotifier(http, "ftp://x", "heatbrain-abc123xyz", ""));
+}

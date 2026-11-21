@@ -813,27 +813,80 @@
   function renderNotifications(body) {
     const n = (S.cfg.notifications ||= { channels: [] });
     const channels = arr(n, "channels");
+    const testButton = (parent) => {
+      if (dirty()) { el("span", { class: "hint" }, parent, "Save first, then send a test message."); return; }
+      btn(parent, "Send test message", "send", async (b) => {
+        b.disabled = true;
+        try {
+          const r = await api("/api/notify/test", { method: "POST" });
+          const bad = r.filter((x) => !x.ok);
+          bad.length ? toast(bad.map((x) => `${x.channel}: ${x.error}`).join("; "), true)
+                     : toast(`Test message sent (${r.map((x) => x.channel).join(", ")})`);
+        } catch (e) { toast(e.message, true); }
+        b.disabled = false;
+      }, "primary");
+    };
+
+    // --- Phone notifications via ntfy (recommended: no account, no server) ---
+    const phone = el("section", { class: "card" }, body);
+    sectionHead(phone, "Phone notifications", "bell", "violet",
+      "Free push notifications with the ntfy app (iPhone and Android). No account needed.");
+    const ntfy = channels.find((c) => c.type === "ntfy");
+    const randomTopic = () => {
+      const bytes = crypto.getRandomValues(new Uint8Array(12));
+      return "heatbrain-" + [...bytes].map((x) => "abcdefghijkmnpqrstuvwxyz23456789"[x % 32]).join("");
+    };
+    if (!ntfy) {
+      btn(el("div", { style: "margin-top:12px" }, phone), "Set up phone notifications", "plus", () => {
+        channels.unshift({ type: "ntfy", server: "https://ntfy.sh", topic: randomTopic() });
+        changed(); render();
+      }, "primary");
+    } else {
+      const ol = el("ol", { class: "steps" }, phone);
+      const li1 = el("li", {}, ol, "Install the ");
+      el("a", { href: "https://docs.ntfy.sh/subscribe/phone/", target: "_blank", rel: "noopener" }, li1, "ntfy app");
+      li1.appendChild(document.createTextNode(" from the App Store or Google Play."));
+      el("li", {}, ol, "In the app, tap + and subscribe to this topic (it works like a password - keep it private):");
+      const row = el("div", { class: "row", style: "margin:6px 0 0 0" }, phone);
+      const topic = txt(ntfy, "topic");
+      topic.style.width = "300px";
+      topic.style.fontFamily = "ui-monospace, Consolas, monospace";
+      row.appendChild(topic);
+      btn(row, "Copy", "check", async () => {
+        try { await navigator.clipboard.writeText(ntfy.topic); toast("Topic copied"); }
+        catch { topic.select(); }
+      });
+      btn(row, "New topic", "undo", () => { ntfy.topic = randomTopic(); changed(); render(); }, "ghost");
+      const server = (ntfy.server || "https://ntfy.sh").replace(/\/+$/, "");
+      const hint = el("div", { class: "hint" }, phone, "On your phone you can also just open ");
+      el("a", { href: `${server}/${encodeURIComponent(ntfy.topic)}`, target: "_blank", rel: "noopener" }, hint, `${server.replace(/^https?:\/\//, "")}/${ntfy.topic}`);
+      hint.appendChild(document.createTextNode(" - it opens the subscription in the app."));
+      const ol2 = el("ol", { class: "steps", start: 3 }, phone);
+      el("li", {}, ol2, "Save & apply, then send a test message.");
+      testButton(el("div", { class: "actions" }, phone));
+      const adv = section(phone, "ntfy-advanced");
+      el("summary", {}, adv, "Advanced: own ntfy server");
+      const ag = el("div", { class: "form-grid" }, adv);
+      field(ag, "Server", txt(ntfy, "server", { placeholder: "https://ntfy.sh" }), { hint: "e.g. ntfy running on your NAS" });
+      field(ag, "Access token", secret(ntfy, "token", "none"), { hint: "only for protected servers" });
+      const rm = el("div", { class: "actions" }, adv);
+      confirmBtn(rm, "Turn off phone notifications", "trash", "Remove the ntfy channel?", () => {
+        channels.splice(channels.indexOf(ntfy), 1); changed(); render();
+      }, "ghost danger");
+    }
+
+    // --- Discord (optional: needs your own server/channel) ---
     let discord = channels.find((c) => c.type === "discord");
     const isNew = !discord;
     const card = el("section", { class: "card" }, body);
-    sectionHead(card, "Discord", "send", "violet",
-      "In Discord: Edit Channel → Integrations → Webhooks → New Webhook → Copy Webhook URL.");
+    sectionHead(card, "Discord (optional)", "send", "gray",
+      "Posts to a channel on a Discord server you own: Edit Channel → Integrations → Webhooks → New Webhook → Copy Webhook URL.");
     if (isNew) discord = { type: "discord", webhookUrl: "" };  // joins the config once something is typed
     const g = el("div", { class: "form-grid" }, card);
     const url = secret(discord, "webhookUrl", "https://discord.com/api/webhooks/…");
     url.addEventListener("input", () => { if (!channels.includes(discord)) { channels.push(discord); changed(); } });
     field(g, "Webhook URL", url, { wide: true });
-    const actions = el("div", { class: "actions" }, card);
-    if (dirty()) el("span", { class: "hint" }, actions, "Save first, then send a test message.");
-    else btn(actions, "Send test message", "send", async (b) => {
-      b.disabled = true;
-      try {
-        const r = await api("/api/notify/test", { method: "POST" });
-        const bad = r.filter((x) => !x.ok);
-        bad.length ? toast(bad.map((x) => `${x.channel}: ${x.error}`).join("; "), true) : toast("Test message sent");
-      } catch (e) { toast(e.message, true); }
-      b.disabled = false;
-    }, "primary");
+    if (!ntfy) testButton(el("div", { class: "actions" }, card));
 
     const rules = el("section", { class: "card" }, body);
     sectionHead(rules, "When to notify", "bell", "amber",

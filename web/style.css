@@ -294,6 +294,8 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
   border-radius: 10px; padding: 10px 14px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
 }
 .toast.error { border-left-color: var(--critical); }
+.steps { margin: 12px 0 0; padding-left: 20px; color: var(--ink-2); }
+.steps li { margin: 4px 0; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }
