@@ -617,7 +617,8 @@ function renderDetail() {
   // The future: a faint wash with a label, so planned prices aren't mistaken for history.
   if (t1 > h.to + 60) {
     el("rect", { x: x(h.to), y: tempTop, width: x(t1) - x(h.to), height: priceTop + priceH - tempTop, fill: "var(--grid)", opacity: 0.35 }, svg);
-    el("text", { x: x(h.to) + 6, y: tempTop + 12 }, svg, "ahead");
+    // Centred in the shaded area, above the plot: the hours ahead show the plan and known prices.
+    if (x(t1) - x(h.to) > 90) el("text", { class: "future-label", x: (x(h.to) + x(t1)) / 2, y: tempTop - 5, "text-anchor": "middle" }, svg, "planned");
   }
 
   // Temperature panel
@@ -685,7 +686,10 @@ function renderDetail() {
     drawTimeAxis(svg, x, ticks, priceTop, priceTop + priceH, H - 6);
   }
   const nowT = state.status?.now;
-  if (nowT && nowT >= t0 && nowT <= t1) el("line", { class: "now", x1: x(nowT), x2: x(nowT), y1: tempTop, y2: priceTop + priceH }, svg);
+  if (nowT && nowT >= t0 && nowT <= t1) {
+    el("line", { class: "now", x1: x(nowT), x2: x(nowT), y1: tempTop, y2: priceTop + priceH }, svg);
+    el("text", { class: "now-label", x: x(nowT), y: tempTop - 5, "text-anchor": "middle" }, svg, "now");
+  }
 
   // One crosshair, one tooltip listing every series at that time
   addCrosshair(svg, x, t0, t1, tempTop, priceTop + priceH, W, (t, evt) => {

@@ -391,6 +391,7 @@ a.chip { text-decoration: none; }
 .chart .target { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .chart .now { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 3; }
 .chart .now-label { fill: var(--accent); font-weight: 600; }
+.chart .future-label { fill: var(--muted); font-style: italic; }
 .chart .cross { stroke: var(--ink-2); stroke-width: 1; }
 .chart .panel-label { fill: var(--ink-2); font-size: 12px; font-weight: 600; }
 .chart .empty { fill: var(--muted); font-size: 13px; }
