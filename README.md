@@ -13,8 +13,8 @@ It runs as a single C++ process with a web UI, in Docker on a NAS or locally whi
 | 1. Price model (configurable providers) + `prices` command | done |
 | 2. Tasmota plugs + on-plug fail-safe (`discover`, `plugs`, `plug`) | done |
 | 3. Netatmo temperatures (OAuth, rotating tokens) + `temps` | done |
-| 4. Planner + scheduler loop + history (SQLite) | next |
-| 5. Web UI | |
+| 4. Planner + scheduler loop + history (`plan`, `run`, `history`, `override`) | done |
+| 5. Notifications (Discord) + web UI | next |
 | 6. Docker image + GitHub Actions, deploy to Synology | |
 
 ## Architecture
@@ -75,27 +75,50 @@ heatbrain plug bedroom restore      # put back the latest backup (data/plugs/<id
 Plugs default to `"mode": "dryrun"`: the planner will only switch plugs set to `"live"`.
 Only provision a plug once heatbrain runs continuously; otherwise it enters limp mode.
 
-## Decision log and room history (milestones 3-5)
+## Rooms and the planner
 
-Every planner tick records one decision per room, stored in SQLite (`/data`, with retention):
+Each room has plugs, a sensor (`"netatmo:Bedroom"`, by module name or id), `minTemp`,
+`maxTemp` and a schedule of target temperatures. Rooms without a sensor use `priceOnly`
+(run the N cheapest hours per day, with no-heat windows). Every tick (default 5 min) the
+planner decides each room, checking in this order:
 
-- `action` (ON/OFF) and whether the plug actually changed state
-- `reason`: a fixed code (`BELOW_MIN`, `ABOVE_MAX`, `PREHEAT_CHEAP`, `PEAK_AVOID`,
-  `TARGET_REACHED`, `MANUAL_OVERRIDE`, `STALE_DATA_LIMP`, `PLUG_UNREACHABLE`, ...)
-- `detail`: a plain-language explanation of which criteria were met
-- `inputs`: a snapshot of what the decision was based on (temperature and its age,
-  target/min/max, price and its rank, active profile)
+| # | Rule | Reason code |
+|---|---|---|
+| 1 | At/above `maxTemp`: OFF, even with manual ON | `ABOVE_MAX` |
+| 2 | Manual override (OFF still heats below `frostTemp`) | `MANUAL_ON`, `MANUAL_OFF`, `FROST_PROTECTION` |
+| 3 | Temperature missing or older than 30 min: 10 min ON / 50 min OFF | `STALE_DATA_LIMP` |
+| 4 | Below `minTemp`: ON whatever the price | `BELOW_MIN` |
+| 5 | Expensive slot: coast down to target − 1.0 °C | `PEAK_AVOID`, `BELOW_COMFORT_DURING_PEAK` |
+| 6 | Expensive slot within 3 h and clearly cheaper now: heat to target + 1.0 °C | `PREHEAT_BEFORE_PEAK` |
+| 7 | Among the cheapest slots: heat to target + 0.5 °C | `CHEAP_BOOST` |
+| 8 | Thermostat with ±0.3 °C hysteresis | `BELOW_TARGET`, `TARGET_REACHED`, `HOLD_ON`, `HOLD_OFF` |
 
-Temperatures are logged on every poll, independent of switching.
+"Expensive" = top quarter of the next 24 h *and* 15% above the median; "cheapest" = bottom
+quarter *and* 10% below the median, so flat-price days fall back to a plain thermostat.
+All margins are configurable per room (`strategy`).
 
-The web UI shows per room: temperature over time with the target band, ON periods as bars
-coloured by reason, and price as a secondary series, plus a filterable event log. Clicking
-an ON period shows the decision that started it.
+### Decision log
+
+Every tick stores one decision per room in SQLite (`data/history.db`, 90 days): ON/OFF,
+whether it changed, reason code, plain-language detail, a snapshot of the inputs
+(temperature and age, target, price, median) and what happened at each plug. Temperatures
+and prices are stored too, for the web UI's graphs.
+
+```powershell
+heatbrain plan                       # what every room would do now, and why
+heatbrain run                        # the control loop
+heatbrain history bedroom            # switch events of the last 24 h  [--hours 72] [--all]
+heatbrain override bedroom on 60     # manual ON for 60 min (picked up by a running 'run')
+heatbrain override bedroom clear
+```
+
+The web UI will show per room: temperature over time with the target band, ON periods as
+bars coloured by reason, and price as a secondary series, plus a filterable event log.
 
 ## Notifications
 
-Pluggable notifiers selected in config: `ntfy` (preferred; can be self-hosted on the NAS),
-`telegram`, `pushover`, `webhook`.
+Pluggable notifiers selected in config: `discord` (webhook; first implementation), later
+`ntfy`, `telegram`, `pushover`, generic `webhook`.
 
 Alerts: plug unreachable, plug state differs from commanded state, Netatmo re-login
 required, Netatmo module offline / low battery, stale temperature (room in limp mode),

@@ -81,6 +81,73 @@
       "refreshToken": ""
     }
   ],
+  "control": {
+    "_comment": "tickSeconds must be at most half of each live plug's failsafe pulse.",
+    "tickSeconds": 300
+  },
+  "rooms": [
+    {
+      "id": "bedroom",
+      "name": "Bedroom",
+      "plugs": [
+        "bedroom"
+      ],
+      "sensor": "netatmo:Bedroom",
+      "minTemp": 16,
+      "maxTemp": 22,
+      "schedule": [
+        {
+          "from": "07:00",
+          "to": "21:00",
+          "target": 19
+        },
+        {
+          "from": "21:00",
+          "to": "23:00",
+          "target": 20
+        },
+        {
+          "from": "23:00",
+          "to": "07:00",
+          "target": 16
+        }
+      ]
+    },
+    {
+      "id": "basement",
+      "name": "Basement",
+      "plugs": [
+        "basement"
+      ],
+      "sensor": "netatmo:Basement",
+      "minTemp": 15,
+      "maxTemp": 22,
+      "schedule": [
+        {
+          "from": "00:00",
+          "to": "24:00",
+          "target": 19
+        }
+      ]
+    },
+    {
+      "id": "shed",
+      "name": "Shed",
+      "plugs": [
+        "shed"
+      ],
+      "_comment": "No temperature sensor: run the cheapest hours of each day, never 17-21.",
+      "priceOnly": {
+        "hoursPerDay": 12,
+        "avoid": [
+          {
+            "from": "17:00",
+            "to": "21:00"
+          }
+        ]
+      }
+    }
+  ],
   "_example_schedule_component": {
     "_comment": "For grid companies without an API: describe the tariff directly.",
     "type": "schedule",
@@ -119,5 +186,16 @@
         ]
       }
     ]
+  },
+  "_example_room_strategy": {
+    "_comment": "Optional per-room 'strategy' (defaults shown).",
+    "hysteresis": 0.3,
+    "peakAllowedDrop": 1.0,
+    "preheatBoost": 1.0,
+    "preheatMinutes": 180,
+    "cheapBoost": 0.5,
+    "staleMinutes": 30,
+    "limpOnMinutes": 10,
+    "limpOffMinutes": 50
   }
 }

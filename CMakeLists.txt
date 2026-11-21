@@ -19,6 +19,7 @@ endif()
 find_package(httplib CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
 
 # --- Pure logic: no IO, no network. Everything here is unit-testable. ---
 add_library(heatbrain_core STATIC
@@ -27,6 +28,7 @@ add_library(heatbrain_core STATIC
   src/core/schedule.cpp
   src/core/price.cpp
   src/core/failsafe.cpp
+  src/core/planner.cpp
 )
 target_include_directories(heatbrain_core PUBLIC src)
 
@@ -40,17 +42,21 @@ add_library(heatbrain_io STATIC
   src/plugs/plugs.cpp
   src/sensors/netatmo.cpp
   src/sensors/sensors.cpp
+  src/storage/history.cpp
   src/app/config.cpp
+  src/app/rooms.cpp
+  src/app/controller.cpp
 )
 target_link_libraries(heatbrain_io PUBLIC
   heatbrain_core
   httplib::httplib
   nlohmann_json::nlohmann_json
   OpenSSL::SSL OpenSSL::Crypto
+  unofficial::sqlite3::sqlite3
 )
 target_compile_definitions(heatbrain_io PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
 
-add_executable(heatbrain src/app/main.cpp)
+add_executable(heatbrain src/app/main.cpp src/app/control.cpp)
 target_link_libraries(heatbrain PRIVATE heatbrain_io)
 if(HEATBRAIN_DEV_DEFAULTS)
   target_compile_definitions(heatbrain PRIVATE HEATBRAIN_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -72,6 +78,8 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_tasmota.cpp
     tests/test_http_client.cpp
     tests/test_netatmo.cpp
+    tests/test_planner.cpp
+    tests/test_controller.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE

@@ -12,6 +12,7 @@
 #include <windows.h>
 #endif
 
+#include "app/cli.hpp"
 #include "app/config.hpp"
 #include "core/log.hpp"
 #include "core/time.hpp"
@@ -22,6 +23,8 @@
 
 namespace fs = std::filesystem;
 using namespace std::chrono;
+
+using namespace hbcli;
 
 namespace {
 
@@ -37,6 +40,12 @@ Usage:
                                       disable the plug's own timers  [--force]
   heatbrain plug <id> restore         Put back the settings from the latest backup
   heatbrain temps                     Current readings of all temperature sensors
+  heatbrain plan                      What every room would do right now, and why
+  heatbrain run                       Control loop: decide, switch live plugs, record
+  heatbrain history <room>            Switch events with reasons  [--hours N] [--all]
+  heatbrain override                  List manual overrides
+  heatbrain override <room> on|off <minutes>
+  heatbrain override <room> clear
   heatbrain help
 
 Options:
@@ -44,62 +53,10 @@ Options:
                    (default: $HEATBRAIN_DATA_DIR, else ./data)
   --slots          Show 15-minute slots instead of hourly averages
   --force          Allow provision to replace existing plug rules
+  --hours N        history: how far back (default 24)
+  --all            history: every decision, not only switch events
   --verbose        Debug logging
 )";
-
-struct Args {
-    std::string command = "help";
-    std::vector<std::string> positional;
-    std::optional<fs::path> dataDir;
-    bool slots = false;
-    bool force = false;
-    bool verbose = false;
-};
-
-Args parseArgs(int argc, char** argv) {
-    Args a;
-    bool haveCommand = false;
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
-        if (arg == "--data-dir" && i + 1 < argc) {
-            a.dataDir = argv[++i];
-        } else if (arg == "--slots") {
-            a.slots = true;
-        } else if (arg == "--force") {
-            a.force = true;
-        } else if (arg == "--verbose" || arg == "-v") {
-            a.verbose = true;
-        } else if (arg.starts_with("-")) {
-            throw std::runtime_error("Unknown option: " + arg);
-        } else if (!haveCommand) {
-            a.command = arg;
-            haveCommand = true;
-        } else {
-            a.positional.push_back(arg);
-        }
-    }
-    return a;
-}
-
-fs::path resolveDataDir(const Args& args) {
-    if (args.dataDir) return *args.dataDir;
-    if (const char* env = std::getenv("HEATBRAIN_DATA_DIR"); env && *env) return env;
-#ifdef HEATBRAIN_SOURCE_DIR
-    return fs::path(HEATBRAIN_SOURCE_DIR) / "data";  // local dev build
-#else
-    return "data";
-#endif
-}
-
-std::vector<fs::path> exampleConfigCandidates() {
-    std::vector<fs::path> c;
-#ifdef HEATBRAIN_SOURCE_DIR
-    c.push_back(fs::path(HEATBRAIN_SOURCE_DIR) / "config" / "heatbrain.example.json");
-#endif
-    c.push_back(fs::path("config") / "heatbrain.example.json");
-    c.push_back("/app/config/heatbrain.example.json");
-    return c;
-}
 
 // One printed row: either a single slot or an hourly average of complete slots.
 struct Row {
@@ -384,6 +341,10 @@ int main(int argc, char** argv) {
         if (args.command == "plugs") return runPlugs(args);
         if (args.command == "plug") return runPlug(args);
         if (args.command == "temps") return runTemps(args);
+        if (args.command == "plan") return runPlan(args);
+        if (args.command == "run") return runDaemon(args);
+        if (args.command == "history") return runHistory(args);
+        if (args.command == "override") return runOverride(args);
         if (args.command == "help") {
             std::cout << kUsage;
             return 0;
