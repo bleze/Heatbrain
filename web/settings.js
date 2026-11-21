@@ -938,6 +938,9 @@
     const hu = el("div", { class: "field span2" }, rg);
     el("span", {}, hu, "Tomorrow's prices");
     hu.appendChild(chk(n, "priceHeadsUp", "Tell me when tomorrow is unusually expensive or cheap", true));
+    const fw = el("div", { class: "field span2" }, rg);
+    el("span", {}, fw, "Firmware");
+    fw.appendChild(chk(n, "firmwareUpdates", "Tell me when a new Tasmota release is out for my plugs", true));
   }
 
   // --- System -------------------------------------------------------------------------

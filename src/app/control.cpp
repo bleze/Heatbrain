@@ -319,6 +319,41 @@ void controlLoop(ControlEnv& env, hb::StatusBoard& board, std::unique_ptr<hb::Al
             hb::log::warn("Digest: {}", e.what());
         }
 
+        // Once a day: is there a Tasmota release newer than what the plugs run?
+        if (hb::firmwareCheckDue(now, *env.tz, digest, digestOpts)) {
+            digest.lastFirmwareCheck = hb::formatLocalDate(env.tz->toLocal(now));
+            try {
+                // Same cached request as the Plugs page (GitHub allows 60 per hour without a token).
+                const auto rel = nlohmann::json::parse(
+                    env.cache->get("https://api.github.com/repos/arendst/Tasmota/releases/latest", hours{12}).body);
+                std::vector<hb::PlugFirmware> fw;
+                for (auto& p : env.plugs) {
+                    if (p.type != "tasmota") continue;
+                    std::string version;
+                    try {
+                        version = p.sw->status().firmware;
+                    } catch (const std::exception&) {
+                    }
+                    fw.push_back({p.name.empty() ? p.id : p.name, version});
+                }
+                const std::string tag = rel.value("tag_name", "");
+                if (const auto m = hb::firmwareNotice(tag, fw, digest.lastFirmware)) {
+                    digest.lastFirmware = tag;
+                    hb::log::info("{}: {}", m->title, m->text);
+                    for (auto& ch : notifications.channels) {
+                        try {
+                            ch->sendText(m->title, m->text);
+                        } catch (const std::exception& e) {
+                            hb::log::warn("{}: {}", ch->name(), e.what());
+                        }
+                    }
+                }
+            } catch (const std::exception& e) {
+                hb::log::warn("Tasmota release check: {}", e.what());
+            }
+            hb::saveDigestState(digestFile, digest);
+        }
+
         // Sleep until the next tick boundary; wake early for Ctrl+C/SIGTERM, overrides, reloads.
         const auto tickLen = env.tick;
         const Instant next = Instant{(now.time_since_epoch() / tickLen + 1) * tickLen};

@@ -95,3 +95,25 @@ TEST_CASE("Digests are sent once, at the right time") {
     DigestState off;
     CHECK(dueDigests(at(monday, 8), tz(), off, DigestOptions{false, false}, report, prices, recentDays).empty());
 }
+
+TEST_CASE("Firmware notice: once per release, only when a plug is behind") {
+    using hb::PlugFirmware;
+    const std::vector<PlugFirmware> plugs{{"Bedroom", "16.0.0(release-tasmota)"},
+                                          {"Shed", "16.0.0(release-tasmota)"},
+                                          {"Basement", ""}};  // unreachable: ignored
+    const auto m = hb::firmwareNotice("v16.1.0", plugs, "");
+    REQUIRE(m);
+    CHECK(m->title == "Tasmota 16.1.0 is out");
+    CHECK(m->text.starts_with("Bedroom, Shed run 16.0.0."));
+
+    CHECK_FALSE(hb::firmwareNotice("v16.1.0", plugs, "v16.1.0"));  // announced already
+    CHECK_FALSE(hb::firmwareNotice("v16.0.0", plugs, ""));         // all up to date
+    CHECK_FALSE(hb::firmwareNotice("", plugs, ""));                // no release info
+
+    const auto one = hb::firmwareNotice("v16.1.0", {{"Bedroom", "14.6.0(release-tasmota)"}, {"Shed", "16.1.0"}}, "");
+    REQUIRE(one);
+    CHECK(one->text.starts_with("Bedroom runs 14.6.0."));
+    const auto mixed = hb::firmwareNotice("v16.1.0", {{"A", "14.6.0"}, {"B", "16.0.0"}}, "");
+    REQUIRE(mixed);
+    CHECK(mixed->text.starts_with("A, B run older versions."));
+}

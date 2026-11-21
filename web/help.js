@@ -99,7 +99,7 @@ const HELP = {
     title: "Notifications",
     body: [
       "Problems (a plug unreachable, a sensor offline or low on battery, missing prices, a room that does not warm up) are sent after they have lasted a while - one missed reading does not wake you. You get a quiet 'resolved' when a problem is over, reminders every few hours while it lasts, and nothing but critical alerts during quiet hours.",
-      "Also: a weekly cost summary on Monday morning and a heads-up when tomorrow is unusually expensive or cheap.",
+      "Also: a weekly cost summary on Monday morning, a heads-up when tomorrow is unusually expensive or cheap, and one message when a new Tasmota release is out for your plugs (checked daily; you start the upgrade yourself).",
     ],
   },
   away: {

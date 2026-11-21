@@ -19,6 +19,8 @@ namespace hb {
 struct DigestState {
     std::string lastWeekly;   // local date of the Monday the last summary was sent
     std::string lastHeadsUp;  // local date ("tomorrow") the last heads-up was evaluated for
+    std::string lastFirmwareCheck;  // local date of the last Tasmota release check
+    std::string lastFirmware;       // release tag already announced ("v16.1.0")
 };
 DigestState loadDigestState(const std::filesystem::path& file);
 void saveDigestState(const std::filesystem::path& file, const DigestState& s);
@@ -39,7 +41,21 @@ std::optional<DigestMessage> priceHeadsUp(const PriceTable& upcoming, const std:
 struct DigestOptions {
     bool weekly = true;
     bool headsUp = true;
+    bool firmware = true;
 };
+
+struct PlugFirmware {
+    std::string name;
+    std::string version;  // "16.0.0(release-tasmota)"; empty if the plug could not be reached
+};
+
+// One message per Tasmota release that is newer than the firmware on at least one plug;
+// nothing if that release was announced already (alreadyAnnounced = its tag).
+std::optional<DigestMessage> firmwareNotice(const std::string& latestTag, const std::vector<PlugFirmware>& plugs,
+                                            const std::string& alreadyAnnounced);
+
+// The daily release check is due: enabled, from 10:00 local time, not done today.
+bool firmwareCheckDue(Instant now, const TimeZone& tz, const DigestState& state, const DigestOptions& opt);
 DigestOptions parseDigestOptions(const nlohmann::json& cfg);
 
 // Called after every control step: returns the messages due now and updates state.

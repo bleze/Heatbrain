@@ -1,5 +1,7 @@
 #include "app/digest.hpp"
 
+#include "core/version.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <format>
@@ -33,13 +35,19 @@ DigestState loadDigestState(const fs::path& file) {
         const json j = json::parse(in);
         s.lastWeekly = j.value("lastWeekly", "");
         s.lastHeadsUp = j.value("lastHeadsUp", "");
+        s.lastFirmwareCheck = j.value("lastFirmwareCheck", "");
+        s.lastFirmware = j.value("lastFirmware", "");
     } catch (const std::exception&) {
     }
     return s;
 }
 
 void saveDigestState(const fs::path& file, const DigestState& s) {
-    std::ofstream(file) << json{{"lastWeekly", s.lastWeekly}, {"lastHeadsUp", s.lastHeadsUp}}.dump(2);
+    std::ofstream(file) << json{{"lastWeekly", s.lastWeekly},
+                                {"lastHeadsUp", s.lastHeadsUp},
+                                {"lastFirmwareCheck", s.lastFirmwareCheck},
+                                {"lastFirmware", s.lastFirmware}}
+                               .dump(2);
 }
 
 DigestOptions parseDigestOptions(const json& cfg) {
@@ -47,6 +55,7 @@ DigestOptions parseDigestOptions(const json& cfg) {
     if (!cfg.contains("notifications")) return o;
     o.weekly = cfg["notifications"].value("weeklySummary", true);
     o.headsUp = cfg["notifications"].value("priceHeadsUp", true);
+    o.firmware = cfg["notifications"].value("firmwareUpdates", true);
     return o;
 }
 
@@ -145,6 +154,33 @@ std::vector<DigestMessage> dueDigests(Instant now, const TimeZone& tz, DigestSta
         }
     }
     return out;
+}
+
+std::optional<DigestMessage> firmwareNotice(const std::string& latestTag, const std::vector<PlugFirmware>& plugs,
+                                            const std::string& alreadyAnnounced) {
+    if (latestTag.empty() || parseVersion(latestTag).empty() || latestTag == alreadyAnnounced) return std::nullopt;
+    std::string behind;
+    std::string current;
+    int count = 0;
+    for (const auto& p : plugs) {
+        if (p.version.empty() || compareVersions(p.version, latestTag) >= 0) continue;
+        behind += (behind.empty() ? "" : ", ") + p.name;
+        ++count;
+        const std::string v = p.version.substr(0, p.version.find('('));
+        if (current.empty()) current = v;
+        else if (current != v) current = "older versions";
+    }
+    if (behind.empty()) return std::nullopt;
+    const std::string latest = latestTag.starts_with('v') ? latestTag.substr(1) : latestTag;
+    return DigestMessage{std::format("Tasmota {} is out", latest),
+                         std::format("{} run{} {}. Upgrade from Settings -> Plugs (one plug at a time; the fail-safe is "
+                                     "tested afterwards).",
+                                     behind, count == 1 ? "s" : "", current)};
+}
+
+bool firmwareCheckDue(Instant now, const TimeZone& tz, const DigestState& state, const DigestOptions& opt) {
+    const auto local = tz.toLocal(now);
+    return opt.firmware && hourOfDay(local) >= 10 && state.lastFirmwareCheck != formatLocalDate(local);
 }
 
 }  // namespace hb
