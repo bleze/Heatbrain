@@ -153,7 +153,9 @@ a { color: var(--accent); }
 
 /* Rooms */
 .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-.room { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; position: relative; overflow: hidden; }
+.room { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; position: relative; overflow: hidden;
+        display: flex; flex-direction: column; }
+.room-foot { margin-top: auto; padding-top: 2px; }
 .room:hover { border-color: var(--axis); }
 .room.selected { box-shadow: 0 0 0 2px var(--accent) inset; }
 .room.heating { background: linear-gradient(180deg, var(--warm-tint), transparent 70%), var(--surface); border-color: var(--warm-edge); }
@@ -180,7 +182,7 @@ a { color: var(--accent); }
 .reason { margin-top: 10px; font-weight: 600; display: flex; gap: 8px; align-items: center; }
 .detail { color: var(--ink-2); margin-top: 4px; min-height: 40px; }
 .plugs { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--ink-2); }
-.chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; background: var(--surface); }
+.chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; background: var(--surface); }
 .chip .icon { width: 13px; height: 13px; }
 .chip.live { border-color: var(--good); color: var(--good); }
 .chip.ok { border-color: var(--good); color: var(--good); }
@@ -339,7 +341,11 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 .planbar .pl-off { background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--grid) 4px 8px); opacity: 0.6; }
 .planbar .pl-away { background: var(--accent); opacity: 0.35; }
 .plan-axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
-.plan-next { font-size: 12.5px; color: var(--ink-2); margin-top: 4px; }
+.plan-head { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; font-weight: 600;
+             color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+.plan-head .help-btn { margin: 0; }
+.plan-next { font-size: 12.5px; line-height: 1.4; color: var(--ink-2); margin-top: 4px; height: 2.8em; overflow: hidden;
+             display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
 /* Job progress (firmware upgrade / fail-safe test) */
 .joblog { margin-top: 12px; border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 10px; padding: 10px 12px; background: var(--surface); }

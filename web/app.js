@@ -289,6 +289,9 @@ const planLabel = (s) => (PLAN[s.kind] || (() => s.kind))(s.target);
 function planStrip(parent, plan) {
   const t0 = plan[0].from, t1 = plan[plan.length - 1].to;
   const wrap = el("div", { class: "plan" }, parent);
+  const head = el("div", { class: "plan-head" }, wrap);
+  el("span", {}, head, "Next 24 h");
+  if (typeof helpButton === "function") helpButton(head, "plan", wrap);
   const bar = el("div", { class: "planbar" }, wrap);
   for (const s of plan) {
     el("div", { class: `pl-${s.kind}`, style: `flex:${s.to - s.from}`, title: `${hm(s.from)}-${hm(s.to)}: ${planLabel(s)}` }, bar);
@@ -299,8 +302,8 @@ function planStrip(parent, plan) {
   el("span", {}, axis, hm(t1));
   // The next two changes, in words
   const next = plan.slice(1, 3).map((s) => `${planLabel(s)} ${hm(s.from)}`);
-  const pn = el("div", { class: "plan-next" }, wrap, `Now: ${planLabel(plan[0])}${next.length ? ` · then ${next.join(" · ")}` : ""} `);
-  if (typeof helpButton === "function") helpButton(pn, "plan", wrap);
+  const text = `Now: ${planLabel(plan[0])}${next.length ? ` · then ${next.join(" · ")}` : ""}`;
+  el("div", { class: "plan-next", title: text }, wrap, text);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -322,7 +325,7 @@ function outdoorCard(host) {
   const hero = el("div", { class: "hero" }, card, temp(o.temperature));
   if (s.humidity != null) el("small", {}, hero, `${Math.round(s.humidity)} % humidity`);
   el("div", { class: "detail" }, card, "Colder outside means more pre-heating before expensive or off periods.");
-  const chips = el("div", { class: "plugs" }, card);
+  const chips = el("div", { class: "plugs" }, el("div", { class: "room-foot" }, card));
   const chip = (cls, iconName, text) => { const c = el("span", { class: `chip ${cls}` }, chips); c.appendChild(icon(iconName)); c.appendChild(document.createTextNode(text)); };
   if (s.battery != null) chip(s.battery <= 20 ? "error" : s.battery <= 40 ? "warn" : "", "battery", `battery ${s.battery} %`);
   if (s.ageMinutes != null) chip("", "clock", `${s.ageMinutes} min ago`);
@@ -471,14 +474,15 @@ let renderRooms = function () {
     if (cat) el("span", { class: "swatch", style: `background:${catColor(cat)}` }, reason);
     reason.appendChild(document.createTextNode(reasonLabel(r.reason)));
     el("div", { class: "detail" }, card, r.detail);
-    if (r.plan?.length) planStrip(card, r.plan);
-
     // Only when something outranks the override (e.g. above max); otherwise the reason says it.
     if (r.override && !["MANUAL_ON", "MANUAL_OFF"].includes(r.reason)) {
       el("div", { class: "override-note" }, card, `Manual ${r.override.on ? "ON" : "OFF"} until ${hm(r.override.until)}`);
     }
 
-    const plugs = el("div", { class: "plugs" }, card);
+    // Pinned to the bottom so plan, plugs and buttons line up across cards of different text length
+    const foot = el("div", { class: "room-foot" }, card);
+    if (r.plan?.length) planStrip(foot, r.plan);
+    const plugs = el("div", { class: "plugs" }, foot);
     for (const p of r.plugs || []) {
       const text = p.mode === "live" ? `${p.id} · live${p.state != null ? (p.state ? " · on" : " · off") : ""}` : `${p.id} · dry-run`;
       const chipEl = el("span", { class: `chip ${p.mode}${p.error ? " error" : ""}`, title: p.error || "" }, plugs);
@@ -486,7 +490,7 @@ let renderRooms = function () {
       chipEl.appendChild(document.createTextNode(p.error ? `${p.id} · ${p.error}` : text));
     }
 
-    const actions = el("div", { class: "actions" }, card);
+    const actions = el("div", { class: "actions" }, foot);
     const act = (label, iconName, cls, fn) => {
       const b = el("button", { type: "button", class: cls }, actions);
       b.appendChild(icon(iconName));
