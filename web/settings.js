@@ -12,7 +12,7 @@
     ["notifications", "Notifications", "bell"],
     ["system", "System", "cpu"],
   ];
-  const S = { cfg: null, saved: "", errors: [], tab: "rooms", plugStatus: null, discovered: null, newIds: new Set(), jobs: {}, confirming: new Set() };
+  const S = { cfg: null, saved: "", errors: [], tab: "rooms", plugStatus: null, discovered: null, newIds: new Set(), jobs: {}, confirming: new Set(), openDetails: new Set() };
   let jobTimer = null;
   const jobRunning = () => Object.values(S.jobs).some((j) => j.state === "running");
 
@@ -154,6 +154,13 @@
     const toMin = (x) => (x === "24:00" ? 1440 : Number(x.slice(0, 2)) * 60 + Number(x.slice(3, 5)));
     if (w.from && w.to && toMin(w.to) - toMin(w.from) === 1440) el("span", { class: "muted" }, row, "all day");
   };
+  // A collapsible section that stays open across re-renders (job/status refreshes redraw).
+  function section(parent, key) {
+    const d = el("details", { class: "advanced" }, parent);
+    d.open = S.openDetails.has(key);
+    d.addEventListener("toggle", () => { if (d.open) S.openDetails.add(key); else S.openDetails.delete(key); });
+    return d;
+  }
   function btn(parent, label, iconName, onClick, cls = "") {
     const b = el("button", { type: "button", class: cls }, parent);
     if (iconName) b.appendChild(icon(iconName));
@@ -348,7 +355,7 @@
     });
     drawTimeline(tl, room);
 
-    const adv = el("details", { class: "advanced" }, c);
+    const adv = section(c, `room:${room.id}`);
     el("summary", {}, adv, "Advanced: how eagerly to chase cheap prices");
     const st = (room.strategy ||= {});
     const ag = el("div", { class: "form-grid" }, adv);
@@ -557,7 +564,7 @@
       }
     }
 
-    const adv = el("details", { class: "advanced" }, c);
+    const adv = section(c, `plug:${p.id}`);
     el("summary", {}, adv, "Advanced: fail-safe timing and password");
     const fs = (p.failsafe ||= {});
     const ag = el("div", { class: "form-grid" }, adv);
@@ -583,7 +590,7 @@
       field(g, "Client ID", txt(n, "clientId"));
       field(g, "Client secret", secret(n, "clientSecret"));
       field(g, "Refresh token", secret(n, "refreshToken"), { hint: "only needed once" });
-      const steps = el("details", { class: "advanced" }, card);
+      const steps = section(card, "netatmo-help");
       el("summary", {}, steps, "Where do I get these?");
       const ol = el("ol", {}, steps);
       el("li", {}, ol, "Log in at dev.netatmo.com/apps with your Netatmo account and create an app.");
