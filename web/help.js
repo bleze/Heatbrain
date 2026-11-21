@@ -162,22 +162,38 @@ function fillHelp(box, h) {
   }
 }
 
+// Which help boxes are open, so they survive a re-render (the plugs tab redraws when plug
+// status arrives, the dashboard every refresh). A button is identified by its view, its key and
+// its position among buttons with the same key.
+const HELP_OPEN = new Set();
+function helpId(b) {
+  const same = [...document.querySelectorAll(".help-btn")].filter((x) => x.dataset.help === b.dataset.help);
+  return `${location.hash}|${b.dataset.help}|${same.indexOf(b)}`;
+}
+
 // A small "?" button that shows the help text in place, below `anchor`.
 function helpButton(parent, key, anchor) {
   const first = Array.isArray(key) ? key[0] : key;
-  const b = el("button", { type: "button", class: "help-btn", title: `About: ${HELP[first]?.title || first}`, "aria-label": "Help" }, parent, "?");
+  const b = el("button", { type: "button", class: "help-btn", title: `About: ${HELP[first]?.title || first}`, "aria-label": "Help",
+                           "data-help": [].concat(key).join(",") }, parent, "?");
   let box = null;
-  b.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (box) { box.remove(); box = null; b.classList.remove("open"); return; }
+  const show = () => {
     // A "?" in a collapsed section's header: open the section, or the text would be hidden inside it
     const details = b.closest("summary")?.parentElement;
     if (details && !details.open) details.open = true;
     box = helpContent(key);
     (anchor || parent).after(box);
     b.classList.add("open");
+  };
+  const hide = () => { box?.remove(); box = null; b.classList.remove("open"); };
+  b.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = helpId(b);
+    if (box) { hide(); HELP_OPEN.delete(id); } else { show(); HELP_OPEN.add(id); }
   });
+  // Once the surrounding render is in the page: reopen if it was open before the redraw.
+  requestAnimationFrame(() => { if (!box && b.isConnected && HELP_OPEN.has(helpId(b))) show(); });
   return b;
 }
 
