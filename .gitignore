@@ -1,0 +1,9 @@
+# Build output
+out/
+build/
+.vs/
+CMakeUserPresets.json
+vcpkg_installed/
+
+# Runtime data (config with tokens, caches, history) - never commit
+data/

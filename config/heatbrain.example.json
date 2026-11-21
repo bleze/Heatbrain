@@ -1,0 +1,62 @@
+{
+  "_comment": "Copied to <data-dir>/heatbrain.json on first run. Edit that copy, not this file.",
+
+  "timezone": "Europe/Copenhagen",
+  "currency": "DKK",
+
+  "price": {
+    "_comment": "Additive components (per kWh, excl. VAT), then surcharges applied in order.",
+    "components": [
+      {
+        "type": "energidataservice.spot",
+        "name": "Spot",
+        "area": "DK2"
+      },
+      {
+        "type": "energidataservice.tariff",
+        "name": "Nettarif (Radius C)",
+        "gln": "5790000705689",
+        "codes": [ "DT_C_01" ]
+      },
+      {
+        "type": "energidataservice.tariff",
+        "name": "Energinet",
+        "_comment": "40000 = Transmissions nettarif, 41000 = Systemtarif",
+        "gln": "5790000432752",
+        "codes": [ "40000", "41000" ]
+      },
+      {
+        "type": "fixed",
+        "name": "Elafgift",
+        "_comment": "Statutory electricity tax per kWh excl. VAT. Verify against your bill.",
+        "amount": 0.008
+      },
+      {
+        "type": "fixed",
+        "name": "EWII tillæg",
+        "_comment": "Supplier markup per kWh excl. VAT from your EWII contract.",
+        "amount": 0.0
+      }
+    ],
+    "surcharges": [
+      { "name": "Moms", "percent": 25 }
+    ]
+  },
+
+  "_example_schedule_component": {
+    "_comment": "For grid companies without an API: describe the tariff directly.",
+    "type": "schedule",
+    "name": "Grid tariff",
+    "seasons": [
+      {
+        "months": [ 10, 11, 12, 1, 2, 3 ],
+        "bands": [
+          { "from": "00:00", "to": "06:00", "amount": 0.106 },
+          { "from": "06:00", "to": "17:00", "amount": 0.319 },
+          { "from": "17:00", "to": "21:00", "amount": 0.956 },
+          { "from": "21:00", "to": "24:00", "amount": 0.319 }
+        ]
+      }
+    ]
+  }
+}
