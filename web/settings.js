@@ -180,7 +180,9 @@
   }
   // Two-step confirmation without browser dialogs. With a key, an open question survives
   // re-renders (the plugs tab redraws when status or job progress arrives).
-  function confirmBtn(parent, label, iconName, question, onYes, cls = "", key = null) {
+  // busyLabel: shown while onYes runs ("Installing fail-safe…"); defaults to "<label>…".
+  function confirmBtn(parent, label, iconName, question, onYes, cls = "", key = null, busyLabel = null) {
+    const busyText = busyLabel || (label ? `${label}…` : "Working…");
     const wrap = el("span", { class: "confirm" }, parent);
     const ask = () => {
       if (key) S.confirming.add(key);
@@ -189,7 +191,7 @@
       el("span", {}, wrap, question);
       btn(wrap, "Yes", "check", async (b) => {
         b.disabled = true;
-        b.lastChild.textContent = "Working…";
+        b.lastChild.textContent = busyText;
         if (key) { S.confirming.delete(key); S.pending.add(key); }
         try { await onYes(); } finally { if (key) S.pending.delete(key); }
         if (wrap.isConnected) show();
@@ -200,7 +202,7 @@
       wrap.replaceChildren();
       wrap.classList.remove("asking");
       if (key && S.pending.has(key)) {
-        const b = btn(wrap, `${label ? label + ": " : ""}working…`, "clock", () => {}, cls);
+        const b = btn(wrap, busyText, "clock", () => {}, cls);
         b.disabled = true;
         return;
       }
@@ -623,7 +625,35 @@
     }, "ghost danger");
 
     const g = el("div", { class: "form-grid" }, c);
-    if ((p.type || "tasmota") === "tasmota") field(g, "Address", txt(p, "host", { placeholder: "192.168.1.38" }));
+    // Address with the device's own buttons next to it: its web UI (also when heatbrain can't
+    // reach it), restart and restore.
+    const savedHasPlug = (JSON.parse(S.saved).plugs || []).some((x) => x.id === p.id);
+    const deviceReady = !dirty() && savedHasPlug && st?.reachable;
+    const busy = jobRunning();
+    if ((p.type || "tasmota") === "tasmota") {
+      const addr = el("div", { class: "row addr-row" });
+      addr.appendChild(txt(p, "host", { placeholder: "192.168.1.38" }));
+      field(g, "Address", addr, { span2: true });
+      if (p.host) {
+        btn(addr, "Web UI", "external", () => window.open(`http://${p.host}/`, "_blank", "noopener"), "ghost")
+          .title = `Open the plug's own page (${p.host}) in a new tab`;
+      }
+      if (deviceReady && !busy) {
+        confirmBtn(addr, "Restart", "power", "Restart the plug now? The relay keeps its state.", () => startPlugJob(p, "restart"), "ghost", `${p.id}:restart`, "Restarting…");
+      }
+      if (deviceReady && st.failsafe?.installed && st.backup) {
+        const when = st.backup.takenAt
+          ? new Intl.DateTimeFormat("en-GB", { timeZone: state.tz, weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(st.backup.takenAt))
+          : st.backup.file;
+        confirmBtn(addr, "Remove fail-safe", "undo",
+          `Remove the fail-safe and put back the plug's own timers, power-on state and rule from the backup of ${when}?`,
+          async () => {
+            try { const r = await api(`/api/plugs/${encodeURIComponent(p.id)}/restore`, { method: "POST" }); toast(`${p.name || p.id}: fail-safe removed, own settings restored (${r.restored})`); }
+            catch (e) { toast(e.message, true); }
+            S.plugStatus = null; await refreshPlugStatus();
+          }, "ghost", `${p.id}:restore`, "Removing fail-safe…");
+      }
+    }
     field(g, "Radiator power", num(p, "watts", { step: 50, min: 0, placeholder: "1500", unit: "W" }),
       { hint: "from the radiator's label" });
 
@@ -657,7 +687,6 @@
 
     // Device actions (on the saved config)
     const actions = el("div", { class: "actions" }, c);
-    const savedHasPlug = (JSON.parse(S.saved).plugs || []).some((x) => x.id === p.id);
     if (dirty() || !savedHasPlug) {
       el("span", { class: "hint" }, actions, "Save or discard your changes first: device actions (fail-safe, test, upgrade) use the saved settings.");
     } else if (st?.reachable) {
@@ -665,12 +694,14 @@
         confirmBtn(actions, "Install fail-safe", "shield",
           "Back up the plug's settings, turn off its own timers and install the fail-safe?",
           async () => {
-            try { await api(`/api/plugs/${encodeURIComponent(p.id)}/provision`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); toast(`${p.name || p.id}: fail-safe installed`); }
-            catch (e) { toast(e.message, true); }
+            try {
+              const r = await api(`/api/plugs/${encodeURIComponent(p.id)}/provision`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+              if (r.failsafe?.installed) toast(`${p.name || p.id}: fail-safe installed`);
+              else toast(`${p.name || p.id}: fail-safe not complete - ${(r.failsafe?.problems || []).join("; ")}`, true);
+            } catch (e) { toast(`${p.name || p.id}: fail-safe not installed - ${e.message}`, true); }
             S.plugStatus = null; await refreshPlugStatus();
-          }, "primary", `${p.id}:provision`);
+          }, "primary", `${p.id}:provision`, "Installing fail-safe…");
       }
-      const busy = jobRunning();
       if (p.mode !== "live" && !busy) {
         confirmBtn(actions, "Test fail-safe", "check",
           "The radiator turns on for about 30 seconds to check the auto-off. Go ahead?",
@@ -683,15 +714,6 @@
       } else if (p.mode === "live") {
         el("span", { class: "hint" }, actions, "Switch to dry-run and save to test or upgrade this plug.");
       }
-      if (!busy) {
-        confirmBtn(actions, "Restart", "power", "Restart the plug now? The relay keeps its state.", () => startPlugJob(p, "restart"), "ghost", `${p.id}:restart`);
-      }
-      confirmBtn(actions, "Restore original", "undo", "Put back the plug's settings from the last backup?",
-        async () => {
-          try { await api(`/api/plugs/${encodeURIComponent(p.id)}/restore`, { method: "POST" }); toast(`${p.name || p.id}: original settings restored`); }
-          catch (e) { toast(e.message, true); }
-          S.plugStatus = null; await refreshPlugStatus();
-        }, "ghost", `${p.id}:restore`);
     }
 
     renderJob(c, p);

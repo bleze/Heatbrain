@@ -23,7 +23,15 @@ json TasmotaSwitch::command(const std::string& cmnd) {
     if (!password_.empty()) url += "user=admin&password=" + urlEncode(password_) + "&";
     url += "cmnd=" + urlEncode(cmnd);
 
-    const HttpResponse res = http_.get(url);
+    HttpResponse res;
+    try {
+        res = http_.get(url);
+    } catch (const HttpError&) {
+        // Transport failure (timeout, reset): one retry. A plug on a weak signal or in WiFi power
+        // save answers in 2-3 s now and then; every command we send is a setting or a query, so
+        // sending it twice is harmless.
+        res = http_.get(url);
+    }
     if (res.status != 200) throw HttpError(std::format("{}: HTTP {} for '{}'", host_, res.status, cmnd));
     json j;
     try {

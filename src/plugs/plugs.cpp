@@ -94,6 +94,33 @@ fs::path latestBackup(const fs::path& dataDir, const Plug& plug) {
     return latest;
 }
 
+fs::path originalBackup(const fs::path& dataDir, const Plug& plug) {
+    const fs::path dir = dataDir / "plugs" / plug.id;
+    std::vector<fs::path> files;
+    if (fs::exists(dir)) {
+        for (const auto& e : fs::directory_iterator(dir)) {
+            if (e.path().filename().string().starts_with("backup-")) files.push_back(e.path());
+        }
+    }
+    if (files.empty()) throw std::runtime_error("No backup found for plug " + plug.id);
+    std::ranges::sort(files, std::greater<>{});  // timestamped names: newest first
+    for (const auto& f : files) {
+        try {
+            const json b = json::parse(std::ifstream(f));
+            if (!backupHasFailsafe(b)) return f;
+        } catch (const std::exception&) {
+            // unreadable backup: skip it
+        }
+    }
+    return files.back();  // every backup has the fail-safe: the oldest is the best we have
+}
+
+bool backupHasFailsafe(const json& backup) {
+    // Both variants of heatbrain's watchdog rule start with this (see tasmotaFailsafeRule).
+    const std::string rules = backup.contains("rule1") ? backup["rule1"].value("rules", "") : "";
+    return rules.find("ON System#Boot DO RuleTimer1 ") != std::string::npos;
+}
+
 std::optional<FirmwareRecord> loadFirmwareRecord(const fs::path& dataDir, const std::string& plugId) {
     const fs::path file = dataDir / "plugs" / plugId / "firmware.json";
     if (!fs::exists(file)) return std::nullopt;

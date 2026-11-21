@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -12,6 +13,11 @@
 #include "plugs/switch.hpp"
 
 namespace hb {
+
+// HTTP timeouts for plugs on the LAN. Generous on purpose: ESP8266 plugs with a weak signal
+// or WiFi power save regularly take 2-3 s to accept a connection.
+inline constexpr std::chrono::milliseconds kPlugConnectTimeout{6000};
+inline constexpr std::chrono::milliseconds kPlugReadTimeout{8000};
 
 enum class PlugMode {
     Live,    // heatbrain switches the plug
@@ -47,6 +53,11 @@ struct FirmwareRecord {
     std::string checkedAt;
     std::string detail;
 };
+// The backup to restore "original" settings from: the newest one taken while heatbrain's fail-safe
+// was NOT on the plug (backups are also taken before upgrades, when it usually is).
+std::filesystem::path originalBackup(const std::filesystem::path& dataDir, const Plug& plug);
+bool backupHasFailsafe(const nlohmann::json& backup);
+
 std::optional<FirmwareRecord> loadFirmwareRecord(const std::filesystem::path& dataDir, const std::string& plugId);
 void saveFirmwareRecord(const std::filesystem::path& dataDir, const std::string& plugId, const FirmwareRecord& r);
 

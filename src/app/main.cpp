@@ -212,7 +212,7 @@ void printPlug(hb::Plug& plug) {
 
 struct PlugEnv {
     hb::AppConfig cfg;
-    hb::HttplibClient http{milliseconds{3000}, milliseconds{5000}};
+    hb::HttplibClient http{hb::kPlugConnectTimeout, hb::kPlugReadTimeout};
     std::vector<hb::Plug> plugs;
 };
 
@@ -269,7 +269,7 @@ int runPlug(const Args& args) {
             "after {} min ({} min ON / {} min OFF). Undo with 'heatbrain plug {} restore'.\n",
             plug.failsafe.watchdog.count(), plug.failsafe.limpOn.count(), plug.failsafe.limpOff.count(), id);
     } else if (action == "restore") {
-        const auto file = hb::latestBackup(env->cfg.dataDir, plug);
+        const auto file = hb::originalBackup(env->cfg.dataDir, plug);
         std::ifstream in(file);
         plug.sw->restore(nlohmann::json::parse(in));
         std::cout << "Restored settings from " << file.string() << "\n";

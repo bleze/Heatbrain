@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <map>
 
 #include "plugs/plugs.hpp"
@@ -226,4 +228,37 @@ TEST_CASE("Starting an upgrade sets the OTA URL first") {
     f.sw.startUpgrade("http://ota.tasmota.com/tasmota/release/tasmota.bin.gz");
     CHECK(f.http.requests.size() == 2);
     CHECK(f.http.requests[0].url.find("OtaUrl") != std::string::npos);
+}
+
+TEST_CASE("Tasmota command retries once after a transport failure") {
+    Fixture f;
+    int failures = 1;
+    f.http.handler = [&](const std::string& url) {
+        if (failures-- > 0) throw HttpError("GET http://192.168.1.38 failed: Connection timed out");
+        return f.device.handle(url);
+    };
+    CHECK(f.sw.status().reachable);  // first attempt timed out, the retry answered
+
+    failures = 2;  // two in a row: reported as unreachable
+    CHECK_FALSE(f.sw.status().reachable);
+}
+
+TEST_CASE("Remove fail-safe restores the newest backup from before the fail-safe") {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "heatbrain-test-backups";
+    fs::remove_all(dir);
+    hb::Plug plug;
+    plug.id = "bedroom";
+    fs::create_directories(dir / "plugs" / "bedroom");
+    const auto write = [&](const char* name, const std::string& rules) {
+        std::ofstream(dir / "plugs" / "bedroom" / name)
+            << nlohmann::json{{"rule1", {{"state", "ON"}, {"rules", rules}}}, {"pulseTime1", 0}}.dump();
+    };
+    const std::string ours = hb::tasmotaFailsafeRule(hb::FailsafeConfig{});
+    write("backup-20261121T190000Z.json", "");                     // before install: the original
+    write("backup-20261121T200000Z.json", "ON Power1#State DO x");  // the user's own rule, still original
+    write("backup-20261122T080000Z.json", ours);                   // before an upgrade: has the fail-safe
+    CHECK(hb::originalBackup(dir, plug).filename() == "backup-20261121T200000Z.json");
+    CHECK(hb::backupHasFailsafe(nlohmann::json{{"rule1", {{"rules", ours}}}}));
+    fs::remove_all(dir);
 }

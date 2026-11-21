@@ -35,7 +35,7 @@ struct ControlEnv {
     hb::AppConfig cfg;
     std::unique_ptr<hb::TimeZone> tz;
     hb::HttplibClient internet;
-    hb::HttplibClient lan{milliseconds{3000}, milliseconds{5000}};
+    hb::HttplibClient lan{hb::kPlugConnectTimeout, hb::kPlugReadTimeout};
     std::unique_ptr<hb::CachingHttpClient> cache;
     std::unique_ptr<hb::ProviderContext> ctx;
     std::unique_ptr<hb::PriceModel> prices;

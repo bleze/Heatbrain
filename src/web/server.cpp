@@ -281,7 +281,7 @@ void WebServer::routes() {
     s.Get("/api/plugs", [this](const httplib::Request&, httplib::Response& res) {
         // Own plug objects from the saved config: never shares state with the control loop.
         const json cfg = readConfigFile(ctx_.configFile);
-        HttplibClient lan(milliseconds{2500}, milliseconds{4000});
+        HttplibClient lan(kPlugConnectTimeout, kPlugReadTimeout);
         auto plugs = loadPlugs(cfg, lan);
         json latest;
         try {
@@ -302,6 +302,19 @@ void WebServer::routes() {
                     j["latest"] = latest;
                     j["updateAvailable"] = compareVersions(st.firmware, latest.value("version", "")) < 0;
                 }
+                // What "Remove fail-safe" would put back, and from when ("backup-20261121T203903Z.json").
+                try {
+                    const std::string name = originalBackup(ctx_.dataDir, p).filename().string();
+                    json b{{"file", name}};
+                    if (name.size() >= 23) {
+                        const std::string t = name.substr(7, 16);  // 20261121T203903Z
+                        b["takenAt"] = std::format("{}-{}-{}T{}:{}:{}Z", t.substr(0, 4), t.substr(4, 2), t.substr(6, 2),
+                                                   t.substr(9, 2), t.substr(11, 2), t.substr(13, 2));
+                    }
+                    j["backup"] = b;
+                } catch (const std::exception&) {
+                    // no backup yet
+                }
                 if (const auto rec = loadFirmwareRecord(ctx_.dataDir, p.id)) {
                     j["test"] = {{"version", rec->version}, {"verified", rec->verified}, {"checkedAt", rec->checkedAt},
                                  {"detail", rec->detail},
@@ -319,7 +332,7 @@ void WebServer::routes() {
         const std::string id = req.matches[1];
         const std::string action = req.matches[2];
         const json cfg = readConfigFile(ctx_.configFile);
-        HttplibClient lan(milliseconds{3000}, milliseconds{5000});
+        HttplibClient lan(kPlugConnectTimeout, kPlugReadTimeout);
         auto plugs = loadPlugs(cfg, lan);
         auto it = std::ranges::find_if(plugs, [&](const Plug& p) { return p.id == id; });
         if (it == plugs.end()) return sendError(res, 404, "unknown plug (save the configuration first)");
@@ -336,13 +349,14 @@ void WebServer::routes() {
                     return sendError(res, 409, "Set the plug to dry-run and save before restoring: a live plug "
                                                "without its fail-safe must not be switched.");
                 }
-                const auto file = latestBackup(ctx_.dataDir, plug);
+                const auto file = originalBackup(ctx_.dataDir, plug);
                 std::ifstream in(file);
                 plug.sw->restore(json::parse(in));
                 log::info("Web: restored plug {} from {}", id, file.string());
                 sendJson(res, json{{"restored", file.filename().string()}, {"failsafe", failsafeJson(plug)}});
             }
         } catch (const std::exception& e) {
+            log::warn("Web: {} of plug {} failed: {}", action, id, e.what());
             sendError(res, 502, e.what());
         }
     });
@@ -399,7 +413,7 @@ void WebServer::routes() {
         const std::string action = req.matches[2];
         const json cfg = readConfigFile(ctx_.configFile);
         // Each job builds its own client and plug objects: nothing is shared with the control loop.
-        auto lan = std::make_shared<HttplibClient>(milliseconds{3000}, milliseconds{5000});
+        auto lan = std::make_shared<HttplibClient>(kPlugConnectTimeout, kPlugReadTimeout);
         auto plugs = std::make_shared<std::vector<Plug>>(loadPlugs(cfg, *lan));
         auto it = std::ranges::find_if(*plugs, [&](const Plug& p) { return p.id == id; });
         if (it == plugs->end()) return sendError(res, 404, "unknown plug (save the configuration first)");

@@ -29,7 +29,8 @@ const HELP = {
       "Auto-off: the plug switches itself off 20 minutes after heatbrain last told it to stay on. heatbrain refreshes it every few minutes while heating.",
       "Limp mode: if heatbrain is silent for 30 minutes, the plug runs a gentle cycle by itself (10 min on, 50 min off) - frost protection, never full heat.",
       "After a power cut the plug starts off and waits for heatbrain.",
-      "The plug's own timers are switched off so they cannot fight heatbrain. Restore original puts everything back.",
+      "The plug's own timers are switched off so they cannot fight heatbrain.",
+      "Backups: before installing the fail-safe and before a firmware upgrade, heatbrain saves the settings it changes (timers, power-on state, Rule1, auto-off) in data/plugs/<plug>/. 'Remove fail-safe' puts back the newest backup from before the fail-safe - the plug then works on its own timers again, like before heatbrain. A live plug must be set to dry-run first.",
     ],
   },
   firmware: {
