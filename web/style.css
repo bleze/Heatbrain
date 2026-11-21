@@ -211,10 +211,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .tabs button { border-radius: 999px; padding: 7px 14px; }
 .tabs button.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-weight: 600; }
-.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px 16px; margin-top: 12px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px 16px; margin-top: 12px; align-items: start; }
 .field { display: flex; flex-direction: column; gap: 4px; }
-.field > span { font-size: 12.5px; color: var(--ink-2); font-weight: 500; }
+.field > span { font-size: 12.5px; color: var(--ink-2); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .field.wide { grid-column: 1 / -1; }
+@media (min-width: 640px) { .field.span2 { grid-column: span 2; } }
+.check { white-space: nowrap; }
 .field input[type="text"], .field input[type="password"], .field input[type="url"], .field select { width: 100%; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; user-select: none; }
@@ -255,6 +257,20 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }
+
+/* Cost tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 14px; }
+.tile { background: var(--surface-2); border-radius: 12px; padding: 12px 14px; }
+.tile .k { color: var(--ink-2); font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+.tile .k .icon { width: 15px; height: 15px; }
+.tile .v { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; margin-top: 2px; }
+.tile .s { color: var(--muted); font-size: 12.5px; }
+.tile.good .v { color: #006300; }
+.tile.good .k .icon { color: var(--good); }
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .tile.good .v { color: #0ca30c; } }
+:root[data-theme="dark"] .tile.good .v { color: #0ca30c; }
+.bar { fill: url(#cost-fill); }
+.bar:hover, .bar.hover { filter: brightness(1.12); }
 
 /* Charts */
 .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0 4px; color: var(--ink-2); font-size: 13px; }

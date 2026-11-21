@@ -123,6 +123,15 @@ event table. Overrides from the UI are applied immediately. Light and dark mode 
 OS. The frontend is plain HTML/JS in `web/` (no build step); in dev builds it is served
 straight from the source folder, so edits only need a browser refresh.
 
+## Heating cost
+
+The dashboard estimates what each radiator costs: on-time from the decision log × the
+radiator's wattage (set per plug in Settings → Plugs) × the actual price in each 15-minute
+slot. It shows cost, energy, the average price paid against each day's average price, and
+what the timing saved. Dry-run plugs show what they *would* have cost. The Sonoff Basic
+has no power metering, so these are estimates; plugs with metering (POW R3, S31, ...)
+could report measured energy later.
+
 ## Notifications
 
 Pluggable notifiers selected in config: `discord` (webhook; first implementation), later

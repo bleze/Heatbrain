@@ -49,7 +49,7 @@
   // --- small form helpers ------------------------------------------------------------
   function field(parent, label, input, opts = {}) {
     const f = el("label", { class: `field${opts.wide ? " wide" : ""}` }, parent);
-    el("span", {}, f, label);
+    el("span", { title: label }, f, label);
     f.appendChild(input);
     if (opts.hint) el("div", { class: "hint" }, f, opts.hint);
     return f;
@@ -94,12 +94,20 @@
     l.appendChild(document.createTextNode(label));
     return l;
   }
-  function time(obj, key) {
+  function time(obj, key, isEnd = false) {
     const i = el("input", { type: "time", step: 900 });
     i.value = obj[key] === "24:00" ? "00:00" : (obj[key] ?? "");
-    i.addEventListener("input", () => { obj[key] = i.value || "00:00"; changed(); renderTimeline?.(); });
+    i.addEventListener("input", () => {
+      const v = i.value || "00:00";
+      obj[key] = isEnd && v === "00:00" ? "24:00" : v;  // an end of 00:00 is midnight
+      changed(); renderTimeline?.();
+    });
     return i;
   }
+  const allDayNote = (row, w) => {
+    const toMin = (x) => (x === "24:00" ? 1440 : Number(x.slice(0, 2)) * 60 + Number(x.slice(3, 5)));
+    if (w.from && w.to && toMin(w.to) - toMin(w.from) === 1440) el("span", { class: "muted" }, row, "all day");
+  };
   function btn(parent, label, iconName, onClick, cls = "") {
     const b = el("button", { type: "button", class: cls }, parent);
     if (iconName) b.appendChild(icon(iconName));
@@ -247,12 +255,12 @@
 
     if (room.priceOnly) {
       const g = el("div", { class: "form-grid" }, c);
-      field(g, "Heat during the cheapest … hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1 }));
+      field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1 }), { hint: "heats in the cheapest hours of each day" });
       el("h3", {}, c, "Never heat between");
       const avoid = arr(room.priceOnly, "avoid");
       avoid.forEach((w, i) => {
         const r = el("div", { class: "sched-row" }, c);
-        r.appendChild(time(w, "from")); el("span", {}, r, "–"); r.appendChild(time(w, "to"));
+        r.appendChild(time(w, "from")); el("span", {}, r, "–"); r.appendChild(time(w, "to", true));
         btn(r, "", "trash", () => { avoid.splice(i, 1); changed(); render(); }, "ghost danger");
       });
       btn(el("div", { style: "margin-top:8px" }, c), "Add window", "plus", () => { avoid.push({ from: "17:00", to: "21:00" }); changed(); render(); });
@@ -272,9 +280,10 @@
     renderTimeline = () => drawTimeline(tl, room);
     sched.forEach((b, i) => {
       const r = el("div", { class: "sched-row" }, c);
-      r.appendChild(time(b, "from")); el("span", {}, r, "–"); r.appendChild(time(b, "to"));
+      r.appendChild(time(b, "from")); el("span", {}, r, "–"); r.appendChild(time(b, "to", true));
       const t = num(b, "target", { step: 0.5, onChange: () => drawTimeline(tl, room) });
       r.appendChild(t); el("span", { class: "muted" }, r, "°C");
+      allDayNote(r, b);
       btn(r, "", "trash", () => { sched.splice(i, 1); changed(); render(); }, "ghost danger");
     });
     btn(el("div", { style: "margin-top:8px" }, c), "Add period", "plus", () => {
@@ -286,14 +295,14 @@
     el("summary", {}, adv, "Advanced: how eagerly to chase cheap prices");
     const st = (room.strategy ||= {});
     const ag = el("div", { class: "form-grid" }, adv);
-    field(ag, "Coast during peak down to target − (°C)", num(st, "peakAllowedDrop", { step: 0.1, placeholder: "1.0" }));
-    field(ag, "Pre-heat before peak up to target + (°C)", num(st, "preheatBoost", { step: 0.1, placeholder: "1.0" }));
-    field(ag, "Look ahead for peaks (minutes)", num(st, "preheatMinutes", { step: 15, placeholder: "180" }));
-    field(ag, "Cheap-price boost (°C)", num(st, "cheapBoost", { step: 0.1, placeholder: "0.5" }));
-    field(ag, "Hysteresis ± (°C)", num(st, "hysteresis", { step: 0.1, placeholder: "0.3" }));
-    field(ag, "Distrust readings older than (min)", num(st, "staleMinutes", { step: 5, placeholder: "30" }));
-    field(ag, "Limp mode ON (min/hour)", num(st, "limpOnMinutes", { step: 5, placeholder: "10" }));
-    field(ag, "Limp mode OFF (min)", num(st, "limpOffMinutes", { step: 5, placeholder: "50" }));
+    field(ag, "Peak coasting −°C", num(st, "peakAllowedDrop", { step: 0.1, placeholder: "1.0" }), { hint: "below target in expensive hours" });
+    field(ag, "Pre-heat +°C", num(st, "preheatBoost", { step: 0.1, placeholder: "1.0" }), { hint: "above target before a peak" });
+    field(ag, "Peak look-ahead (min)", num(st, "preheatMinutes", { step: 15, placeholder: "180" }), { hint: "how early to start pre-heating" });
+    field(ag, "Cheap boost +°C", num(st, "cheapBoost", { step: 0.1, placeholder: "0.5" }), { hint: "extra in the cheapest hours" });
+    field(ag, "Hysteresis ±°C", num(st, "hysteresis", { step: 0.1, placeholder: "0.3" }), { hint: "avoids rapid on/off" });
+    field(ag, "Stale after (min)", num(st, "staleMinutes", { step: 5, placeholder: "30" }), { hint: "older readings are not trusted" });
+    field(ag, "Limp mode ON (min)", num(st, "limpOnMinutes", { step: 5, placeholder: "10" }), { hint: "when the temperature is unknown" });
+    field(ag, "Limp mode OFF (min)", num(st, "limpOffMinutes", { step: 5, placeholder: "50" }), { hint: "then off for this long" });
   }
 
   // 24 h preview of the schedule: blue (cool) to orange (warm), uncovered time in grey.
@@ -406,6 +415,8 @@
 
     const g = el("div", { class: "form-grid" }, c);
     if ((p.type || "tasmota") === "tasmota") field(g, "Address", txt(p, "host", { placeholder: "192.168.1.38" }));
+    field(g, "Radiator power (W)", num(p, "watts", { step: 50, min: 0, placeholder: "e.g. 1500" }),
+      { hint: "from the radiator's label: used to estimate cost" });
 
     // Live status
     const chips = el("div", { class: "plugs", style: "margin-top:12px" }, c);
@@ -452,8 +463,8 @@
     el("summary", {}, adv, "Advanced: fail-safe timing and password");
     const fs = (p.failsafe ||= {});
     const ag = el("div", { class: "form-grid" }, adv);
-    field(ag, "Auto-off after (min) without refresh", num(fs, "pulseMinutes", { step: 1, placeholder: "20" }));
-    field(ag, "Limp mode after (min) of silence", num(fs, "watchdogMinutes", { step: 1, placeholder: "30" }));
+    field(ag, "Auto-off (min)", num(fs, "pulseMinutes", { step: 1, placeholder: "20" }), { hint: "if heatbrain stops refreshing it" });
+    field(ag, "Limp mode after (min)", num(fs, "watchdogMinutes", { step: 1, placeholder: "30" }), { hint: "of silence from heatbrain" });
     field(ag, "Limp mode ON (min)", num(fs, "limpOnMinutes", { step: 1, placeholder: "10" }), { hint: "0 = stay off" });
     field(ag, "Limp mode OFF (min)", num(fs, "limpOffMinutes", { step: 1, placeholder: "50" }));
     field(ag, "Tasmota web password", secret(p, "password", "none"));
@@ -473,7 +484,7 @@
       const g = el("div", { class: "form-grid" }, card);
       field(g, "Client ID", txt(n, "clientId"));
       field(g, "Client secret", secret(n, "clientSecret"));
-      field(g, "Refresh token", secret(n, "refreshToken"), { hint: "only used once; heatbrain keeps the rotating token itself" });
+      field(g, "Refresh token", secret(n, "refreshToken"), { hint: "used once; heatbrain keeps the rotating token" });
       const steps = el("details", { class: "advanced" }, card);
       el("summary", {}, steps, "Where do I get these?");
       const ol = el("ol", {}, steps);
@@ -537,9 +548,9 @@
         field(cg, "Grid company GLN", txt(comp, "gln", { placeholder: "5790000705689" }));
         const codes = el("input", { type: "text", value: [].concat(comp.codes || []).join(", ") });
         codes.addEventListener("input", () => { comp.codes = codes.value.split(",").map((x) => x.trim()).filter(Boolean); changed(); });
-        field(cg, "Charge codes (comma separated)", codes, { hint: "Radius C-customers: DT_C_01" });
+        field(cg, "Charge codes", codes, { hint: "comma separated · Radius C-customers: DT_C_01" });
       } else if (comp.type === "fixed") {
-        field(cg, `Amount (${S.cfg.currency || "DKK"}/kWh, excl. VAT)`, num(comp, "amount", { step: 0.001 }));
+        field(cg, `Amount (${S.cfg.currency || "DKK"}/kWh)`, num(comp, "amount", { step: 0.001 }), { hint: "excluding VAT" });
       } else if (comp.type === "schedule") {
         const ta = el("textarea", { rows: 8 });
         ta.value = JSON.stringify(comp.seasons || [], null, 2);
@@ -606,16 +617,17 @@
     sectionHead(rules, "When to notify", "bell", "amber",
       "Problems must last a while before you hear about them; you also get a message when they are resolved.");
     const rg = el("div", { class: "form-grid" }, rules);
-    field(rg, "Remind about ongoing problems every (hours)", num(n, "repeatHours", { step: 1, min: 1, placeholder: "6" }));
+    field(rg, "Reminder interval (hours)", num(n, "repeatHours", { step: 1, min: 1, placeholder: "6" }), { hint: "for problems that are still ongoing" });
     const quietOn = !!n.quietHours;
-    const qwrap = el("div", { class: "field" }, rg);
-    el("span", {}, qwrap, "Quiet hours (critical alerts still come through)");
+    const qwrap = el("div", { class: "field span2" }, rg);
+    el("span", {}, qwrap, "Quiet hours");
     const qrow = el("div", { class: "row" }, qwrap);
     const qchk = el("input", { type: "checkbox" }, el("label", { class: "check" }, qrow));
     qchk.checked = quietOn;
     qchk.addEventListener("change", () => { if (qchk.checked) n.quietHours = { from: "23:00", to: "07:00" }; else delete n.quietHours; changed(); render(); });
-    if (quietOn) { qrow.appendChild(time(n.quietHours, "from")); el("span", {}, qrow, "–"); qrow.appendChild(time(n.quietHours, "to")); }
-    const sg = el("div", { class: "field" }, rg);
+    el("div", { class: "hint" }, qwrap, "critical alerts still come through");
+    if (quietOn) { qrow.appendChild(time(n.quietHours, "from")); el("span", {}, qrow, "–"); qrow.appendChild(time(n.quietHours, "to", true)); }
+    const sg = el("div", { class: "field span2" }, rg);
     el("span", {}, sg, "Startup");
     sg.appendChild(chk(n, "notifyOnStart", "Send a message when heatbrain starts", true));
   }
@@ -627,7 +639,7 @@
     const g = el("div", { class: "form-grid" }, card);
     field(g, "Time zone", txt(S.cfg, "timezone", { placeholder: "Europe/Copenhagen" }));
     const control = (S.cfg.control ||= {});
-    field(g, "Control step every (seconds)", num(control, "tickSeconds", { step: 60, min: 60, placeholder: "300" }),
+    field(g, "Control interval (s)", num(control, "tickSeconds", { step: 60, min: 60, placeholder: "300" }),
       { hint: "at most half of each live plug's auto-off time" });
     const web = (S.cfg.web ||= {});
     field(g, "Web UI port", num(web, "port", { step: 1, placeholder: "8080" }), { hint: "takes effect after a restart" });
