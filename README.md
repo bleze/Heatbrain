@@ -91,7 +91,11 @@ Only provision a plug once heatbrain runs continuously; otherwise it enters limp
 ## Rooms and the planner
 
 Each room has plugs, a sensor (`"netatmo:Bedroom"`, by module name or id), `minTemp`,
-`maxTemp` and a schedule of target temperatures. Rooms without a sensor use `priceOnly`
+`maxTemp` and a **daily program** of switch points, each running until the next one (the
+last continues past midnight): **heat to X** (price-aware), **keep above X** (a floor only:
+no pre-heating or boosting) or **off** (only frost protection, e.g. the 17-21 peak tariff or
+the night). Older configs with `schedule` bands and `noHeat` windows are converted
+automatically. Rooms without a sensor use `priceOnly`
 (run the N cheapest hours per day, with no-heat windows). Every tick (default 5 min) the
 planner decides each room, checking in this order:
 

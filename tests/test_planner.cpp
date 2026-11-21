@@ -49,9 +49,7 @@ RoomConfig bedroom() {
     r.sensor = "netatmo:Bedroom";
     r.minTemp = 16;
     r.maxTemp = 22;
-    r.schedule = {{{7 * 60, 21 * 60}, 19.0, "07:00-21:00"},
-                  {{21 * 60, 23 * 60}, 20.0, "21:00-23:00"},
-                  {{23 * 60, 7 * 60}, 16.0, "23:00-07:00"}};
+    r.program = {{7 * 60, ProgramMode::Heat, 19.0}, {21 * 60, ProgramMode::Heat, 20.0}, {23 * 60, ProgramMode::Heat, 16.0}};
     return r;
 }
 
@@ -172,7 +170,7 @@ TEST_CASE("Pre-heat before the peak when it's clearly cheaper now") {
 
 TEST_CASE("Cheapest slots: heat a little extra") {
     RoomConfig r = bedroom();
-    r.schedule = {{{0, 1440}, 19.0, "all day"}};
+    r.program = {{0, ProgramMode::Heat, 19.0}};
     const auto d = decide(input(at(3), 19.0), r);
     CHECK(d.on);
     CHECK(d.reason == Reason::CheapBoost);
@@ -216,12 +214,15 @@ TEST_CASE("Decision inputs are captured for the log") {
     CHECK(d.inputs.priceExpensive);
 }
 
-TEST_CASE("No-heat windows: off even below minimum, but never below frost protection") {
+TEST_CASE("Off periods: off even below minimum, but never below frost protection") {
     RoomConfig r = bedroom();
-    r.noHeat = {DayWindow{17 * 60, 21 * 60}};
+    r.program = {{7 * 60, ProgramMode::Heat, 19.0}, {17 * 60, ProgramMode::Off, 0}, {21 * 60, ProgramMode::Heat, 20.0},
+                 {23 * 60, ProgramMode::Heat, 16.0}};
     const auto peak = decide(input(at(18), 15.0), r);  // below minTemp 16
     CHECK_FALSE(peak.on);
-    CHECK(peak.reason == Reason::AvoidWindow);
+    CHECK(peak.reason == Reason::ScheduledOff);
+    CHECK_FALSE(peak.inputs.target);
+    CHECK(peak.inputs.mode == "off");
     CHECK_THAT(peak.detail, ContainsSubstring("17:00-21:00"));
 
     const auto frost = decide(input(at(18), 4.5), r);
@@ -241,4 +242,31 @@ TEST_CASE("No-heat windows: off even below minimum, but never below frost protec
 
     CHECK(decide(input(at(21), 18.0), r).reason == Reason::BelowTarget);  // window ended
     CHECK(decide(input(at(15), 19.2), r).reason == Reason::PreheatBeforePeak);  // pre-heat still works
+}
+
+TEST_CASE("Program periods: switch points run until the next one and wrap past midnight") {
+    RoomConfig r = bedroom();
+    r.program = {{9 * 60, ProgramMode::Heat, 19.0}, {17 * 60, ProgramMode::Off, 0}, {21 * 60, ProgramMode::Heat, 20.0},
+                 {23 * 60, ProgramMode::Off, 0}};
+    CHECK(periodAt(r, 2 * 60)->point.mode == ProgramMode::Off);  // 23:00 -> 09:00 wraps
+    CHECK(periodAt(r, 2 * 60)->label == "23:00-09:00");
+    CHECK(periodAt(r, 9 * 60)->point.target == 19.0);
+    CHECK(periodAt(r, 16 * 60 + 59)->label == "09:00-17:00");
+    CHECK(periodAt(r, 22 * 60)->point.target == 20.0);
+
+    RoomConfig single = bedroom();
+    single.program = {{0, ProgramMode::Heat, 19.0}};
+    CHECK(periodAt(single, 12 * 60)->label == "all day");
+}
+
+TEST_CASE("Keep above: a floor only, ignores price, no pre-heat or boost") {
+    RoomConfig r = bedroom();
+    r.program = {{0, ProgramMode::Keep, 15.0}};
+    CHECK(decide(input(at(18), 14.5), r).reason == Reason::KeepAbove);       // peak price, still heats
+    CHECK(decide(input(at(18), 15.5), r).reason == Reason::KeepSatisfied);
+    CHECK(decide(input(at(3), 15.5), r).reason == Reason::KeepSatisfied);    // cheapest hours: no boost
+    CHECK(decide(input(at(15), 15.5), r).reason == Reason::KeepSatisfied);   // before the peak: no pre-heat
+    CHECK(decide(input(at(12), 15.1, /*on=*/true), r).on);                   // hysteresis while heating
+    CHECK_FALSE(decide(input(at(12), 15.3, /*on=*/true), r).on);
+    CHECK(decide(input(at(12), 15.0), r).inputs.mode == "keep");
 }

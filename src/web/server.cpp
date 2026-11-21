@@ -278,7 +278,8 @@ void WebServer::routes() {
     // --- Settings -----------------------------------------------------------------------
 
     s.Get("/api/config", [this](const httplib::Request&, httplib::Response& res) {
-        const json cfg = readConfigFile(ctx_.configFile);
+        // Rooms are always presented as daily programs (older configs are converted).
+        const json cfg = withPrograms(readConfigFile(ctx_.configFile));
         sendJson(res, json{{"config", maskSecrets(cfg)}, {"errors", validateConfig(cfg, ctx_.dataDir)}});
     });
 

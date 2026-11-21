@@ -19,6 +19,14 @@ std::vector<RoomConfig> parseRooms(const nlohmann::json& cfg, const std::vector<
 
 DayWindow parseWindow(const nlohmann::json& j);
 
+// Rooms written before daily programs existed have "schedule" bands (+ "noHeat" windows).
+// Returns the room with an equivalent "program" of switch points instead; rooms that
+// already have a program (or are price-only) are returned unchanged.
+nlohmann::json roomWithProgram(const nlohmann::json& room);
+
+// The whole config with every room in program form (what the settings UI edits).
+nlohmann::json withPrograms(nlohmann::json cfg);
+
 // Manual overrides, stored in <dataDir>/overrides.json so the CLI can set them while
 // `heatbrain run` is running (it re-reads the file every tick).
 class Overrides {

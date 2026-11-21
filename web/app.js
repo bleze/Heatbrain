@@ -23,6 +23,9 @@ const REASONS = {
   MANUAL_OFF: ["Manual off", null],
   NOT_CHEAP_HOURS: ["Waiting for cheap hours", null],
   AVOID_WINDOW: ["No-heat window", null],
+  SCHEDULED_OFF: ["Off by program", null],
+  KEEP_ABOVE: ["Keeping above the floor", "comfort"],
+  KEEP_SATISFIED: ["Above the floor", null],
 };
 const CATEGORIES = {
   comfort: "Heating: comfort",
@@ -303,6 +306,8 @@ function renderRooms() {
     // Price-only rooms have no temperature: the current price is what drives them.
     const hero = el("div", { class: "hero" }, card, r.priceOnly ? price(inp.price) : temp(inp.temperature));
     if (r.priceOnly) el("small", {}, hero, `${state.status.currency}/kWh · no sensor`);
+    else if (inp.mode === "off") el("small", {}, hero, `off ${inp.targetLabel || ""}`.trim());
+    else if (inp.mode === "keep") el("small", {}, hero, `keep above ${temp(inp.target)}`);
     else if (inp.target != null) el("small", {}, hero, `target ${temp(inp.target)}`);
 
     const reason = el("div", { class: "reason" }, card);

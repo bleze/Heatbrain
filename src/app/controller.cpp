@@ -25,7 +25,7 @@ void add(TickResult& r, std::string key, Severity sev, std::string msg, minutes 
 }  // namespace
 
 json toJson(const DecisionInputs& in) {
-    json j{{"minTemp", in.minTemp}, {"maxTemp", in.maxTemp}, {"targetLabel", in.targetLabel},
+    json j{{"minTemp", in.minTemp}, {"maxTemp", in.maxTemp}, {"targetLabel", in.targetLabel}, {"mode", in.mode},
            {"priceExpensive", in.priceExpensive}, {"priceCheapest", in.priceCheapest}};
     if (in.temperature) j["temperature"] = *in.temperature;
     if (in.temperatureAgeMinutes) j["temperatureAgeMinutes"] = *in.temperatureAgeMinutes;

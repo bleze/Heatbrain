@@ -169,11 +169,32 @@ TEST_CASE("Room config validation") {
     CHECK_THROWS_WITH(rooms(R"({"rooms":[{"id":"r","plugs":["a"],"priceOnly":{}},{"id":"s","plugs":["a"],"priceOnly":{}}]})"),
                       ContainsSubstring("more than one room"));
     CHECK_THROWS_WITH(rooms(R"({"rooms":[{"id":"r","plugs":["a"],"sensor":"netatmo:X",
-                       "schedule":[{"from":"07:00","to":"21:00","target":19}]}]})"),
-                      ContainsSubstring("does not cover"));
+                       "program":[{"at":"07:00","mode":"heat","target":19},{"at":"07:00","mode":"off"}]}]})"),
+                      ContainsSubstring("two switch points"));
+    CHECK_THROWS_WITH(rooms(R"({"rooms":[{"id":"r","plugs":["a"],"sensor":"netatmo:X",
+                       "program":[{"at":"07:00","mode":"warm"}]}]})"),
+                      ContainsSubstring("heat, keep or off"));
     CHECK_THROWS_WITH(rooms(R"({"rooms":[{"id":"r","plugs":["a"],"sensor":"netatmo:X","maxTemp":22,
                        "schedule":[{"from":"00:00","to":"24:00","target":25}]}]})"),
-                      ContainsSubstring("between minTemp and maxTemp"));
+                      ContainsSubstring("must be between 15 and 22"));
     CHECK_NOTHROW(rooms(R"({"rooms":[{"id":"r","plugs":["a"],"sensor":"netatmo:X",
                     "schedule":[{"from":"07:00","to":"23:00","target":19},{"from":"23:00","to":"07:00","target":16}]}]})"));
+    CHECK_NOTHROW(rooms(R"({"rooms":[{"id":"r","plugs":["a"],"sensor":"netatmo:X",
+                    "program":[{"at":"23:00","mode":"keep","target":15},{"at":"09:00","mode":"heat","target":19}]}]})"));
+}
+
+TEST_CASE("Old schedules with no-heat windows become an equivalent program") {
+    const auto room = json::parse(R"({"id":"bedroom","plugs":["a"],"sensor":"netatmo:X",
+        "schedule":[{"from":"07:00","to":"21:00","target":19},{"from":"21:00","to":"23:00","target":20},
+                    {"from":"23:00","to":"07:00","target":16}],
+        "noHeat":[{"from":"17:00","to":"21:00"}]})");
+    const auto converted = roomWithProgram(room);
+    CHECK_FALSE(converted.contains("schedule"));
+    CHECK_FALSE(converted.contains("noHeat"));
+    CHECK(converted["program"] == json::parse(R"([
+        {"at":"07:00","mode":"heat","target":19.0},
+        {"at":"17:00","mode":"off"},
+        {"at":"21:00","mode":"heat","target":20.0},
+        {"at":"23:00","mode":"heat","target":16.0}])"));
+    CHECK(roomWithProgram(converted) == converted);  // already converted: unchanged
 }

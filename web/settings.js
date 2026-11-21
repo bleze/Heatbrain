@@ -262,7 +262,7 @@
       const id = slug("room", new Set(rooms.map((r) => r.id)));
       S.newIds.add(id);
       rooms.push({ id, name: "New room", plugs: [], sensor: "", minTemp: 16, maxTemp: 22,
-        schedule: [{ from: "07:00", to: "22:00", target: 20 }, { from: "22:00", to: "07:00", target: 17 }] });
+        program: [{ at: "07:00", mode: "heat", target: 20 }, { at: "17:00", mode: "off" }, { at: "21:00", mode: "heat", target: 20 }, { at: "23:00", mode: "keep", target: 16 }] });
       render();
     }, "primary");
 
@@ -297,7 +297,7 @@
       if (priceOnly && !room.priceOnly) room.priceOnly = { hoursPerDay: 12, avoid: [{ from: "17:00", to: "21:00" }] };
       if (!priceOnly) {
         delete room.priceOnly;
-        room.schedule ||= [{ from: "00:00", to: "24:00", target: 20 }];
+        room.program ||= [{ at: "00:00", mode: "heat", target: 20 }];
         room.sensor ??= "";
       }
       changed(); render();
@@ -346,36 +346,62 @@
     field(g, "Never above (°C)", num(room, "maxTemp", { step: 0.5 }), { hint: "hard stop, even when manual" });
     field(g, "Frost protection (°C)", num(room, "frostTemp", { step: 0.5, placeholder: "5" }));
 
-    el("h3", {}, c, "Target temperature through the day");
-    const sched = arr(room, "schedule");
+    el("h3", {}, c, "Daily program");
+    el("div", { class: "hint", style: "margin-top:-4px" }, c,
+      "Each switch point runs until the next one; the last continues past midnight. Off still protects against frost.");
+    const program = arr(room, "program");
+    if (!program.length) program.push({ at: "00:00", mode: "heat", target: 20 });
+    const toMin = (x) => Number(x.slice(0, 2)) * 60 + Number(x.slice(3, 5));
+    program.sort((x, y) => toMin(x.at) - toMin(y.at));
     const tl = el("div", {}, c);
     renderTimeline = () => drawTimeline(tl, room);
-    sched.forEach((b, i) => {
+    program.forEach((pt, i) => {
       const r = el("div", { class: "sched-row" }, c);
-      r.appendChild(time(b, "from")); el("span", {}, r, "–"); r.appendChild(time(b, "to", true));
-      const t = num(b, "target", { step: 0.5, onChange: () => drawTimeline(tl, room) });
-      r.appendChild(t); el("span", { class: "muted" }, r, "°C");
-      allDayNote(r, b);
-      btn(r, "", "trash", () => { sched.splice(i, 1); changed(); render(); }, "ghost danger row-delete");
+      const at = time(pt, "at");
+      at.addEventListener("change", () => render());  // re-sort once the time is set
+      r.appendChild(at);
+      r.appendChild(sel(pt, "mode", [["heat", "Heat to"], ["keep", "Keep above"], ["off", "Off"]], () => {
+        if (pt.mode === "off") delete pt.target;
+        else pt.target ??= pt.mode === "keep" ? 15 : 20;
+        render();
+      }));
+      if (pt.mode !== "off") {
+        r.appendChild(num(pt, "target", { step: 0.5, onChange: () => drawTimeline(tl, room) }));
+        el("span", { class: "muted" }, r, "°C");
+      }
+      const next = program[(i + 1) % program.length];
+      el("span", { class: "muted" }, r, program.length === 1 ? "all day" : `until ${next.at}`);
+      if (program.length > 1) {
+        btn(r, "", "trash", () => { program.splice(i, 1); changed(); render(); }, "ghost danger row-delete");
+      }
     });
-    btn(el("div", { style: "margin-top:8px" }, c), "Add period", "plus", () => {
-      sched.push({ from: "06:00", to: "08:00", target: 20 }); changed(); render();
+    const addRow = el("div", { class: "row", style: "margin-top:8px" }, c);
+    btn(addRow, "Add switch point", "plus", () => {
+      const used = new Set(program.map((x) => x.at));
+      let m = (toMin(program[program.length - 1].at) + 120) % 1440;
+      while (used.has(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`)) m = (m + 60) % 1440;
+      program.push({ at: `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`, mode: "heat", target: 20 });
+      changed(); render();
     });
+    // One click for the peak tariff: off 17-21, then back to whatever was running at 21:00.
+    const modeAt = (m) => { let cur = program[program.length - 1]; for (const x of program) if (toMin(x.at) <= m) cur = x; return cur; };
+    const peakOff = program.some((x) => x.at === "17:00" && x.mode === "off");
+    if (!peakOff) {
+      btn(addRow, "Off 17:00-21:00 (peak tariff)", "bolt", () => {
+        const resume = { ...modeAt(21 * 60) };
+        for (let k = program.length - 1; k >= 0; k--) {
+          const m = toMin(program[k].at);
+          if (m >= 17 * 60 && m < 21 * 60) program.splice(k, 1);  // the window replaces these
+        }
+        program.push({ at: "17:00", mode: "off" });
+        if (!program.some((x) => x.at === "21:00")) {
+          delete resume.at;
+          program.push({ at: "21:00", ...resume });
+        }
+        changed(); render();
+      });
+    }
     drawTimeline(tl, room);
-
-    // Hard no-heat windows (e.g. the 17-21 peak tariff). Only frost protection overrides.
-    el("h3", {}, c, "Never heat between");
-    el("div", { class: "hint", style: "margin-top:-4px" }, c,
-      "Off in these hours even below the minimum - only frost protection still heats. Pre-heating warms the room beforehand.");
-    const noHeat = arr(room, "noHeat");
-    noHeat.forEach((w, i) => {
-      const r = el("div", { class: "sched-row" }, c);
-      r.appendChild(time(w, "from")); el("span", {}, r, "–"); r.appendChild(time(w, "to", true));
-      btn(r, "", "trash", () => { noHeat.splice(i, 1); changed(); render(); }, "ghost danger row-delete");
-    });
-    btn(el("div", { style: "margin-top:8px" }, c), noHeat.length ? "Add window" : "Add 17:00-21:00 (peak tariff)", "plus", () => {
-      noHeat.push({ from: "17:00", to: "21:00" }); changed(); render();
-    });
 
     const adv = section(c, `room:${room.id}`);
     el("summary", {}, adv, "Advanced: how eagerly to chase cheap prices");
@@ -391,38 +417,50 @@
     field(ag, "Limp mode OFF (min)", num(st, "limpOffMinutes", { step: 5, placeholder: "50" }), { hint: "then off for this long" });
   }
 
-  // 24 h preview of the schedule: blue (cool) to orange (warm), uncovered time in grey.
+  // 24 h preview of the program: heat in blue (cool) to orange (warm), keep-above as a
+  // light tint, off striped.
   function drawTimeline(host, room) {
     host.replaceChildren();
-    const toMin = (s) => { const [h, m] = (s || "00:00").split(":").map(Number); return h * 60 + m; };
-    const bands = (room.schedule || []).map((b) => ({ from: toMin(b.from), to: b.to === "24:00" ? 1440 : toMin(b.to), t: b.target }));
-    const at = (m) => bands.find((b) => (b.from <= b.to ? m >= b.from && m < b.to : m >= b.from || m < b.to));
-    const off = (room.noHeat || []).map((w) => ({ from: toMin(w.from), to: w.to === "24:00" ? 1440 : toMin(w.to) }));
-    const inOff = (m) => off.some((w) => (w.from <= w.to ? m >= w.from && m < w.to : m >= w.from || m < w.to));
+    const toMin = (x) => Number((x || "00:00").slice(0, 2)) * 60 + Number((x || "00:00").slice(3, 5));
+    const pts = [...(room.program || [])].sort((x, y) => toMin(x.at) - toMin(y.at));
+    const stateAt = (m) => { let cur = pts[pts.length - 1]; for (const x of pts) if (toMin(x.at) <= m) cur = x; return cur; };
     const segs = [];
     for (let m = 0; m < 1440; m += 15) {
-      const b = at(m), t = inOff(m) ? "off" : b ? b.t : null, last = segs[segs.length - 1];
-      if (last && last.t === t) last.len += 15; else segs.push({ t, len: 15 });
+      const st = pts.length ? stateAt(m) : null;
+      const key = st ? `${st.mode}:${st.target ?? ""}` : "none";
+      const last = segs[segs.length - 1];
+      if (last && last.key === key) last.len += 15; else segs.push({ key, st, len: 15 });
     }
     const lo = room.minTemp ?? 15, hi = room.maxTemp ?? 23;
     const bar = el("div", { class: "timeline" }, host);
-    for (const s of segs) {
-      const d = el("div", { style: `flex:${s.len}` }, bar, s.t == null ? "–" : s.t === "off" ? "off" : `${s.t}°`);
-      if (s.t == null) { d.style.background = "var(--grid)"; d.style.color = "var(--muted)"; continue; }
-      if (s.t === "off") { d.className = "tl-off"; d.title = "never heats"; continue; }
+    for (const sg of segs) {
+      const st = sg.st;
+      if (!st) { el("div", { style: `flex:${sg.len};background:var(--grid)` }, bar, "–"); continue; }
+      if (st.mode === "off") {
+        const d = el("div", { style: `flex:${sg.len}`, class: "tl-off", title: "off (frost protection only)" }, bar, "off");
+        continue;
+      }
+      const label = st.mode === "keep" ? `≥${st.target}°` : `${st.target}°`;
+      const d = el("div", { style: `flex:${sg.len}`, title: st.mode === "keep" ? `keep above ${st.target}°C` : `heat to ${st.target}°C` }, bar, label);
       // Cool blue -> amber -> deep orange (two segments, so the middle never turns muddy).
-      const f = Math.max(0, Math.min(1, (s.t - lo) / Math.max(1, hi - lo)));
-      d.style.background = f < 0.5
+      const f = Math.max(0, Math.min(1, ((st.target ?? lo) - lo) / Math.max(1, hi - lo)));
+      const color = f < 0.5
         ? `color-mix(in oklch, #2a78d6 ${Math.round((1 - f * 2) * 100)}%, #f59f00)`
         : `color-mix(in oklch, #f59f00 ${Math.round((2 - f * 2) * 100)}%, #e8590c)`;
-      d.style.color = f > 0.3 && f < 0.7 ? "#0b0b0b" : "#fff";
-      d.title = `${s.t}°C`;
+      if (st.mode === "keep") {
+        d.className = "tl-keep";
+        d.style.background = `color-mix(in oklch, ${color} 35%, var(--surface-2))`;
+        d.style.color = "var(--ink)";
+      } else {
+        d.style.background = color;
+        d.style.color = f > 0.3 && f < 0.7 ? "#0b0b0b" : "#fff";
+      }
     }
     const axis = el("div", { class: "timeline-axis" }, host);
     for (const h of ["00", "06", "12", "18", "24"]) el("span", {}, axis, h);
     // Label every segment, then hide only the labels that really don't fit (depends on width).
     requestAnimationFrame(() => {
-      for (const d of bar.children) d.style.color = d.scrollWidth > d.clientWidth ? "transparent" : d.style.color;
+      for (const d of bar.children) if (d.scrollWidth > d.clientWidth) d.style.color = "transparent";
     });
   }
 

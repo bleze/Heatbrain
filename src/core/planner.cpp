@@ -20,11 +20,28 @@ std::string temp(double t) { return std::format("{:.1f}°C", t); }
 
 }  // namespace
 
-const TargetBand* targetAt(const RoomConfig& room, int minuteOfDay) {
-    for (const auto& b : room.schedule) {
-        if (b.window.contains(minuteOfDay)) return &b;
+std::string_view modeName(ProgramMode m) {
+    switch (m) {
+        case ProgramMode::Heat: return "heat";
+        case ProgramMode::Keep: return "keep";
+        case ProgramMode::Off: return "off";
     }
-    return nullptr;
+    return "?";
+}
+
+std::optional<ActivePeriod> periodAt(const RoomConfig& room, int minute) {
+    const auto& p = room.program;
+    if (p.empty()) return std::nullopt;
+    std::size_t idx = p.size() - 1;  // before the first point: the last one is still running
+    for (std::size_t i = 0; i < p.size(); ++i) {
+        if (p[i].atMinute <= minute) idx = i;
+    }
+    ActivePeriod a;
+    a.point = p[idx];
+    a.fromMinute = p[idx].atMinute;
+    a.toMinute = p[(idx + 1) % p.size()].atMinute;
+    a.label = p.size() == 1 ? "all day" : formatWindow(DayWindow{a.fromMinute, a.toMinute});
+    return a;
 }
 
 std::string formatWindow(const DayWindow& w) {
@@ -51,6 +68,9 @@ std::string_view reasonCode(Reason r) {
         case Reason::CheapHours: return "CHEAP_HOURS";
         case Reason::NotCheapHours: return "NOT_CHEAP_HOURS";
         case Reason::AvoidWindow: return "AVOID_WINDOW";
+        case Reason::ScheduledOff: return "SCHEDULED_OFF";
+        case Reason::KeepAbove: return "KEEP_ABOVE";
+        case Reason::KeepSatisfied: return "KEEP_SATISFIED";
         case Reason::NoPricesFallback: return "NO_PRICES_FALLBACK";
     }
     return "UNKNOWN";
@@ -160,10 +180,12 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     inputs.priceExpensive = outlook.expensive;
     inputs.priceCheapest = outlook.cheapest;
 
-    const TargetBand* band = targetAt(room, minuteOfDay(tz.toLocal(in.now)));
-    const double target = band ? band->target : room.minTemp;
-    inputs.target = target;
-    inputs.targetLabel = band ? band->label : "no schedule: minimum";
+    const auto period = periodAt(room, minuteOfDay(tz.toLocal(in.now)));
+    const ProgramMode mode = period ? period->point.mode : ProgramMode::Off;
+    const double target = period ? period->point.target : room.minTemp;
+    if (mode != ProgramMode::Off) inputs.target = target;
+    inputs.targetLabel = period ? period->label : "no program";
+    inputs.mode = std::string(modeName(mode));
 
     const bool fresh = in.temperature && in.measuredAt && in.now - *in.measuredAt <= s.staleAfter;
     const double t = in.temperature.value_or(0.0);
@@ -189,18 +211,16 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         return make(false, Reason::ManualOff, "Manual OFF until " + until, inputs);
     }
 
-    // 3. No-heat windows (e.g. the 17-21 peak tariff): off, except to prevent frost.
-    //    Comes before limp mode, so missing data never heats in a window either.
-    const int nowMinute = minuteOfDay(tz.toLocal(in.now));
-    for (const auto& w : room.noHeat) {
-        if (!w.contains(nowMinute)) continue;
+    // 3. "Off" in the program (e.g. the 17-21 peak tariff, or the night): off, except to
+    //    prevent frost. Comes before limp mode, so missing data never heats here either.
+    if (mode == ProgramMode::Off) {
         if (fresh && t < room.frostTemp) {
             return make(true, Reason::FrostProtection,
-                        std::format("No-heat window {}, but {} is below frost protection {}", formatWindow(w), temp(t),
+                        std::format("Off {}, but {} is below frost protection {}", inputs.targetLabel, temp(t),
                                     temp(room.frostTemp)),
                         inputs);
         }
-        return make(false, Reason::AvoidWindow, "No-heat window " + formatWindow(w), inputs);
+        return make(false, Reason::ScheduledOff, "Off by program " + inputs.targetLabel, inputs);
     }
 
     // 4. No trustworthy temperature: bounded duty cycle, never continuous heat.
@@ -215,13 +235,22 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                     inputs);
     }
 
-    // 5. Hard minimum, whatever the price.
+    // 5. "Keep above": a floor only - no pre-heating or boosting, price does not matter.
+    if (mode == ProgramMode::Keep) {
+        const std::string where = std::format("{} (keep above {} for {})", temp(t), temp(target), inputs.targetLabel);
+        if (t <= target - h || (in.currentlyOn && t < target + h)) {
+            return make(true, Reason::KeepAbove, "Below the floor: " + where, inputs);
+        }
+        return make(false, Reason::KeepSatisfied, "Above the floor: " + where, inputs);
+    }
+
+    // 6. Hard minimum in heat periods, whatever the price.
     if (t < room.minTemp) {
         return make(true, Reason::BelowMin, std::format("{} is below minimum {}", temp(t), temp(room.minTemp)),
                     inputs);
     }
 
-    // 6. Expensive now: coast, unless it gets too cold.
+    // 7. Expensive now: coast, unless it gets too cold.
     if (outlook.expensive) {
         const double floor = target - s.peakAllowedDrop;
         if (t < floor || (in.currentlyOn && t < floor + h)) {
@@ -236,7 +265,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                     inputs);
     }
 
-    // 7. Cheap now, expensive soon: pre-heat.
+    // 8. Cheap now, expensive soon: pre-heat.
     if (outlook.nextExpensiveAt && *outlook.current < *outlook.nextExpensivePrice * kPreheatMaxRatio) {
         const double ceiling = std::min(target + s.preheatBoost, room.maxTemp - h);
         if (t < ceiling - h || (in.currentlyOn && t < ceiling)) {
@@ -248,7 +277,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         }
     }
 
-    // 8. Among the cheapest slots: a little extra.
+    // 9. Among the cheapest slots: a little extra.
     if (outlook.cheapest) {
         const double ceiling = std::min(target + s.cheapBoost, room.maxTemp - h);
         if (t < ceiling - h || (in.currentlyOn && t < ceiling)) {
@@ -259,7 +288,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         }
     }
 
-    // 9. Plain thermostat with hysteresis.
+    // 10. Plain thermostat with hysteresis.
     const std::string where = std::format("{} (target {} for {})", temp(t), temp(target), inputs.targetLabel);
     if (t <= target - h) return make(true, Reason::BelowTarget, "Below target: " + where, inputs);
     if (t >= target + h) return make(false, Reason::TargetReached, "Target reached: " + where, inputs);

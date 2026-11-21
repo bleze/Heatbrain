@@ -3,6 +3,7 @@
 #include <chrono>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace hb {
@@ -17,10 +18,20 @@ struct DayWindow {
     }
 };
 
-struct TargetBand {
-    DayWindow window;
-    double target = 20.0;
-    std::string label;  // "07:00-21:00", for explanations
+// What a room does in a period of its daily program.
+enum class ProgramMode {
+    Heat,  // heat to the target, price-aware (pre-heat, coast in expensive hours, cheap boost)
+    Keep,  // only keep above the target: no pre-heating or boosting, ignores price
+    Off,   // off; only frost protection still heats
+};
+std::string_view modeName(ProgramMode m);  // "heat" | "keep" | "off"
+
+// A switch point: from `atMinute` until the next point, the room does `mode`.
+// The last point of the day continues past midnight until the first one.
+struct ProgramPoint {
+    int atMinute = 0;
+    ProgramMode mode = ProgramMode::Heat;
+    double target = 20.0;  // unused for Off
 };
 
 // How eagerly the planner trades comfort for price. Defaults are deliberately mild.
@@ -46,17 +57,22 @@ struct RoomConfig {
     std::string name;
     std::vector<std::string> plugIds;
     std::string sensor;             // "<source>:<sensor id or name>", empty for price-only
-    double minTemp = 15.0;          // always heat below this, whatever the price
+    double minTemp = 15.0;          // in heat periods: heat below this whatever the price
     double maxTemp = 23.0;          // never heat above this
-    double frostTemp = 5.0;         // even a manual OFF or a no-heat window heats below this
-    std::vector<DayWindow> noHeat;  // never heat in these windows (e.g. 17-21 peak tariff)
-    std::vector<TargetBand> schedule;
+    double frostTemp = 5.0;         // even "off" or a manual OFF heats below this
+    std::vector<ProgramPoint> program;  // sorted by time, at least one point
     Strategy strategy;
     std::optional<PriceOnlyConfig> priceOnly;
 };
 
-// Target band in effect at a local minute of day (first match), or nullptr.
-const TargetBand* targetAt(const RoomConfig& room, int minuteOfDay);
+// The program period in effect at a local minute of day.
+struct ActivePeriod {
+    ProgramPoint point;
+    int fromMinute = 0;
+    int toMinute = 1440;  // start of the next point (may be smaller than from: wraps)
+    std::string label;    // "17:00-21:00"
+};
+std::optional<ActivePeriod> periodAt(const RoomConfig& room, int minuteOfDay);
 
 std::string formatWindow(const DayWindow& w);  // "17:00-21:00"
 

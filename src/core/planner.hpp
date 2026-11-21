@@ -28,6 +28,9 @@ enum class Reason {
     CheapHours,             // price-only room: among today's cheapest hours
     NotCheapHours,
     AvoidWindow,            // price-only room: in a configured no-heat window
+    ScheduledOff,           // the room's program says off (frost protection only)
+    KeepAbove,              // "keep above" period: below the floor, heating
+    KeepSatisfied,          // "keep above" period: above the floor, off
     NoPricesFallback,       // price-only room without prices: heat outside avoid windows
 };
 
@@ -63,7 +66,8 @@ struct DecisionInputs {
     std::optional<double> temperature;
     std::optional<int> temperatureAgeMinutes;
     std::optional<double> target;
-    std::string targetLabel;
+    std::string targetLabel;   // program period, "17:00-21:00"
+    std::string mode;          // "heat" | "keep" | "off"
     double minTemp = 0, maxTemp = 0;
     std::optional<double> price;
     std::optional<double> medianPrice;
