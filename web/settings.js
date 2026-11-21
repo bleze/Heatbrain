@@ -676,8 +676,16 @@
         a.appendChild(document.createTextNode(`${st.latest.version.replace(/^v/, "")} available`));
       }
       if (st.failsafe?.installed) chip("ok", "shield", "fail-safe installed");
-      else chip("error", "shield", "no fail-safe");
-      if (st.test) {
+      else if (st.failsafe?.unknown) {
+        const ch = el("span", { class: "chip warn", title: st.failsafe.problems.join("; ") }, chips);
+        ch.appendChild(icon("shield"));
+        ch.appendChild(document.createTextNode("fail-safe: plug too slow to check - refresh status"));
+      } else {
+        const ch = el("span", { class: "chip error", title: (st.failsafe?.problems || []).join("\n") }, chips);
+        ch.appendChild(icon("shield"));
+        ch.appendChild(document.createTextNode("no fail-safe"));
+      }
+      if (st.test && st.failsafe?.installed) {
         if (!st.test.verified) chip("error", "alert", "fail-safe test failed");
         else if (!st.test.matchesFirmware) chip("warn", "alert", "not tested on this firmware");
         else chip("ok", "check", `tested on ${st.test.version.split("(")[0]}`);
@@ -690,22 +698,25 @@
     if (dirty() || !savedHasPlug) {
       el("span", { class: "hint" }, actions, "Save or discard your changes first: device actions (fail-safe, test, upgrade) use the saved settings.");
     } else if (st?.reachable) {
-      if (!st.failsafe?.installed) {
+      if (!st.failsafe?.installed && !st.failsafe?.unknown) {
         confirmBtn(actions, "Install fail-safe", "shield",
-          "Back up the plug's settings, turn off its own timers and install the fail-safe?",
+          "Back up the plug's settings, turn off its own timers and install the fail-safe (about 10 seconds)? " +
+          "From then on the plug needs heatbrain: switch it to Live afterwards - in dry-run it switches itself off and runs limp mode (10 min on, 50 min off).",
           async () => {
             try {
               const r = await api(`/api/plugs/${encodeURIComponent(p.id)}/provision`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-              if (r.failsafe?.installed) toast(`${p.name || p.id}: fail-safe installed`);
+              if (r.failsafe?.installed) toast(`${p.name || p.id}: fail-safe installed - test it, then switch the plug to Live`);
               else toast(`${p.name || p.id}: fail-safe not complete - ${(r.failsafe?.problems || []).join("; ")}`, true);
             } catch (e) { toast(`${p.name || p.id}: fail-safe not installed - ${e.message}`, true); }
             S.plugStatus = null; await refreshPlugStatus();
           }, "primary", `${p.id}:provision`, "Installing fail-safe…");
       }
       if (p.mode !== "live" && !busy) {
-        confirmBtn(actions, "Test fail-safe", "check",
-          "The radiator turns on for about 30 seconds to check the auto-off. Go ahead?",
-          () => startPlugJob(p, "test"), "", `${p.id}:test`);
+        if (st.failsafe?.installed) {
+          confirmBtn(actions, "Test fail-safe", "check",
+            "The radiator turns on for about 30 seconds to check the auto-off. Go ahead?",
+            () => startPlugJob(p, "test"), "", `${p.id}:test`, "Starting test…");
+        }
         if (st.updateAvailable) {
           confirmBtn(actions, `Upgrade to ${st.latest.version.replace(/^v/, "")}`, "bolt",
             "Takes 2-5 minutes; the plug restarts and must not lose power meanwhile. The fail-safe is tested afterwards. Start?",

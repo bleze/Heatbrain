@@ -9,7 +9,7 @@ const HELP = {
       "Settings → Sensors: connect Netatmo so rooms get their temperature.",
       "Settings → Rooms: add a room, pick its plug(s) and sensor, and set its daily program.",
       "Leave plugs in dry-run for a day or two and watch what heatbrain would do on the dashboard.",
-      "Happy? Install the fail-safe on a plug, test it, then switch the plug to live.",
+      "Happy? Install the fail-safe on a plug, test it, then switch the plug to live - straight away: with the fail-safe installed, a dry-run plug switches itself off and runs limp mode, because heatbrain does not refresh it.",
       "Settings → Notifications: set up phone notifications so you hear about problems.",
     ],
   },

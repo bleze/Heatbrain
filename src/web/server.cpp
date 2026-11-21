@@ -122,7 +122,9 @@ json failsafeJson(Plug& plug) {
         const auto fs = plug.sw->checkFailsafe();
         return json{{"installed", fs.installed()}, {"problems", fs.problems}};
     } catch (const std::exception& e) {
-        return json{{"installed", false}, {"problems", json::array({std::string("could not check: ") + e.what()})}};
+        // Unknown, not "missing": a slow plug must not look like it lost its fail-safe.
+        return json{{"installed", false}, {"unknown", true},
+                    {"problems", json::array({std::string("could not check: ") + e.what()})}};
     }
 }
 
