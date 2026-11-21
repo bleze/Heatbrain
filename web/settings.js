@@ -69,7 +69,7 @@
 
   // --- small form helpers ------------------------------------------------------------
   function field(parent, label, input, opts = {}) {
-    const f = el("label", { class: `field${opts.wide ? " wide" : ""}` }, parent);
+    const f = el("label", { class: `field${opts.wide ? " wide" : ""}${opts.span2 ? " span2" : ""}` }, parent);
     el("span", { title: label }, f, label);
     f.appendChild(input);
     if (opts.hint) el("div", { class: "hint" }, f, opts.hint);
@@ -702,7 +702,7 @@
     field(g, "Time zone", txt(S.cfg, "timezone", { placeholder: "Europe/Copenhagen" }));
     const control = (S.cfg.control ||= {});
     field(g, "Control interval (s)", num(control, "tickSeconds", { step: 60, min: 60, placeholder: "300" }),
-      { hint: "at most half of each live plug's auto-off time" });
+      { hint: "at most half of each live plug's auto-off time", span2: true });
     const web = (S.cfg.web ||= {});
     field(g, "Web UI port", num(web, "port", { step: 1, placeholder: "8080" }), { hint: "takes effect after a restart" });
 
