@@ -52,6 +52,8 @@ add_library(heatbrain_io STATIC
   src/app/rooms.cpp
   src/app/controller.cpp
   src/app/config_service.cpp
+  src/app/cost_report.cpp
+  src/app/digest.cpp
 )
 target_link_libraries(heatbrain_io PUBLIC
   heatbrain_core
@@ -91,6 +93,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_config_service.cpp
     tests/test_cost.cpp
     tests/test_version.cpp
+    tests/test_digest.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE

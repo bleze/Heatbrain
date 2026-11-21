@@ -903,6 +903,12 @@
     const sg = el("div", { class: "field span2" }, rg);
     el("span", {}, sg, "Startup");
     sg.appendChild(chk(n, "notifyOnStart", "Send a message when heatbrain starts", true));
+    const wk = el("div", { class: "field span2" }, rg);
+    el("span", {}, wk, "Weekly summary");
+    wk.appendChild(chk(n, "weeklySummary", "Cost and savings every Monday morning", true));
+    const hu = el("div", { class: "field span2" }, rg);
+    el("span", {}, hu, "Tomorrow's prices");
+    hu.appendChild(chk(n, "priceHeadsUp", "Tell me when tomorrow is unusually expensive or cheap", true));
   }
 
   // --- System -------------------------------------------------------------------------

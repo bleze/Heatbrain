@@ -12,6 +12,8 @@
 #include "app/cli.hpp"
 #include "app/config.hpp"
 #include "app/controller.hpp"
+#include "app/cost_report.hpp"
+#include "app/digest.hpp"
 #include "app/rooms.hpp"
 #include "core/log.hpp"
 #include "notify/notifier.hpp"
@@ -245,6 +247,10 @@ void controlLoop(ControlEnv& env, hb::StatusBoard& board, std::unique_ptr<hb::Al
         return any;
     };
 
+    const fs::path digestFile = env.cfg.dataDir / "digest.json";
+    hb::DigestState digest = hb::loadDigestState(digestFile);
+    const auto digestOpts = hb::parseDigestOptions(env.cfg.raw);
+
     std::set<std::string> seenKeys;
     while (!g_stop && !g_reload) {
         const Instant now = nowSeconds();
@@ -270,6 +276,28 @@ void controlLoop(ControlEnv& env, hb::StatusBoard& board, std::unique_ptr<hb::Al
         seenKeys = keys;
         alerts.update(now, result.problems, deliver);
         board.set(buildStatus(env, result, alerts.activeProblems(), now));
+
+        // Weekly summary (Monday morning) and tomorrow's-price heads-up.
+        try {
+            const auto recent = env.history->prices(now - hours{24 * 7}, hb::startOfLocalDay(*env.tz, now));
+            const auto messages = hb::dueDigests(
+                now, *env.tz, digest, digestOpts,
+                [&](Instant end) { return hb::costReport(env.cfg.raw, *env.history, end, 7); }, env.controller->prices(),
+                recent);
+            if (!messages.empty()) hb::saveDigestState(digestFile, digest);
+            for (const auto& m : messages) {
+                hb::log::info("{}: {}", m.title, m.text);
+                for (auto& ch : notifications.channels) {
+                    try {
+                        ch->sendText(m.title, m.text);
+                    } catch (const std::exception& e) {
+                        hb::log::warn("{}: {}", ch->name(), e.what());
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            hb::log::warn("Digest: {}", e.what());
+        }
 
         // Sleep until the next tick boundary; wake early for Ctrl+C/SIGTERM, overrides, reloads.
         const auto tickLen = env.tick;

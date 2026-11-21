@@ -1,0 +1,51 @@
+#pragma once
+
+#include <filesystem>
+#include <functional>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "core/price.hpp"
+#include "core/time.hpp"
+#include "storage/history.hpp"
+
+namespace hb {
+
+// Scheduled informational messages: the weekly cost summary (Monday morning) and a
+// heads-up when tomorrow's electricity is unusually expensive or cheap.
+struct DigestState {
+    std::string lastWeekly;   // local date of the Monday the last summary was sent
+    std::string lastHeadsUp;  // local date ("tomorrow") the last heads-up was evaluated for
+};
+DigestState loadDigestState(const std::filesystem::path& file);
+void saveDigestState(const std::filesystem::path& file, const DigestState& s);
+
+struct DigestMessage {
+    std::string title;
+    std::string text;
+};
+
+// Text for a cost report covering last week.
+DigestMessage weeklySummary(const nlohmann::json& report);
+
+// Heads-up if tomorrow's average price is >= 20 % above or below the recent average.
+// upcoming: price table that includes tomorrow; recent: the last days' slot prices.
+std::optional<DigestMessage> priceHeadsUp(const PriceTable& upcoming, const std::vector<PricePoint>& recent,
+                                          const TimeZone& tz, Instant now);
+
+struct DigestOptions {
+    bool weekly = true;
+    bool headsUp = true;
+};
+DigestOptions parseDigestOptions(const nlohmann::json& cfg);
+
+// Called after every control step: returns the messages due now and updates state.
+// reportForLastWeek(endInclusive) builds the cost report when the summary is due.
+std::vector<DigestMessage> dueDigests(Instant now, const TimeZone& tz, DigestState& state, const DigestOptions& opt,
+                                      const std::function<nlohmann::json(Instant)>& reportForLastWeek,
+                                      const PriceTable& upcoming, const std::vector<PricePoint>& recent);
+
+}  // namespace hb
