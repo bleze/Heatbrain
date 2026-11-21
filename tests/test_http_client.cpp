@@ -2,6 +2,7 @@
 
 #include <httplib.h>
 
+#include <format>
 #include <thread>
 
 #include "net/http.hpp"

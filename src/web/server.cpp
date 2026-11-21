@@ -3,6 +3,7 @@
 #include <httplib.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <format>
 
 #include "app/rooms.hpp"

@@ -3,6 +3,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+
 #include "app/controller.hpp"
 #include "app/rooms.hpp"
 #include "test_support.hpp"

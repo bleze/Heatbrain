@@ -138,6 +138,30 @@ recovery, repeat ongoing problems at most every few hours, optional quiet hours 
 non-urgent alerts. Active problems also show as a banner in the web UI and in the room's
 decision log.
 
+## Deployment (Synology DS1821+ / any Docker host)
+
+Every push to `main` builds the image with GitHub Actions (unit tests run inside the
+Docker build) and publishes `ghcr.io/bleze/heatbrain:latest` (plus a `sha-…` tag).
+
+1. **Registry access.** GHCR packages start private. Either make the `heatbrain` package
+   public (GitHub → Packages → heatbrain → Package settings), or on the NAS log in with a
+   personal access token that has `read:packages`:
+   `sudo docker login ghcr.io -u bleze`.
+2. **Data folder.** Create `/volume1/docker/heatbrain` and copy `heatbrain.json`,
+   `netatmo-tokens.json` and optionally `history.db` from `data/` on the dev machine.
+3. **Only one heatbrain at a time.** Netatmo rotates its refresh token on every refresh;
+   a second instance with a copy of the token file locks both out. Stop the local one first.
+4. **Container Manager → Project → Create**, paste `deploy/docker-compose.yml`, start.
+   The web UI is at `http://<nas-ip>:8080`.
+5. Other commands run inside the container, e.g.
+   `sudo docker exec heatbrain /app/bin/heatbrain plugs`.
+6. **Going live, one plug at a time:** `docker exec heatbrain /app/bin/heatbrain plug
+   bedroom provision`, set `"mode": "live"` for that plug in `heatbrain.json`, restart the
+   container. Undo with `plug bedroom restore` and `"mode": "dryrun"`.
+
+Updating: Container Manager → Project → heatbrain → Action → Build (pulls `latest`), or
+`sudo docker compose pull && sudo docker compose up -d` in the project folder.
+
 ## Development (Windows, Visual Studio 2026)
 
 Open the folder in Visual Studio, select the **Windows Debug (local dev)** preset, and build.
