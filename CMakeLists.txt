@@ -26,6 +26,7 @@ add_library(heatbrain_core STATIC
   src/core/tariff.cpp
   src/core/schedule.cpp
   src/core/price.cpp
+  src/core/failsafe.cpp
 )
 target_include_directories(heatbrain_core PUBLIC src)
 
@@ -35,6 +36,8 @@ add_library(heatbrain_io STATIC
   src/providers/energidataservice.cpp
   src/providers/basic_components.cpp
   src/providers/price_model.cpp
+  src/plugs/tasmota.cpp
+  src/plugs/plugs.cpp
   src/app/config.cpp
 )
 target_link_libraries(heatbrain_io PUBLIC
@@ -63,6 +66,9 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_price.cpp
     tests/test_energidataservice.cpp
     tests/test_http_cache.cpp
+    tests/test_failsafe.cpp
+    tests/test_tasmota.cpp
+    tests/test_http_client.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE

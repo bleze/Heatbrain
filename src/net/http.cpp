@@ -26,9 +26,13 @@ HttpResponse HttplibClient::get(const std::string& url) {
     const std::string path = pathStart == std::string::npos ? "/" : url.substr(pathStart);
 
     httplib::Client client(origin);
-    client.set_connection_timeout(10);
-    client.set_read_timeout(30);
+    client.set_connection_timeout(connectTimeout_);
+    client.set_read_timeout(readTimeout_);
     client.set_follow_location(true);
+    // Callers pass fully encoded URLs. Without this, httplib decodes and re-encodes the
+    // query and turns %3B back into ';', which Tasmota treats as a command separator
+    // (a Rule1 containing "Backlog a; b" was silently truncated at the ';').
+    client.set_path_encode(false);
     client.set_default_headers({{"User-Agent", "heatbrain/0.1"}});
 
     auto res = client.Get(path);

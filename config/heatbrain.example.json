@@ -43,6 +43,30 @@
     ]
   },
 
+  "plugs": [
+    {
+      "_comment": "Find plugs with 'heatbrain discover 192.168.1.0/24'. mode: dryrun (never switched) or live.",
+      "id": "bedroom",
+      "name": "Bedroom radiator",
+      "type": "tasmota",
+      "host": "192.168.1.38",
+      "mode": "dryrun",
+      "failsafe": {
+        "_comment": "Auto-off after pulseMinutes without refresh; limp mode after watchdogMinutes of silence.",
+        "pulseMinutes": 20,
+        "watchdogMinutes": 30,
+        "limpOnMinutes": 10,
+        "limpOffMinutes": 50
+      }
+    },
+    {
+      "id": "test",
+      "name": "Simulated plug for development",
+      "type": "simulated",
+      "mode": "live"
+    }
+  ],
+
   "_example_schedule_component": {
     "_comment": "For grid companies without an API: describe the tariff directly.",
     "type": "schedule",

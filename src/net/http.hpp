@@ -30,9 +30,18 @@ public:
 };
 
 // Real client (cpp-httplib + OpenSSL).
+// Stateless and thread-safe: each request uses its own connection.
 class HttplibClient final : public HttpClient {
 public:
+    explicit HttplibClient(std::chrono::milliseconds connectTimeout = std::chrono::seconds{10},
+                           std::chrono::milliseconds readTimeout = std::chrono::seconds{30})
+        : connectTimeout_(connectTimeout), readTimeout_(readTimeout) {}
+
     HttpResponse get(const std::string& url) override;
+
+private:
+    std::chrono::milliseconds connectTimeout_;
+    std::chrono::milliseconds readTimeout_;
 };
 
 struct CachedBody {

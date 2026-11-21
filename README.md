@@ -11,8 +11,8 @@ It runs as a single C++ process with a web UI, in Docker on a NAS or locally whi
 | Milestone | State |
 |---|---|
 | 1. Price model (configurable providers) + `prices` command | done |
-| 2. Tasmota plugs + on-plug fail-safe | next |
-| 3. Netatmo temperatures (OAuth) | |
+| 2. Tasmota plugs + on-plug fail-safe (`discover`, `plugs`, `plug`) | done |
+| 3. Netatmo temperatures (OAuth) | next |
 | 4. Planner + scheduler loop | |
 | 5. Web UI | |
 | 6. Docker image + GitHub Actions, deploy to Synology | |
@@ -44,10 +44,12 @@ The price per kWh is a list of components in `heatbrain.json`, summed, then surc
 Adding a country means adding a spot provider (ENTSO-E covers all of Europe) and
 describing its tariffs with `schedule`.
 
-## Fail-safe design (milestone 2)
+## Fail-safe
 
 The radiators have analog thermostats set high, so heatbrain is effectively the thermostat.
-A crash while a relay is ON must never mean "heat forever":
+A crash while a relay is ON must never mean "heat forever". All of this was verified on
+Tasmota 14.6.0 (Sonoff Basic R2), including that re-sending ON restarts the PulseTime
+countdown:
 
 1. **Dead-man switch on the plug.** Every ON is sent with Tasmota `PulseTime` (~20 min):
    the relay turns itself OFF unless heatbrain keeps refreshing it.
@@ -59,6 +61,19 @@ A crash while a relay is ON must never mean "heat forever":
 4. **Hard max temperature per room**, enforced by heatbrain; the analog thermostat stays as
    the last-resort cap.
 5. `PowerOnState 0`: after a power cut, plugs start OFF until heatbrain takes over.
+
+### Plug commands
+
+```powershell
+heatbrain discover 192.168.1.0/24   # find Tasmota devices
+heatbrain plugs                     # status + fail-safe check of configured plugs
+heatbrain plug bedroom provision    # back up settings, install fail-safe, disable device timers
+heatbrain plug bedroom on|off       # ON refused unless the fail-safe is installed (--force)
+heatbrain plug bedroom restore      # put back the latest backup (data/plugs/<id>/)
+```
+
+Plugs default to `"mode": "dryrun"`: the planner will only switch plugs set to `"live"`.
+Only provision a plug once heatbrain runs continuously; otherwise it enters limp mode.
 
 ## Decision log and room history (milestones 3-5)
 
