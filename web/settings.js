@@ -76,13 +76,32 @@
     return f;
   }
   function num(obj, key, opts = {}) {
-    const i = el("input", { type: "number", step: opts.step ?? "any", min: opts.min, max: opts.max, placeholder: opts.placeholder ?? "" });
+    const step = Number(opts.step) || 1;
+    const decimals = (String(step).split(".")[1] || "").length;
+    const wrap = el("span", { class: "stepper" });
+    const i = el("input", { type: "number", step: opts.step ?? "any", min: opts.min, max: opts.max,
+                            placeholder: opts.placeholder ?? "", inputmode: "decimal" });
     i.value = obj[key] ?? "";
-    i.addEventListener("input", () => {
+    const commit = () => {
       if (i.value === "") delete obj[key]; else obj[key] = Number(i.value);
       opts.onChange?.(); changed();
-    });
-    return i;
+    };
+    const bump = (dir) => {
+      // Start from the current value, else the placeholder (the default), else 0.
+      let v = i.value !== "" ? Number(i.value) : Number(opts.placeholder) || 0;
+      v = Math.round((v + dir * step) / step) * step;
+      if (opts.min != null) v = Math.max(Number(opts.min), v);
+      if (opts.max != null) v = Math.min(Number(opts.max), v);
+      i.value = v.toFixed(decimals);
+      commit();
+    };
+    const minus = el("button", { type: "button", class: "step", "aria-label": "Decrease", tabindex: -1 }, wrap, "−");
+    wrap.appendChild(i);
+    const plus = el("button", { type: "button", class: "step", "aria-label": "Increase", tabindex: -1 }, wrap, "+");
+    minus.addEventListener("click", (e) => { e.preventDefault(); bump(-1); });
+    plus.addEventListener("click", (e) => { e.preventDefault(); bump(1); });
+    i.addEventListener("input", commit);
+    return wrap;
   }
   function txt(obj, key, opts = {}) {
     const i = el("input", { type: opts.type || "text", placeholder: opts.placeholder ?? "", autocomplete: "off", spellcheck: "false" });
@@ -276,7 +295,7 @@
 
     if (room.priceOnly) {
       const g = el("div", { class: "form-grid" }, c);
-      field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1 }), { hint: "heats in the cheapest hours of each day" });
+      field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1 }), { hint: "heats only in those hours" });
       el("h3", {}, c, "Never heat between");
       const avoid = arr(room.priceOnly, "avoid");
       avoid.forEach((w, i) => {
@@ -546,7 +565,7 @@
       const g = el("div", { class: "form-grid" }, card);
       field(g, "Client ID", txt(n, "clientId"));
       field(g, "Client secret", secret(n, "clientSecret"));
-      field(g, "Refresh token", secret(n, "refreshToken"), { hint: "used once; heatbrain keeps the rotating token" });
+      field(g, "Refresh token", secret(n, "refreshToken"), { hint: "only needed once" });
       const steps = el("details", { class: "advanced" }, card);
       el("summary", {}, steps, "Where do I get these?");
       const ol = el("ol", {}, steps);
@@ -612,7 +631,7 @@
         codes.addEventListener("input", () => { comp.codes = codes.value.split(",").map((x) => x.trim()).filter(Boolean); changed(); });
         field(cg, "Charge codes", codes, { hint: "comma separated" });
       } else if (comp.type === "fixed") {
-        field(cg, `Amount (${S.cfg.currency || "DKK"}/kWh)`, num(comp, "amount", { step: 0.001 }), { hint: "excluding VAT" });
+        field(cg, `Amount (${S.cfg.currency || "DKK"}/kWh)`, num(comp, "amount", { step: 0.01 }), { hint: "excluding VAT" });
       } else if (comp.type === "schedule") {
         const ta = el("textarea", { rows: 8 });
         ta.value = JSON.stringify(comp.seasons || [], null, 2);
@@ -642,7 +661,7 @@
     surcharges.forEach((s, i) => {
       const r = el("div", { class: "sched-row" }, sc);
       r.appendChild(txt(s, "name", { placeholder: "Moms" }));
-      r.appendChild(num(s, "percent", { step: 0.1 }));
+      r.appendChild(num(s, "percent", { step: 1 }));
       el("span", { class: "muted" }, r, "%");
       btn(r, "", "trash", () => { surcharges.splice(i, 1); changed(); render(); }, "ghost danger");
     });
@@ -698,13 +717,16 @@
   function renderSystem(body) {
     const card = el("section", { class: "card" }, body);
     sectionHead(card, "System", "cpu", "violet");
-    const g = el("div", { class: "form-grid" }, card);
-    field(g, "Time zone", txt(S.cfg, "timezone", { placeholder: "Europe/Copenhagen" }));
+    const g = el("div", { class: "form-row" }, card);
+    // All IANA zones the browser knows; the server validates the choice again.
+    const zones = (Intl.supportedValuesOf?.("timeZone") || ["Europe/Copenhagen"]).map((z) => [z, z.replaceAll("_", " ")]);
+    if (!S.cfg.timezone) S.cfg.timezone = "Europe/Copenhagen";
+    field(g, "Time zone", sel(S.cfg, "timezone", zones));
     const control = (S.cfg.control ||= {});
-    field(g, "Control interval (s)", num(control, "tickSeconds", { step: 60, min: 60, placeholder: "300" }),
-      { hint: "at most half of each live plug's auto-off time", span2: true });
+    field(g, "Control interval (s)", num(control, "tickSeconds", { step: 60, min: 60, max: 3600, placeholder: "300" }),
+      { hint: "at most half of each live plug's auto-off time" });
     const web = (S.cfg.web ||= {});
-    field(g, "Web UI port", num(web, "port", { step: 1, placeholder: "8080" }), { hint: "takes effect after a restart" });
+    field(g, "Web UI port", num(web, "port", { step: 1, min: 1, max: 65535, placeholder: "8080" }), { hint: "takes effect after a restart" });
 
     const raw = el("section", { class: "card" }, body);
     sectionHead(raw, "Raw configuration", "gear", "gray", "For power users. Secrets are shown as ******** and kept unless you replace them.");

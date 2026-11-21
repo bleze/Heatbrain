@@ -217,6 +217,16 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field > span { font-size: 12.5px; color: var(--ink-2); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .field.wide { grid-column: 1 / -1; }
+.form-row { display: flex; flex-wrap: wrap; gap: 12px 32px; margin-top: 12px; align-items: flex-start; }
+.form-row .field { min-width: 180px; }
+/* Spinbox: - [value] + */
+.stepper { display: inline-flex; align-items: stretch; border: 1px solid var(--axis); border-radius: 8px; overflow: hidden; background: var(--surface); width: max-content; }
+.stepper:focus-within { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+.stepper input { border: 0; border-radius: 0; width: 72px; text-align: center; outline: none; background: transparent; -moz-appearance: textfield; }
+.stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper input:focus { outline: none; }
+.stepper .step { border: 0; border-radius: 0; padding: 0 10px; font-size: 16px; line-height: 1; color: var(--ink-2); background: var(--surface-2); }
+.stepper .step:hover { background: var(--accent-soft); color: var(--accent); }
 @media (min-width: 640px) { .field.span2 { grid-column: span 2; } }
 .check { white-space: nowrap; }
 .field input[type="text"], .field input[type="password"], .field input[type="url"], .field select { width: 100%; }
