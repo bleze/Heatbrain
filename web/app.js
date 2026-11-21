@@ -299,7 +299,8 @@ function planStrip(parent, plan) {
   el("span", {}, axis, hm(t1));
   // The next two changes, in words
   const next = plan.slice(1, 3).map((s) => `${planLabel(s)} ${hm(s.from)}`);
-  el("div", { class: "plan-next" }, wrap, `Now: ${planLabel(plan[0])}${next.length ? ` · then ${next.join(" · ")}` : ""}`);
+  const pn = el("div", { class: "plan-next" }, wrap, `Now: ${planLabel(plan[0])}${next.length ? ` · then ${next.join(" · ")}` : ""} `);
+  if (typeof helpButton === "function") helpButton(pn, "plan", wrap);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -310,7 +311,9 @@ function outdoorCard(host) {
   const o = state.status?.outdoor;
   if (!o) return;
   const s = (state.status.sensors || []).find((x) => x.name === o.name && x.kind === "outdoor") || {};
-  const card = el("article", { class: "card room outdoor-card" }, host);
+  const card = el("article", { class: `card room outdoor-card${state.selected === "__outdoor" ? " selected" : ""}`, tabindex: 0 }, host);
+  card.addEventListener("click", () => selectRoom("__outdoor"));
+  card.addEventListener("keydown", (e) => { if (e.key === "Enter") selectRoom("__outdoor"); });
   const top = el("div", { class: "room-top" }, card);
   const name = el("div", { class: "room-name" }, top);
   name.appendChild(badge("snow", "cool"));
@@ -381,7 +384,8 @@ function renderAway() {
   if (!awayFormOpen) return;
   bar.appendChild(badge("plane", "violet"));
   const t = el("div", { class: "grow" }, bar);
-  el("b", {}, t, "Going away?");
+  const ga = el("b", {}, t, "Going away? ");
+  if (typeof helpButton === "function") helpButton(ga, "away", t);
   el("div", { class: "muted" }, t, "Plan it ahead: it starts and ends by itself. Every room only keeps above the temperature you choose.");
   const local = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   const fromLabel = el("label", { class: "field" }, bar);
@@ -483,13 +487,15 @@ let renderRooms = function () {
     }
 
     const actions = el("div", { class: "actions" }, card);
-    const act = (label, fn) => {
-      const b = el("button", { type: "button" }, actions, label);
+    const act = (label, iconName, cls, fn) => {
+      const b = el("button", { type: "button", class: cls }, actions);
+      b.appendChild(icon(iconName));
+      b.appendChild(document.createTextNode(label));
       b.addEventListener("click", (e) => { e.stopPropagation(); fn(b); });
     };
-    act("Heat 1 h", (b) => setOverride(r.id, true, 60, b));
-    act("Off 2 h", (b) => setOverride(r.id, false, 120, b));
-    if (r.override) act("Back to auto", (b) => clearOverride(r.id, b));
+    act("Heat 1 h", "flame", "act-heat", (b) => setOverride(r.id, true, 60, b));
+    act("Off 2 h", "power", "act-off", (b) => setOverride(r.id, false, 120, b));
+    if (r.override) act("Back to auto", "undo", "", (b) => clearOverride(r.id, b));
   }
 }
 
@@ -532,7 +538,15 @@ async function loadHistory() {
   if (!state.selected) return;
   $("room-chart").classList.add("loading"); // refetch keeps the frame
   try {
-    state.history = await api(`/api/rooms/${encodeURIComponent(state.selected)}/history?hours=${state.hours}`);
+    if (state.selected === "__outdoor") {
+      const o = state.status?.outdoor;
+      if (!o) return;
+      const sh = await api(`/api/sensor-history?key=${encodeURIComponent(o.key)}&hours=${state.hours}`);
+      state.history = { room: { id: "__outdoor", name: `Outside · ${o.name}`, sensorOnly: true, priceOnly: false, minTemp: 0, maxTemp: 0 },
+                        from: sh.from, to: sh.to, temperatures: sh.temperatures, decisions: [], events: [], prices: sh.prices };
+    } else {
+      state.history = await api(`/api/rooms/${encodeURIComponent(state.selected)}/history?hours=${state.hours}`);
+    }
     renderDetail();
   } catch (e) { alertInline(e); } finally { $("room-chart").classList.remove("loading"); }
 }
@@ -557,6 +571,7 @@ function renderLegend(room, segs) {
   host.replaceChildren();
   if (!room.priceOnly) {
     const a = el("span", {}, host); el("i", { class: "key-line" }, a); a.appendChild(document.createTextNode("Temperature"));
+    if (room.sensorOnly) return;  // a sensor: no target, no heating
     const b = el("span", {}, host); el("i", { class: "key-dash" }, b); b.appendChild(document.createTextNode("Target"));
   }
   for (const [cat, label] of Object.entries(CATEGORIES)) {
@@ -587,8 +602,9 @@ function renderDetail() {
   const W = host.clientWidth, m = { l: 40, r: 8 };
   const showTemp = !room.priceOnly;
   const tempTop = 18, tempH = showTemp ? 190 : 0;
-  const stripTop = tempTop + tempH + (showTemp ? 34 : 0), stripH = 12;
-  const priceTop = stripTop + stripH + 30, priceH = 90;
+  const showStrip = !room.sensorOnly;
+  const stripTop = tempTop + tempH + (showTemp ? 34 : 0), stripH = showStrip ? 12 : 0;
+  const priceTop = stripTop + stripH + (showStrip ? 30 : 0), priceH = 90;
   const H = priceTop + priceH + 24;
   const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": `${room.name}: temperature, heating and price` }, host);
@@ -630,8 +646,8 @@ function renderDetail() {
   }
 
   // Heating strip: the exact on/off periods, coloured by why
-  el("text", { class: "panel-label", x: m.l, y: stripTop - 4 }, svg, "Heating");
-  el("rect", { x: m.l, y: stripTop, width: W - m.l - m.r, height: stripH, fill: "var(--grid)", rx: 3, opacity: 0.5 }, svg);
+  if (showStrip) el("text", { class: "panel-label", x: m.l, y: stripTop - 4 }, svg, "Heating");
+  if (showStrip) el("rect", { x: m.l, y: stripTop, width: W - m.l - m.r, height: stripH, fill: "var(--grid)", rx: 3, opacity: 0.5 }, svg);
   for (const s of segs) {
     const x0 = x(s.start) + 1, w = Math.max(2, x(s.end) - x(s.start) - 2); // 2px surface gap between fills
     el("rect", { x: x0, y: stripTop, width: w, height: stripH, rx: 3, fill: catColor(s.cat) }, svg);
@@ -688,7 +704,10 @@ function renderDetail() {
     showTooltip(evt, dayHm(t), rows);
   });
 
-  renderEvents(h);
+  const eventsBlock = $("events").closest(".table-wrap");
+  eventsBlock.hidden = !!room.sensorOnly;
+  eventsBlock.previousElementSibling.hidden = !!room.sensorOnly;  // the "Switch events" heading
+  if (!room.sensorOnly) renderEvents(h);
 }
 
 function renderEvents(h) {
@@ -770,9 +789,11 @@ window.addEventListener("resize", () => {
 // Views: #settings or the dashboard
 // ---------------------------------------------------------------------------------------
 function route() {
-  const view = location.hash.startsWith("#settings") ? "settings" : "dashboard";
+  const view = location.hash.startsWith("#settings") ? "settings" : location.hash.startsWith("#help") ? "help" : "dashboard";
   $("view-dashboard").hidden = view !== "dashboard";
   $("view-settings").hidden = view !== "settings";
+  $("view-help").hidden = view !== "help";
+  if (view === "help" && typeof renderManual === "function" && !$("view-help").childElementCount) renderManual($("view-help"));
   document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === view));
   if (view === "settings" && window.Settings) window.Settings.open();
   if (view === "dashboard" && state.status) { renderPriceChart(); window.Costs?.render(); if (state.history) renderDetail(); }

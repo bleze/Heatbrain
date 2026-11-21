@@ -57,6 +57,7 @@
     <nav class="nav">
       <a href="#" data-view="dashboard"><svg class="icon"><use href="#i-gauge"/></svg>Dashboard</a>
       <a href="#settings" data-view="settings"><svg class="icon"><use href="#i-gear"/></svg>Settings</a>
+      <a href="#help" data-view="help"><svg class="icon"><use href="#i-info"/></svg>Help</a>
     </nav>
     <div class="updated" id="updated">connecting…</div>
     <button type="button" id="away-btn" class="away-btn" hidden><svg class="icon"><use href="#i-plane"/></svg>Away</button>
@@ -100,7 +101,7 @@
 
     <section class="card" id="costs" hidden>
       <div class="card-head">
-        <h2><span class="badge badge-green"><svg class="icon"><use href="#i-coin"/></svg></span>Heating cost <span class="muted" style="font-weight:400;font-size:13px">estimated</span></h2>
+        <h2><span class="badge badge-green"><svg class="icon"><use href="#i-coin"/></svg></span>Heating cost <span class="muted" style="font-weight:400;font-size:13px">estimated</span><span id="cost-help"></span></h2>
         <div class="range" role="group" aria-label="Cost period" id="cost-range">
           <button data-days="7" class="active">7 days</button>
           <button data-days="30">30 days</button>
@@ -128,10 +129,13 @@
     </div>
   </main>
 
+  <main id="view-help" hidden></main>
+
   <div class="toast" id="toast" hidden></div>
   <div class="tooltip" id="tooltip" role="status" hidden></div>
   <script src="app.js"></script>
   <script src="settings.js"></script>
   <script src="costs.js"></script>
+  <script src="help.js"></script>
 </body>
 </html>

@@ -55,6 +55,7 @@ public:
                                           bool changesOnly) const;
     std::optional<DecisionRecord> lastDecision(const std::string& roomId) const;
     std::vector<TemperatureRecord> temperatures(const std::string& roomId, Instant from, Instant to) const;
+    std::vector<TemperatureRecord> sensorTemperatures(const std::string& sensorKey, Instant from, Instant to) const;
     std::vector<PricePoint> prices(Instant from, Instant to) const;
 
     void prune(Instant olderThan);

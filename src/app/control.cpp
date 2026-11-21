@@ -210,7 +210,7 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                 {"until", a->until.time_since_epoch().count()}, {"active", a->activeAt(now)}};
     }
     json outdoor = nullptr;
-    if (const auto& o = env.controller->outdoor()) outdoor = {{"name", o->first}, {"temperature", o->second}};
+    if (const auto& o = env.controller->outdoor()) outdoor = {{"key", o->key}, {"name", o->name}, {"temperature", o->temperature}};
     return json{{"now", now.time_since_epoch().count()},
                 {"away", away},
                 {"outdoor", outdoor},

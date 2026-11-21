@@ -120,8 +120,7 @@ a { color: var(--accent); }
 .nav a:hover { background: var(--surface-2); }
 .nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .updated { margin-left: auto; color: var(--muted); font-size: 13px; }
-.outdoor-card { cursor: default; background: linear-gradient(180deg, var(--cool-tint), transparent 60%), var(--surface); }
-.outdoor-card:hover { border-color: var(--border); }
+.outdoor-card { background: linear-gradient(180deg, var(--cool-tint), transparent 60%), var(--surface); }
 .away-btn { border-radius: 999px; }
 .away-btn .icon { color: var(--accent); }  /* same as the plane on the away panel */
 .away-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-color: var(--accent);
@@ -189,6 +188,8 @@ a { color: var(--accent); }
 .chip.error { border-color: var(--critical); color: var(--critical); }
 .actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
 .override-note { margin-top: 8px; font-size: 13px; font-weight: 600; }
+.act-heat .icon { color: var(--flame-1); }
+.act-off .icon { color: var(--cat-comfort); }
 .empty-state { text-align: center; padding: 36px 16px; color: var(--ink-2); }
 .empty-state .badge { width: 48px; height: 48px; border-radius: 14px; margin-bottom: 10px; }
 .empty-state .badge .icon { width: 26px; height: 26px; }
@@ -307,6 +308,25 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }
+
+/* Help: "?" buttons, help boxes and the manual */
+.help-btn { width: 18px; height: 18px; padding: 0; border-radius: 50%; font-size: 11px; font-weight: 700; line-height: 1;
+  justify-content: center; color: var(--accent); border-color: var(--accent-soft); background: var(--accent-soft);
+  vertical-align: middle; margin-left: 4px; }
+.help-btn:hover, .help-btn.open { background: var(--accent-fill); color: var(--accent-ink); }
+.helpbox { margin: 8px 0; padding: 10px 14px; border-radius: 10px; background: var(--accent-soft); color: var(--ink);
+  font-size: 13px; font-weight: 400; border-left: 3px solid var(--accent); grid-column: 1 / -1; }
+.helpbox p { margin: 4px 0; }
+.helpbox ul { margin: 4px 0; padding-left: 18px; }
+.helpbox li { margin: 3px 0; }
+.helpbox h4 { margin: 8px 0 2px; font-size: 13px; }
+.help-example { color: var(--ink-2); }
+.manual { max-width: 860px; }
+.manual h3 { margin-top: 28px; }
+.manual .helpbox { background: transparent; border-left: 0; padding: 0; font-size: 14px; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; }
+.toc a { font-size: 12.5px; text-decoration: none; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); }
+.toc a:hover { color: var(--accent); }
 
 /* Next 24 h plan on room cards */
 .plan { margin-top: 12px; }

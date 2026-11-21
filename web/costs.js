@@ -28,6 +28,8 @@
     const card = $("costs");
     if (!d || !d.rooms.length) { card.hidden = true; return; }
     card.hidden = false;
+    const ch = $("cost-help");
+    if (ch && !ch.childElementCount && typeof helpButton === "function") helpButton(ch, "costs", $("cost-tiles"));
     const cur = d.currency;
     const rooms = d.rooms.filter((r) => r.total);
     const missing = d.rooms.filter((r) => !r.total);

@@ -177,6 +177,27 @@ void WebServer::routes() {
                            {"prices", prices}});
     });
 
+    // Temperature history of a single sensor (e.g. the outdoor module): ?key=netatmo:02:00:...&hours=24
+    s.Get("/api/sensor-history", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string key = req.get_param_value("key");
+        if (key.empty()) return sendError(res, 400, "key is required");
+        int hoursBack = 24;
+        if (req.has_param("hours")) hoursBack = std::clamp(std::atoi(req.get_param_value("hours").c_str()), 1, 24 * 14);
+        History history(ctx_.dataDir / "history.db");
+        const Instant to = floor<seconds>(system_clock::now()) + seconds{1};
+        const Instant from = to - hours{hoursBack};
+        json temps = json::array();
+        json humidity = json::array();
+        for (const auto& t : history.sensorTemperatures(key, from, to)) {
+            temps.push_back({epoch(t.at), t.temperature});
+            if (t.humidity) humidity.push_back({epoch(t.at), *t.humidity});
+        }
+        json prices = json::array();
+        for (const auto& p : history.prices(from, to + hours{36})) prices.push_back({epoch(p.slot), p.total});
+        sendJson(res, json{{"key", key}, {"from", epoch(from)}, {"to", epoch(to)}, {"temperatures", temps},
+                           {"humidity", humidity}, {"prices", prices}});
+    });
+
     s.Post(R"(/api/rooms/([\w-]+)/override)", [this](const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.matches[1];
         const auto all = rooms();

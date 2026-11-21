@@ -210,12 +210,13 @@
     while (taken.has(id)) id = `${base}-${n++}`;
     return id;
   }
-  function sectionHead(parent, title, iconName, tone, desc) {
+  function sectionHead(parent, title, iconName, tone, desc, helpKey) {
     const head = el("div", { class: "card-head" }, parent);
     const h = el("h2", {}, head);
     h.appendChild(badge(iconName, tone));
     h.appendChild(document.createTextNode(title));
-    if (desc) el("div", { class: "hint", style: "margin:6px 0 0" }, parent, desc);
+    const d = desc ? el("div", { class: "hint", style: "margin:6px 0 0" }, parent, desc) : null;
+    if (helpKey) helpButton(h, helpKey, d || head);
     return head;
   }
   const arr = (obj, key) => (obj[key] ||= []);
@@ -260,7 +261,8 @@
   function renderRooms(body) {
     const card = el("section", { class: "card" }, body);
     const head = sectionHead(card, "Rooms", "home", "violet",
-      "Each room has plugs, a temperature sensor and target temperatures through the day. Rooms without a sensor can run on price alone.");
+      "Each room has plugs, a temperature sensor and target temperatures through the day. Rooms without a sensor can run on price alone.",
+      "start");
     btn(head, "Add room", "plus", () => {
       const rooms = arr(S.cfg, "rooms");
       const id = slug("room", new Set(rooms.map((r) => r.id)));
@@ -331,7 +333,8 @@
 
     if (room.priceOnly) {
       const g = el("div", { class: "form-grid" }, c);
-      field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1, unit: "h" }), { hint: "heats only in those hours" });
+      const ch = field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1, unit: "h" }), { hint: "heats only in those hours" });
+      helpButton(ch.querySelector("span"), "priceOnly", g);
       el("h3", {}, c, "Never heat between");
       const avoid = arr(room.priceOnly, "avoid");
       avoid.forEach((w, i) => {
@@ -346,11 +349,13 @@
     const g = el("div", { class: "form-grid" }, c);
     field(g, "Temperature sensor", sel(room, "sensor", sensorOptions()),
       { hint: (state.status?.sensors || []).length ? "" : "No sensors yet: set up Netatmo on the Sensors tab" });
-    field(g, "Never below", num(room, "minTemp", { step: 0.5, unit: "°C" }), { hint: "heats whatever the price" });
+    const nb = field(g, "Never below", num(room, "minTemp", { step: 0.5, unit: "°C" }), { hint: "heats whatever the price" });
+    helpButton(nb.querySelector("span"), "limits", g);
     field(g, "Never above", num(room, "maxTemp", { step: 0.5, unit: "°C" }), { hint: "hard stop, even when manual" });
     field(g, "Frost protection", num(room, "frostTemp", { step: 0.5, placeholder: "5", unit: "°C" }));
 
-    el("h3", {}, c, "Daily program");
+    const ph = el("h3", {}, c, "Daily program ");
+    helpButton(ph, ["program", "modes"]);
     el("div", { class: "hint", style: "margin-top:-4px" }, c,
       "Each switch point runs until the next one; the last continues past midnight. Off still protects against frost.");
     const program = arr(room, "program");
@@ -412,7 +417,8 @@
     drawTimeline(tl, room);
 
     const adv = section(c, `room:${room.id}`);
-    el("summary", {}, adv, "Advanced: how eagerly to chase cheap prices");
+    const sm = el("summary", {}, adv, "Advanced: how eagerly to chase cheap prices ");
+    helpButton(sm, "strategy");
     const st = (room.strategy ||= {});
     const ag = el("div", { class: "form-grid" }, adv);
     field(ag, "Peak coasting", num(st, "peakAllowedDrop", { step: 0.1, placeholder: "1.0", unit: "−°C" }), { hint: "below target in expensive hours" });
@@ -529,7 +535,8 @@
     // Configured plugs
     const card = el("section", { class: "card" }, body);
     const head = sectionHead(card, "Your plugs", "plug", "warm",
-      "Dry-run: heatbrain decides and logs, but never switches the plug. Live: heatbrain switches it. A plug only goes live with its fail-safe installed.");
+      "Dry-run: heatbrain decides and logs, but never switches the plug. Live: heatbrain switches it. A plug only goes live with its fail-safe installed.",
+      ["dryrun", "failsafe", "firmware"]);
     btn(head, "Refresh status", "wifi", () => { S.plugStatus = null; refreshPlugStatus(); });
     const plugs = S.cfg.plugs || [];
     if (!plugs.length) el("div", { class: "empty-state" }, card, "No plugs yet: scan your network above.");
@@ -680,7 +687,8 @@
     renderJob(c, p);
 
     const adv = section(c, `plug:${p.id}`);
-    el("summary", {}, adv, "Advanced: fail-safe timing and password");
+    const fsm = el("summary", {}, adv, "Advanced: fail-safe timing and password ");
+    helpButton(fsm, "failsafe");
     const fs = (p.failsafe ||= {});
     const ag = el("div", { class: "form-grid" }, adv);
     field(ag, "Auto-off after", num(fs, "pulseMinutes", { step: 1, placeholder: "20", unit: "min" }), { hint: "if heatbrain stops refreshing it" });
@@ -693,7 +701,7 @@
   // --- Sensors ------------------------------------------------------------------------
   function renderSensors(body) {
     const card = el("section", { class: "card" }, body);
-    sectionHead(card, "Netatmo weather station", "thermo", "warm", "Indoor modules give each room its temperature.");
+    sectionHead(card, "Netatmo weather station", "thermo", "warm", "Indoor modules give each room its temperature.", "sensors");
     const sources = arr(S.cfg, "temperatureSources");
     let n = sources.find((s) => s.type === "netatmo");
     if (!n) {
@@ -758,7 +766,7 @@
     const price = (S.cfg.price ||= { components: [] });
     const card = el("section", { class: "card" }, body);
     sectionHead(card, "What a kWh costs", "bolt", "amber",
-      "The price is the sum of these parts, then the surcharges (VAT) on top. Defaults fit EWII/Radius in DK2.");
+      "The price is the sum of these parts, then the surcharges (VAT) on top. Defaults fit EWII/Radius in DK2.", "prices");
     const g = el("div", { class: "form-grid" }, card);
     field(g, "Currency", txt(S.cfg, "currency", { placeholder: "DKK" }));
 
@@ -841,7 +849,7 @@
     // --- Phone notifications via ntfy (recommended: no account, no server) ---
     const phone = el("section", { class: "card" }, body);
     sectionHead(phone, "Phone notifications", "bell", "violet",
-      "Free push notifications with the ntfy app (iPhone and Android). No account needed.");
+      "Free push notifications with the ntfy app (iPhone and Android). No account needed.", "notifications");
     const ntfy = channels.find((c) => c.type === "ntfy");
     const randomTopic = () => {
       const bytes = crypto.getRandomValues(new Uint8Array(12));

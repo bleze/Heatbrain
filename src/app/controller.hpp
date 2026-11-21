@@ -51,8 +51,13 @@ public:
     void setDataDir(std::filesystem::path dir) { dataDir_ = std::move(dir); }
     void setAwayStore(const AwayStore* away) { away_ = away; }
     void setOutdoorSensor(std::string ref) { outdoorSensor_ = std::move(ref); }
-    // The outdoor reading used in the last tick (name, °C), if any.
-    const std::optional<std::pair<std::string, double>>& outdoor() const { return outdoorUsed_; }
+    // The outdoor reading used in the last tick, if any.
+    struct OutdoorUsed {
+        std::string key;   // "<source>:<sensor id>" as stored in the history
+        std::string name;
+        double temperature = 0;
+    };
+    const std::optional<OutdoorUsed>& outdoor() const { return outdoorUsed_; }
 
 private:
     void refreshPrices(Instant now, TickResult& result);
@@ -70,7 +75,7 @@ private:
     const Overrides* overrides_;
     const AwayStore* away_ = nullptr;
     std::string outdoorSensor_;  // "<source>:<id or name>"; empty = first outdoor sensor
-    std::optional<std::pair<std::string, double>> outdoorUsed_;
+    std::optional<OutdoorUsed> outdoorUsed_;
     History* history_;
 
     PriceTable prices_;

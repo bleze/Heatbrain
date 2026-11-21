@@ -178,6 +178,19 @@ std::vector<TemperatureRecord> History::temperatures(const std::string& roomId, 
     return out;
 }
 
+std::vector<TemperatureRecord> History::sensorTemperatures(const std::string& sensorKey, Instant from, Instant to) const {
+    Stmt s(db_, "SELECT ts, sensor_key, room_id, temperature, humidity FROM temperatures "
+                "WHERE sensor_key=? AND ts>=? AND ts<? ORDER BY ts");
+    s.bind(1, sensorKey).bind(2, from).bind(3, to);
+    std::vector<TemperatureRecord> out;
+    while (s.step()) {
+        TemperatureRecord t{s.instant(0), s.text(1), s.text(2), s.dbl(3), std::nullopt};
+        if (!s.isNull(4)) t.humidity = s.dbl(4);
+        out.push_back(std::move(t));
+    }
+    return out;
+}
+
 std::vector<PricePoint> History::prices(Instant from, Instant to) const {
     Stmt s(db_, "SELECT slot, total FROM prices WHERE slot>=? AND slot<? ORDER BY slot");
     s.bind(1, from).bind(2, to);

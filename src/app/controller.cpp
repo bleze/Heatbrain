@@ -206,9 +206,13 @@ TickResult Controller::tick(Instant now, bool apply) {
                 if (r.kind == "outdoor") { o = &r; break; }
             }
         }
+        std::string okey;
+        for (const auto& [k, r] : readings_) {
+            if (&r == o) okey = k;
+        }
         if (o && o->temperature && o->measuredAt && now - *o->measuredAt < hours{1}) outdoor = o->temperature;
         outdoorUsed_.reset();
-        if (outdoor) outdoorUsed_ = std::pair{o->name, *outdoor};
+        if (outdoor) outdoorUsed_ = OutdoorUsed{okey, o->name, *outdoor};
     }
 
     for (const auto& room : rooms_) {

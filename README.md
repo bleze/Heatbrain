@@ -14,7 +14,7 @@ It runs as a single C++ process with a web UI, in Docker on a NAS or locally whi
 | 2. Tasmota plugs + on-plug fail-safe (`discover`, `plugs`, `plug`) | done |
 | 3. Netatmo temperatures (OAuth, rotating tokens) + `temps` | done |
 | 4. Planner + scheduler loop + history (`plan`, `run`, `history`, `override`) | done |
-| 5. Notifications (Discord) + web UI | done |
+| 5. Notifications (ntfy, Discord) + web UI with settings, help, costs | done |
 | 6. Docker image + GitHub Actions, deploy to Synology | next |
 
 ## Architecture
@@ -103,16 +103,27 @@ planner decides each room, checking in this order:
 |---|---|---|
 | 1 | At/above `maxTemp`: OFF, even with manual ON | `ABOVE_MAX` |
 | 2 | Manual override (OFF still heats below `frostTemp`) | `MANUAL_ON`, `MANUAL_OFF`, `FROST_PROTECTION` |
-| 3 | Temperature missing or older than 30 min: 10 min ON / 50 min OFF | `STALE_DATA_LIMP` |
-| 4 | Below `minTemp`: ON whatever the price | `BELOW_MIN` |
-| 5 | Expensive slot: coast down to target − 1.0 °C | `PEAK_AVOID`, `BELOW_COMFORT_DURING_PEAK` |
-| 6 | Expensive slot within 3 h and clearly cheaper now: heat to target + 1.0 °C | `PREHEAT_BEFORE_PEAK` |
-| 7 | Among the cheapest slots: heat to target + 0.5 °C | `CHEAP_BOOST` |
-| 8 | Thermostat with ±0.3 °C hysteresis | `BELOW_TARGET`, `TARGET_REACHED`, `HOLD_ON`, `HOLD_OFF` |
+| 3 | Program says off: only frost protection | `SCHEDULED_OFF` |
+| 4 | Away period: keep above the away temperature | `AWAY_OFF` |
+| 5 | Temperature missing or older than 30 min: 10 min ON / 50 min OFF | `STALE_DATA_LIMP` |
+| 6 | Keep-above period: heat only below the floor | `KEEP_ABOVE`, `KEEP_SATISFIED` |
+| 7 | Below `minTemp`: ON whatever the price | `BELOW_MIN` |
+| 8 | Expensive slot: coast down to target − 1.0 °C | `PEAK_AVOID`, `BELOW_COMFORT_DURING_PEAK` |
+| 9 | Expensive slot within 3 h and clearly cheaper now: heat to target + 1.0 °C (×0.5–1.5 by outdoor temperature) | `PREHEAT_BEFORE_PEAK` |
+| 10 | Among the cheapest slots: heat to target + 0.5 °C | `CHEAP_BOOST` |
+| 11 | Thermostat with ±0.3 °C hysteresis | `BELOW_TARGET`, `TARGET_REACHED`, `HOLD_ON`, `HOLD_OFF` |
 
 "Expensive" = top quarter of the next 24 h *and* 15% above the median; "cheapest" = bottom
 quarter *and* 10% below the median, so flat-price days fall back to a plain thermostat.
-All margins are configurable per room (`strategy`).
+All margins are configurable per room (`strategy`). The outdoor module (configurable, or
+the first Netatmo outdoor module) scales pre-heating: colder outside, more stored heat.
+
+**Away mode** is a planned period (from – until, set from the dashboard's Away button,
+stored in `data/away.json`): every room only keeps above the chosen temperature, price-only
+rooms stay off, and it starts and ends by itself.
+
+**Plan preview:** each room card shows the next 24 h worked out from the program and the
+known prices (heat / pre-heat / coast / boost / keep / away / off).
 
 ### Decision log
 
@@ -136,8 +147,11 @@ home network): problems banner, price chart for today and tomorrow, a card per r
 (temperature, decision and reason, plugs, "Heat 1 h" / "Off 2 h" / "Back to auto"), and
 per room a chart of temperature + target, heating periods coloured by reason category
 (comfort / price-driven / safety-manual) and price, with the hours ahead, plus the switch
-event table. Overrides from the UI are applied immediately. Light and dark mode follow the
-OS. The frontend is plain HTML/JS in `web/` (no build step); in dev builds it is served
+event table. The outdoor card opens the same chart for the outdoor temperature. Overrides
+from the UI are applied immediately. **Settings** edits everything in the config (rooms and
+programs, plugs incl. fail-safe and firmware upgrades, sensors, prices, notifications,
+system) with validation and backups; **Help** explains every feature, and "?" buttons show
+the same text next to the settings. Light/dark/system theme. The frontend is plain HTML/JS in `web/` (no build step); in dev builds it is served
 straight from the source folder, so edits only need a browser refresh.
 
 ## Heating cost
@@ -151,8 +165,12 @@ could report measured energy later.
 
 ## Notifications
 
-Pluggable notifiers selected in config: `discord` (webhook; first implementation), later
-`ntfy`, `telegram`, `pushover`, generic `webhook`.
+Pluggable notifiers selected in config: **`ntfy`** (phone push without an account: install
+the ntfy app and subscribe to a random topic; optional token for self-hosted servers) and
+`discord` (channel webhook). Set up and test from Settings → Notifications.
+
+Digests: a weekly cost summary on Monday at 08:00 and a heads-up at 14:00 when tomorrow is
+at least 20 % more expensive or cheaper than today (both optional).
 
 Alerts: plug unreachable, plug state differs from commanded state, Netatmo re-login
 required, Netatmo module offline / low battery, stale temperature (room in limp mode),
