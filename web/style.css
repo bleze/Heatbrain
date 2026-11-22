@@ -263,6 +263,10 @@ button.link-btn:hover { background: none; text-decoration: underline; }
   border: 1px solid var(--border); background: var(--surface);
 }
 .state.on { border-color: var(--warm-edge); color: var(--flame-1); }
+/* Measured at 4x: the font puts the capitals 1/2 px below the pill's middle and the icon sits 3/8 px
+   above it - nudged onto the middle. */
+.state .state-text { transform: translateY(-0.5px); }
+.state .icon { transform: translateY(0.375px); }
 .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
 .swatch-off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--axis); }
 .reason { margin-top: 10px; font-weight: 600; display: flex; gap: 8px; align-items: center; }

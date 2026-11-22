@@ -617,7 +617,7 @@ let renderRooms = function () {
     const chip = el("span", { class: `state${r.on ? " on" : ""}` }, top);
     const cat = r.on ? reasonCat(r.reason) : null;
     chip.appendChild(icon(r.on ? "flame" : "power"));
-    chip.appendChild(document.createTextNode(r.on ? "Heating" : "Off"));
+    el("span", { class: "state-text" }, chip, r.on ? "Heating" : "Off");
 
     const inp = r.inputs || {};
     // Price-only rooms have no temperature: the current price is what drives them.
