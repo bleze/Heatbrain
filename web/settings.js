@@ -576,8 +576,21 @@
   // --- Thermostats (DEVIreg Smart): pairing, and which of them heatbrain controls -------
   async function loadDevi(force = false) {
     if (!force && S.devi && Date.now() - S.devi.at < 20_000) return;
-    try { S.devi = { at: Date.now(), ...(await api("/api/devi")) }; render(); } catch { /* optional */ }
+    try {
+      const fresh = await api("/api/devi");
+      const changedData = JSON.stringify(fresh) !== JSON.stringify(S.devi?.data);
+      S.devi = { at: Date.now(), data: fresh, ...fresh };
+      // Redraw only when something changed, and never under the cursor of someone typing.
+      const typing = document.activeElement?.closest?.("#settings-body") && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+      if (changedData && !typing) render();
+    } catch { /* optional */ }
   }
+  // Live thermostat state while the Heating tab is open: every 5 s while one is connecting, else 20 s.
+  setInterval(() => {
+    if ($("view-settings").hidden || S.tab !== "plugs" || document.visibilityState !== "visible" || !S.devi) return;
+    const connecting = (S.devi.rooms || []).some((r) => !r.connected || r.roomTemp == null);
+    if (Date.now() - S.devi.at >= (connecting ? 5_000 : 20_000)) loadDevi(true);
+  }, 2_500);
   function renderThermostats(body) {
     loadDevi();
     const d = S.devi || {};

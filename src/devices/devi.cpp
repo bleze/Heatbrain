@@ -233,6 +233,10 @@ void DeviThermostat::onData(const std::uint8_t* data, unsigned length) {
         else if (p.code == kHeatingOn) state_.heating = b();
         else if (p.code == kWindowOpen) state_.windowOpen = b();
         else if (p.code == kAlarms && !p.payload.empty()) state_.alarms = p.payload[0];
+        else if (p.code == kRelayCount || p.code == kRelayOnTime || p.code == kSystemRuntime || p.code == kWizardInfo ||
+                 p.code == kEnergyTotal || p.code == kEnergy30Days || p.code == kEnergy7Days) {
+            state_.raw[p.code.code] = toHex(p.payload.data(), p.payload.size());
+        }
     }
     state_.updated = floor<seconds>(system_clock::now());
     state_.error.clear();
@@ -318,7 +322,8 @@ void DeviThermostat::refresh() {
     using namespace dominion;
     std::vector<std::uint8_t> all;
     for (const Code& c : {kFloorTemperature, kRoomTemperature, kSetpointManual, kSetpointComfort, kSetpointFrost,
-                          kControlInfo, kHeatingOn, kWindowOpen, kAlarms}) {
+                          kControlInfo, kHeatingOn, kWindowOpen, kAlarms, kRelayCount, kRelayOnTime, kSystemRuntime,
+                          kWizardInfo, kEnergyTotal, kEnergy30Days, kEnergy7Days}) {
         const auto r = readRequest(c);
         all.insert(all.end(), r.begin(), r.end());
     }

@@ -39,6 +39,14 @@ inline constexpr Code kHeatingOn{5, 29240};         // relay on
 inline constexpr Code kAlarms{5, 29241};            // bitfield
 inline constexpr Code kWindowOpen{5, 29246};
 inline constexpr Code kSoftwareRevision{0, 35};
+// Energy bookkeeping in the thermostat (formats not documented yet: read raw, see DeviState::raw).
+inline constexpr Code kRelayCount{5, 29232};
+inline constexpr Code kRelayOnTime{5, 29233};
+inline constexpr Code kSystemRuntime{5, 29234};
+inline constexpr Code kWizardInfo{5, 29239};
+inline constexpr Code kEnergyTotal{8, 29377};
+inline constexpr Code kEnergy30Days{8, 29378};
+inline constexpr Code kEnergy7Days{8, 29379};
 inline constexpr Code kConnectionCount{3, 30470};
 
 enum class ControlState : std::uint8_t {

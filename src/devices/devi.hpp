@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -46,6 +47,7 @@ struct DeviState {
     std::optional<bool> heating, windowOpen;
     std::uint8_t alarms = 0;
     std::optional<Instant> updated;  // last packet received
+    std::map<int, std::string> raw;  // code -> payload as hex, for values whose format is still being worked out
 };
 
 // The process-wide grid connection (OpenSDG has one worker thread for everything).

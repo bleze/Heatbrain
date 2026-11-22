@@ -451,6 +451,11 @@ void WebServer::routes() {
                     if (st.manualSetpoint) room["manualSetpoint"] = *st.manualSetpoint;
                     if (st.controlState) room["mode"] = dominion::controlStateName(*st.controlState);
                     if (st.heating) room["heating"] = *st.heating;
+                    if (!st.raw.empty()) {
+                        json raw = json::object();
+                        for (const auto& [code, hex] : st.raw) raw[std::to_string(code)] = hex;
+                        room["raw"] = raw;
+                    }
                 } catch (const std::exception& e) {
                     room["connected"] = false;
                     room["error"] = e.what();
