@@ -11,3 +11,6 @@ runtime library. Regenerate them if the .proto changes.
 
 Upstream's legal note: SecureDeviceGrid is a proprietary protocol by Trifork; this library is
 for personal, non-commercial use. heatbrain uses it to control the user's own thermostat.
+
+One local change: `library/mainloop.h` declares `main_cb` as `extern` (upstream defines it in the
+header, which GCC 10+ rejects as a multiple definition; it is defined once in `mainloop_events.c`).
