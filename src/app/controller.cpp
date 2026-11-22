@@ -127,6 +127,26 @@ void Controller::refreshPrices(Instant now, TickResult& result) {
     }
 }
 
+void Controller::backfillPrices(Instant now) {
+    if (!firstTick_) firstTick_ = now;
+    // Not in the burst right after a start (prices, power mix): Energi Data Service allows only a few
+    // requests a minute, and a rate-limited answer would hold up this control step.
+    if (!history_ || now - *firstTick_ < minutes{10} || (backfillTried_ && now - *backfillTried_ < hours{24})) return;
+    backfillTried_ = now;
+    const Instant from = startOfLocalDay(tz_, now - days{8});
+    const Instant to = floor<hours>(now);
+    const auto have = history_->prices(from, to);
+    const auto expected = static_cast<std::size_t>(duration_cast<minutes>(to - from) / kSlotLength);
+    if (have.size() >= expected * 98 / 100) return;  // (nearly) complete
+    try {
+        const PriceTable past = priceModel_.build(from, to);
+        history_->recordPrices(past);
+        log::info("Prices: filled in {} past slots from {:%d %b}", past.slots.size(), tz_.toLocal(from));
+    } catch (const std::exception& e) {
+        log::warn("Prices: could not fill in past prices: {}", e.what());
+    }
+}
+
 void Controller::readSensors(TickResult& result) {
     sourcesAnswered_.clear();
     for (auto& src : sources_) {
@@ -511,6 +531,7 @@ TickResult Controller::tick(Instant now, bool apply) {
                 history_->recordTemperature({*r.measuredAt, key, roomId, *r.temperature, r.humidity});
             }
             history_->recordPrices(prices_);
+            backfillPrices(now);
             if (!lastPrune_ || now - *lastPrune_ > hours{24}) {
                 history_->prune(now - kHistoryRetention);
                 lastPrune_ = now;

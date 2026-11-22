@@ -324,7 +324,7 @@
       }
       changed(); render();
     });
-    field(g, "Temperature sensor", s, { hint: room.priceOnly ? "without one, the room runs the cheapest hours of each day"
+    field(g, "Temperature sensor", s, { span2: true, hint: room.priceOnly ? "without one, the room runs the cheapest hours of each day"
       : (state.status?.sensors || []).length ? "" : "No sensors yet: set up Netatmo on the Sensors tab" });
   }
 

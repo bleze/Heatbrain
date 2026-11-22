@@ -116,6 +116,11 @@ public:
 
 private:
     void refreshPrices(Instant now, TickResult& result);
+    // Past prices the history doesn't have yet (it only records from when heatbrain ran): the last
+    // 8 days, like the power mix, so the price chart reaches back too. Tried once a day.
+    void backfillPrices(Instant now);
+    std::optional<Instant> backfillTried_;
+    std::optional<Instant> firstTick_;  // the backfill waits until the start-up requests are done
     void readSensors(TickResult& result);
     const SensorReading* findSensor(const std::string& ref) const;
     nlohmann::json applyToPlugs(const RoomConfig& room, bool on, Instant now, TickResult& result);
