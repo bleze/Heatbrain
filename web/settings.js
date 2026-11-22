@@ -933,6 +933,46 @@
     const og = el("div", { class: "form-grid" }, out);
     field(og, "Outdoor sensor", sel(S.cfg, "outdoorSensor", outdoorOptions), { span2: true, hint: "automatic = the first outdoor module" });
 
+    // Weather forecast (Open-Meteo): pre-heating is sized for the weather during the expensive hours.
+    const fc = el("section", { class: "card" }, body);
+    sectionHead(fc, "Weather forecast", "snow", "cool",
+      "Pre-heating and booking warm-up use the forecast for the hours ahead, corrected to your outdoor sensor.", "forecast");
+    if (!S.cfg.forecast || typeof S.cfg.forecast !== "object") S.cfg.forecast = {};
+    const fcfg = S.cfg.forecast;
+    const fg = el("div", { class: "form-grid" }, fc);
+    const fon = el("div", { class: "field span2" }, fg);
+    el("span", {}, fon, "Forecast");
+    fon.appendChild(chk(fcfg, "enabled", "Fetch the forecast from Open-Meteo (free, no account)", true, () => render()));
+    if (fcfg.enabled !== false) {
+      const st = state.status?.forecast;
+      field(fg, "Latitude", num(fcfg, "latitude", { step: 0.01, min: -90, max: 90,
+        placeholder: st?.from === "netatmo" ? st.latitude.toFixed(2) : "" }));
+      field(fg, "Longitude", num(fcfg, "longitude", { step: 0.01, min: -180, max: 180,
+        placeholder: st?.from === "netatmo" ? st.longitude.toFixed(2) : "" }));
+      const info = el("div", { class: "hint", style: "grid-column: 1 / -1" }, fg);
+      const hmOf = (ts) => hm(ts);  // the dashboard's 24-hour clock in the house's time zone
+      if (!st) info.textContent = "Empty = where your Netatmo station is. No position known yet.";
+      else if (st.error && st.min == null) info.textContent = `No forecast: ${st.error}`;
+      else if (st.min) info.textContent = `${st.from === "netatmo" ? "Position from your Netatmo station. " : ""}Next 24 h: ` +
+        `lowest ${st.min.temperature.toFixed(1)}° at ${hmOf(st.min.at)}, highest ${st.max.temperature.toFixed(1)}° at ${hmOf(st.max.at)}.`;
+      else info.textContent = "Fetching the forecast…";
+    }
+
+    // Open-window detection: a fast fall in temperature pauses the room's heating.
+    const ow = el("section", { class: "card" }, body);
+    sectionHead(ow, "Open windows", "thermo", "warm",
+      "When a room's temperature falls fast, a window or door is probably open: heating pauses for a while.", "openWindow");
+    if (!S.cfg.openWindow || typeof S.cfg.openWindow !== "object") S.cfg.openWindow = {};
+    const owc = S.cfg.openWindow;
+    const wg = el("div", { class: "form-grid" }, ow);
+    const won = el("div", { class: "field span2" }, wg);
+    el("span", {}, won, "Detection");
+    won.appendChild(chk(owc, "enabled", "Pause heating when the temperature falls fast", true, () => render()));
+    if (owc.enabled !== false) {
+      field(wg, "Fall within 30 min (°C)", num(owc, "drop", { step: 0.1, min: 0.3, max: 5, placeholder: "1.0" }));
+      field(wg, "Pause (min)", num(owc, "pauseMinutes", { step: 5, min: 5, max: 240, placeholder: "30" }));
+    }
+
     const mods = el("section", { class: "card" }, body);
     sectionHead(mods, "Modules", "wifi", "violet");
     const sensors = state.status?.sensors || [];
@@ -1202,6 +1242,9 @@
     const wk = el("div", { class: "field span2" }, rg);
     el("span", {}, wk, "Weekly summary");
     wk.appendChild(chk(n, "weeklySummary", "Cost and savings every Monday morning", true));
+    const mo = el("div", { class: "field span2" }, rg);
+    el("span", {}, mo, "Monthly report");
+    mo.appendChild(chk(n, "monthlyReport", "Last month's cost, price paid and the dearest day, on the 1st", true));
     const hu = el("div", { class: "field span2" }, rg);
     el("span", {}, hu, "Tomorrow's prices");
     hu.appendChild(chk(n, "priceHeadsUp", "Tell me when tomorrow is unusually expensive or cheap", true));

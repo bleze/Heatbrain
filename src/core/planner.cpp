@@ -82,6 +82,7 @@ std::string_view reasonCode(Reason r) {
         case Reason::AwayOff: return "AWAY_OFF";
         case Reason::NoPricesFallback: return "NO_PRICES_FALLBACK";
         case Reason::OfflineSchedule: return "OFFLINE_SCHEDULE";
+        case Reason::WindowOpen: return "WINDOW_OPEN";
     }
     return "UNKNOWN";
 }
@@ -112,6 +113,16 @@ PriceOutlook priceOutlook(const PriceTable& prices, Instant now, minutes lookAhe
                 o.nextExpensivePrice = s.total;
                 break;
             }
+        }
+        if (o.nextExpensiveAt) {
+            // The stretch lasts until the first slot that is not expensive (or prices run out).
+            Instant until = *o.nextExpensiveAt + kSlotLength;
+            for (const auto& s : prices.slots) {
+                if (s.start < until || s.start >= slotNow + hours{24}) continue;
+                if (s.start != until || !s.total || !isExpensive(*s.total)) break;
+                until += kSlotLength;
+            }
+            o.nextExpensiveUntil = until;
         }
     }
     return o;
@@ -251,6 +262,18 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         return make(false, Reason::ManualOff, "Manual OFF until " + until, inputs);
     }
 
+    // 2b. Window open (the temperature fell fast): pause, except to prevent frost.
+    if (in.windowOpen && in.windowOpen->until > in.now) {
+        const std::string why = std::format("{} fell {:.1f}° in {} min: window open? Heating paused until {}",
+                                            fresh ? temp(t) : std::string("The temperature"), in.windowOpen->drop,
+                                            in.windowOpen->over.count(), formatLocalHm(tz.toLocal(in.windowOpen->until)));
+        if (fresh && t < room.frostTemp) {
+            return make(true, Reason::FrostProtection, why + std::format(", but below frost protection {}", temp(room.frostTemp)),
+                        inputs);
+        }
+        return make(false, Reason::WindowOpen, why, inputs);
+    }
+
     // 3. "Off" in the program (e.g. the 17-21 peak tariff, or the night): off, except to
     //    prevent frost. Comes before limp mode, so missing data never heats here either.
     if (mode == ProgramMode::Off) {
@@ -307,15 +330,33 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 
     // 8. Cheap now, expensive soon: pre-heat.
     if (outlook.nextExpensiveAt && *outlook.current < *outlook.nextExpensivePrice * kPreheatMaxRatio) {
-        const double boost = s.preheatBoost * outdoorFactor(target, in.outdoorTemp);
+        const Instant peak = *outlook.nextExpensiveAt;
+        const Instant peakEnd = outlook.nextExpensiveUntil.value_or(peak + hours{1});
+        // The outdoor temperature during the expensive stretch: forecast, else the current reading.
+        std::optional<double> outside = in.forecast ? in.forecast->meanOver(peak, peakEnd) : std::nullopt;
+        const bool forecast = outside.has_value();
+        if (!outside) outside = in.outdoorTemp;
+        double boost = s.preheatBoost * outdoorFactor(target, outside);
+        std::string why = outside ? std::format(", +{:.1f}° as it will be {} outside", boost, temp(*outside)) : "";
+        bool due = true;
+        if (in.thermal && in.thermal->usable()) {
+            // Learned: just enough to coast through the stretch, at most twice the boost setting, and
+            // started only as early as heating that far takes (stored heat leaks away).
+            const double needed = neededPreheat(*in.thermal, target, s.peakAllowedDrop, outside.value_or(5.0), peak, peakEnd);
+            boost = std::min(needed, 2 * s.preheatBoost);
+            const auto lead = estimateWarmup(*in.thermal, t, std::min(target + boost, room.maxTemp - h),
+                                             in.outdoorTemp.value_or(outside.value_or(5.0)));
+            due = boost > 0.05 && peak - in.now <= lead.duration;
+            why = std::format(", +{:.1f}° to last until {}{}", boost, formatLocalHm(tz.toLocal(peakEnd)),
+                              outside ? std::format(" at {} outside{}", temp(*outside), forecast ? " (forecast)" : "") : "");
+        }
         const double ceiling = std::min(target + boost, room.maxTemp - h);
-        if (t < ceiling - h || (in.currentlyOn && t < ceiling)) {
-            const std::string weather =
-                in.outdoorTemp ? std::format(", +{:.1f}° as it is {} outside", boost, temp(*in.outdoorTemp)) : "";
+        if (due && (t < ceiling - h || (in.currentlyOn && t < ceiling))) {
+            inputs.ceiling = ceiling;
             return make(true, Reason::PreheatBeforePeak,
                         std::format("Pre-heating to {} before expensive period at {} ({:.2f} vs {:.2f} {}/kWh now{})",
-                                    temp(ceiling), formatLocalHm(tz.toLocal(*outlook.nextExpensiveAt)),
-                                    *outlook.nextExpensivePrice, *outlook.current, currency, weather),
+                                    temp(ceiling), formatLocalHm(tz.toLocal(peak)), *outlook.nextExpensivePrice,
+                                    *outlook.current, currency, why),
                         inputs);
         }
     }
@@ -324,6 +365,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     if (outlook.cheapest) {
         const double ceiling = std::min(target + s.cheapBoost, room.maxTemp - h);
         if (t < ceiling - h || (in.currentlyOn && t < ceiling)) {
+            inputs.ceiling = ceiling;
             return make(true, Reason::CheapBoost,
                         std::format("Among the cheapest slots ({:.2f} {}/kWh, median {:.2f}): heating to {}",
                                     *outlook.current, currency, *outlook.median, temp(ceiling)),
@@ -343,6 +385,16 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 
 namespace hb {
 
+double neededPreheat(const ThermalModel& m, double target, double allowedDrop, double outdoor, Instant from,
+                     Instant until) {
+    const double hours = duration<double, std::ratio<3600>>(until - from).count();
+    const double floor = target - allowedDrop;
+    if (floor <= outdoor || m.loss <= 0) return 0.0;
+    // Newton cooling: T(h) = out + (T0 - out) e^(-loss h) must still be >= floor at the end.
+    const double start = outdoor + (floor - outdoor) * std::exp(m.loss * hours);
+    return std::max(0.0, start - target);
+}
+
 std::optional<Booking> bookingAt(const std::vector<Booking>& bookings, Instant t) {
     for (const auto& b : bookings) {
         if (b.coversAt(t)) return b;
@@ -353,12 +405,12 @@ std::optional<Booking> bookingAt(const std::vector<Booking>& bookings, Instant t
 std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz, Instant now,
                                    std::chrono::hours horizon, std::optional<AwayMode> away,
                                    std::optional<double> outdoorTemp, const std::vector<Booking>& bookings,
-                                   std::optional<double> currentTemp, std::optional<double> coolingRate) {
+                                   std::optional<double> currentTemp, std::optional<double> coolingRate,
+                                   std::optional<ThermalModel> thermal, std::shared_ptr<const OutdoorForecast> forecast) {
     std::vector<PlanSegment> out;
     // The room's temperature as it is likely to go: it cools towards outdoors while not heated and is
     // back at the target after a heating period. Only used to tell "keep above" apart from "idle".
     std::optional<double> room_t = currentTemp;
-    const double outside = outdoorTemp.value_or(5.0);
     const double cool = std::exp(-coolingRate.value_or(0.05) * 0.25);  // per 15 minutes; cautious default
     for (Instant t = floorToSlot(now); t < now + horizon; t += kSlotLength) {
         // The target in effect at t, so the planner sees a room that is exactly at target.
@@ -366,6 +418,9 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
         in.now = t;
         in.away = away;
         in.outdoorTemp = outdoorTemp;
+        in.thermal = thermal;
+        in.forecast = forecast;
+        const double outside = (forecast ? forecast->at(t) : std::nullopt).value_or(outdoorTemp.value_or(5.0));
         const auto period = periodAt(room, minuteOfDay(tz.toLocal(t)));
         double assumed = period && period->point.mode != ProgramMode::Off ? period->point.target : room.minTemp + 1;
         if (away && away->activeAt(t)) assumed = away->keepAbove + 1;
@@ -401,9 +456,8 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
             } else if (d.inputs.target && (kind == "heat" || kind == "preheat" || kind == "boost" || kind == "coast")) {
                 // A heat period whose target (with any boost) is below where the room still is: no heat
                 // either - a room "heated to 5 deg" at 16 deg just cools.
-                const double ceiling = *d.inputs.target + (kind == "preheat" ? room.strategy.preheatBoost
-                                                           : kind == "boost"  ? room.strategy.cheapBoost
-                                                           : kind == "coast"  ? -room.strategy.peakAllowedDrop : 0.0);
+                const double ceiling = d.inputs.ceiling.value_or(
+                    *d.inputs.target + (kind == "coast" ? -room.strategy.peakAllowedDrop : 0.0));
                 *room_t = outside + (*room_t - outside) * cool;
                 if (*room_t > ceiling + room.strategy.hysteresis) kind = "idle";
                 else *room_t = std::max(*room_t, ceiling);

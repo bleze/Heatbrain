@@ -75,6 +75,27 @@ std::unique_ptr<ControlEnv> loadControlEnv(const Args& args) {
     e->controller->setAwayStore(e->away.get());
     e->controller->setBookingStore(e->bookings.get());
     e->controller->setOutdoorSensor(e->cfg.raw.value("outdoorSensor", std::string()));
+    {
+        // Open-window detection, on unless switched off: "openWindow": {"enabled", "drop", "pauseMinutes"}.
+        hb::OpenWindowConfig ow;
+        if (const auto& j = e->cfg.raw.value("openWindow", nlohmann::json::object()); j.is_object()) {
+            ow.enabled = j.value("enabled", true);
+            ow.drop = std::clamp(j.value("drop", 1.0), 0.3, 5.0);
+            ow.pause = minutes{std::clamp(j.value("pauseMinutes", 30), 5, 240)};
+        }
+        e->controller->setOpenWindow(ow);
+        // Weather forecast, on unless switched off: "forecast": {"enabled", "latitude", "longitude"}; without a
+        // position, where the Netatmo station is.
+        const auto& f = e->cfg.raw.value("forecast", nlohmann::json::object());
+        if (!f.is_object() || f.value("enabled", true)) {
+            std::optional<std::pair<double, double>> at;
+            if (f.is_object() && f.contains("latitude") && f.contains("longitude") && f["latitude"].is_number() &&
+                f["longitude"].is_number()) {
+                at = {{f["latitude"].get<double>(), f["longitude"].get<double>()}};
+            }
+            e->controller->setForecast(e->cache.get(), at);
+        }
+    }
     // Thermostats (DEVIreg Smart): their own sensors are a temperature source too.
     hb::DeviRegistry::instance().setDataDir(e->cfg.dataDir);
     if (auto thermostats = hb::parseThermostats(e->cfg.raw); !thermostats.empty()) {
@@ -250,10 +271,28 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
     }
     json outdoor = nullptr;
     if (const auto& o = env.controller->outdoor()) outdoor = {{"key", o->key}, {"name", o->name}, {"temperature", o->temperature}};
+    // The weather forecast, for Settings and the dashboard: lowest and highest in the next 24 h.
+    json forecast = nullptr;
+    if (const auto& fi = env.controller->forecast(); fi.location) {
+        forecast = {{"latitude", fi.location->first}, {"longitude", fi.location->second}, {"from", fi.locationFrom}};
+        if (!fi.error.empty()) forecast["error"] = fi.error;
+        if (fi.forecast) {
+            std::optional<std::pair<Instant, double>> lo, hi;
+            for (Instant t = ceil<hours>(now); t < now + hours{24}; t += hours{1}) {
+                const auto v = fi.forecast->at(t);
+                if (!v) continue;
+                if (!lo || *v < lo->second) lo = {{t, *v}};
+                if (!hi || *v > hi->second) hi = {{t, *v}};
+            }
+            if (lo) forecast["min"] = {{"at", lo->first.time_since_epoch().count()}, {"temperature", lo->second}};
+            if (hi) forecast["max"] = {{"at", hi->first.time_since_epoch().count()}, {"temperature", hi->second}};
+        }
+    }
     return json{{"now", now.time_since_epoch().count()},
                 {"away", away},
                 {"wifiOff", wifiOff},
                 {"outdoor", outdoor},
+                {"forecast", forecast},
                 {"tickSeconds", env.tick.count()},
                 {"version", hb::buildRevision()},
                 {"timezone", env.cfg.timezone},
@@ -415,12 +454,12 @@ void controlLoop(ControlEnv& env, hb::StatusBoard& board, std::unique_ptr<hb::Al
         }
         board.set(buildStatus(env, result, alerts.activeProblems(now), now));
 
-        // Weekly summary (Monday morning) and tomorrow's-price heads-up.
+        // Weekly summary (Monday morning), monthly report (the 1st) and tomorrow's-price heads-up.
         try {
             const auto recent = env.history->prices(now - hours{24 * 7}, hb::startOfLocalDay(*env.tz, now));
             const auto messages = hb::dueDigests(
                 now, *env.tz, digest, digestOpts,
-                [&](Instant end) { return hb::costReport(env.cfg.raw, *env.history, end, 7); }, env.controller->prices(),
+                [&](Instant end, int days) { return hb::costReport(env.cfg.raw, *env.history, end, days); }, env.controller->prices(),
                 recent);
             if (!messages.empty()) hb::saveDigestState(digestFile, digest);
             for (const auto& m : messages) {

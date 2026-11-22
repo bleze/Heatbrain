@@ -70,6 +70,8 @@ add_library(heatbrain_core STATIC
   src/core/base64.cpp
   src/core/offline.cpp
   src/core/thermal.cpp
+  src/core/window.cpp
+  src/core/forecast.cpp
 )
 target_include_directories(heatbrain_core PUBLIC src)
 target_compile_definitions(heatbrain_core PRIVATE HEATBRAIN_REVISION="${HEATBRAIN_REVISION}")
@@ -81,6 +83,7 @@ add_library(heatbrain_io STATIC
   src/providers/basic_components.cpp
   src/providers/price_model.cpp
   src/providers/eloverblik.cpp
+  src/providers/forecast.cpp
   src/plugs/tasmota.cpp
   src/plugs/plugs.cpp
   src/sensors/netatmo.cpp
@@ -137,6 +140,8 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_netatmo.cpp
     tests/test_planner.cpp
     tests/test_thermal.cpp
+    tests/test_window.cpp
+    tests/test_forecast.cpp
     tests/test_sdg_incoming.cpp
     tests/test_controller.cpp
     tests/test_alerts.cpp

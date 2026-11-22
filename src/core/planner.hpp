@@ -1,12 +1,16 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 
 #include "core/price.hpp"
+#include "core/forecast.hpp"
 #include "core/room.hpp"
+#include "core/thermal.hpp"
 #include "core/time.hpp"
+#include "core/window.hpp"
 
 namespace hb {
 
@@ -34,6 +38,7 @@ enum class Reason {
     NoPricesFallback,       // price-only room without prices: heat outside avoid windows
     AwayOff,                // price-only room while away
     OfflineSchedule,        // Wi-Fi off period: the plug follows the schedule loaded onto it
+    WindowOpen,             // the temperature fell fast: window open? heating paused
 };
 
 std::string_view reasonCode(Reason r);  // "PREHEAT_BEFORE_PEAK", stable for storage/UI
@@ -46,6 +51,7 @@ struct PriceOutlook {
     bool cheapest = false;    // bottom quarter and clearly below the median
     std::optional<Instant> nextExpensiveAt;  // within the look-ahead window
     std::optional<double> nextExpensivePrice;
+    std::optional<Instant> nextExpensiveUntil;  // end of that expensive stretch (within 24 h)
 };
 
 PriceOutlook priceOutlook(const PriceTable& prices, Instant now, std::chrono::minutes lookAhead);
@@ -89,6 +95,11 @@ struct PlannerInput {
     std::optional<AwayMode> away;  // whole-house away/holiday mode
     std::optional<Booking> booking;  // this room booked (in effect now)
     std::optional<double> outdoorTemp;  // °C, recent reading of an outdoor sensor
+    std::optional<OpenWindowEvent> windowOpen;  // heating paused: the temperature fell fast
+    // How fast this room warms and cools, once learned well enough: pre-heating is then sized to
+    // carry the room through the expensive hours, and starts only as early as needed.
+    std::optional<ThermalModel> thermal;
+    std::shared_ptr<const OutdoorForecast> forecast;  // outdoor temperature ahead, if known
 };
 
 // Everything a decision was based on, for the decision log.
@@ -104,6 +115,7 @@ struct DecisionInputs {
     bool priceExpensive = false;
     bool priceCheapest = false;
     std::optional<double> outdoorTemp;
+    std::optional<double> ceiling;  // pre-heat / cheap boost: heating up to this
 };
 
 struct Decision {
@@ -135,6 +147,14 @@ struct PlanSegment {
 std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz, Instant now,
                                    std::chrono::hours horizon, std::optional<AwayMode> away,
                                    std::optional<double> outdoorTemp, const std::vector<Booking>& bookings = {},
-                                   std::optional<double> currentTemp = {}, std::optional<double> coolingRate = {});
+                                   std::optional<double> currentTemp = {}, std::optional<double> coolingRate = {},
+                                   std::optional<ThermalModel> thermal = {},
+                                   std::shared_ptr<const OutdoorForecast> forecast = {});
+
+// The pre-heat a room needs before an expensive stretch [from, until): how far above `target` it
+// must be when the stretch starts to coast through it without falling below target - allowedDrop,
+// cooling towards `outdoor` at the learned rate. 0 when it holds anyway.
+double neededPreheat(const ThermalModel& m, double target, double allowedDrop, double outdoor, Instant from,
+                     Instant until);
 
 }  // namespace hb

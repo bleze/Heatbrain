@@ -130,6 +130,7 @@ double thermostatSetpoint(const RoomConfig& room, const Decision& d) {
         case Reason::ManualOn: sp = room.maxTemp; break;
         case Reason::ManualOff:
         case Reason::ScheduledOff:
+        case Reason::WindowOpen:
         case Reason::AboveMax:
             sp = frost;
             break;
@@ -139,8 +140,10 @@ double thermostatSetpoint(const RoomConfig& room, const Decision& d) {
             sp = in.target.value_or(frost);
             break;
         case Reason::PeakAvoid: sp = in.target.value_or(frost) - room.strategy.peakAllowedDrop; break;
-        case Reason::PreheatBeforePeak: sp = in.target.value_or(frost) + room.strategy.preheatBoost; break;
-        case Reason::CheapBoost: sp = in.target.value_or(frost) + room.strategy.cheapBoost; break;
+        case Reason::PreheatBeforePeak:
+            sp = in.ceiling.value_or(in.target.value_or(frost) + room.strategy.preheatBoost);
+            break;
+        case Reason::CheapBoost: sp = in.ceiling.value_or(in.target.value_or(frost) + room.strategy.cheapBoost); break;
         default:
             // heat periods (thermostat logic, below minimum, limp, ...): the target; the
             // thermostat does the regulating itself.

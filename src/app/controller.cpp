@@ -1,5 +1,7 @@
 #include "app/controller.hpp"
 
+#include "providers/forecast.hpp"
+
 #include <fstream>
 
 #include <algorithm>
@@ -81,6 +83,7 @@ json toJson(const DecisionInputs& in) {
     if (in.price) j["price"] = *in.price;
     if (in.medianPrice) j["medianPrice"] = *in.medianPrice;
     if (in.outdoorTemp) j["outdoorTemp"] = *in.outdoorTemp;
+    if (in.ceiling) j["ceiling"] = *in.ceiling;
     return j;
 }
 
@@ -312,6 +315,8 @@ TickResult Controller::tick(Instant now, bool apply) {
         outdoorUsed_.reset();
         if (outdoor) outdoorUsed_ = OutdoorUsed{okey, o->name, *outdoor};
     }
+    refreshForecast(now, outdoor, result);
+    const auto forecast = forecastInfo_.forecast;
 
     // Wi-Fi off period: hand back after it, load the night schedule just before it.
     std::optional<OfflinePeriod> offline;
@@ -356,6 +361,27 @@ TickResult Controller::tick(Instant now, bool apply) {
         if (auto it = overrides.find(room.id); it != overrides.end()) in.override = it->second;
         in.away = away;
         in.outdoorTemp = outdoor;
+        in.forecast = forecast;
+        // Open window: the temperature fell fast. Pause heating for a while (manual ON still wins).
+        if (!room.priceOnly && reading && reading->temperature && reading->measuredAt) {
+            auto& detector = windows_[room.id];
+            if (apply) {
+                if (const auto ev = detector.update(*reading->measuredAt, *reading->temperature, openWindow_)) {
+                    log::info("{}: {:.1f}° fall in {} min, window open? Heating paused until {:%H:%M}", room.id,
+                              ev->drop, ev->over.count(), tz_.toLocal(ev->until));
+                }
+            }
+            in.windowOpen = detector.pausedAt(now);
+            if (in.windowOpen) {
+                add(result, "room:" + room.id + ":window", Severity::Info,
+                    std::format("{}: the temperature fell {:.1f}° in {} min. Window open? Heating is paused until {:%H:%M}.",
+                                room.name, in.windowOpen->drop, in.windowOpen->over.count(),
+                                tz_.toLocal(in.windowOpen->until)));
+            }
+        }
+        if (!room.priceOnly) {
+            if (const ThermalModel m = thermalModel(room, now); m.usable()) in.thermal = m;
+        }
         // Bookings: warm up as long as the room needs - learned from its history, from the current
         // and the outdoor temperature - or the room's warm-up setting until that is known.
         std::vector<BookingPlan> bookingPlans;
@@ -370,7 +396,12 @@ TickResult Controller::tick(Instant now, bool apply) {
                 BookingPlan bp{s.id, s.booking, "set", true, s.warmingSince};
                 bp.booking.warmup = room.warmup;
                 if (learned && freshTemp) {
-                    const auto est = estimateWarmup(*learned, *in.temperature, s.booking.target, outdoor.value_or(5.0));
+                    // The outdoor temperature while warming up: the forecast for the hours before the booking.
+                    const Instant guessStart = s.booking.from - room.warmup;
+                    std::optional<double> outside =
+                        forecast ? forecast->meanOver(std::max(now, guessStart), std::max(now, s.booking.from)) : std::nullopt;
+                    if (!outside) outside = outdoor;
+                    const auto est = estimateWarmup(*learned, *in.temperature, s.booking.target, outside.value_or(5.0));
                     bp.booking.warmup = est.duration;
                     bp.basis = "learned";
                     bp.reachable = est.reachable;
@@ -412,7 +443,8 @@ TickResult Controller::tick(Instant now, bool apply) {
             std::optional<double> current, cooling;
             if (in.temperature && in.measuredAt && now - *in.measuredAt <= room.strategy.staleAfter) current = in.temperature;
             if (const auto m = thermalModel(room, now); m.coolingStretches >= 3 && m.loss > 0) cooling = m.loss;
-            rr.plan = planAhead(room, prices_, tz_, now, hours{24}, away, outdoor, bookings, current, cooling);
+            rr.plan = planAhead(room, prices_, tz_, now, hours{24}, away, outdoor, bookings, current, cooling, in.thermal,
+                                forecast);
         }
         if (offline && offline->start < now + hours{24} && room.thermostat.empty()) {  // thermostats keep their setpoint
             // Show the night as it will run: the loaded schedule, or what would be loaded now.
@@ -500,7 +532,11 @@ ThermalModel Controller::thermalModel(const RoomConfig& room, Instant now) {
             std::vector<ThermalSample> samples;
             for (const auto& d : history_->decisions(room.id, now - days{21}, now, false)) {
                 // Only real states: not limp mode or night schedules (the plug did its own thing).
-                if (d.reason == "STALE_DATA_LIMP" || d.reason == "OFFLINE_SCHEDULE" || !d.inputs.is_object()) continue;
+                // An open window is not how the room normally cools.
+                if (d.reason == "STALE_DATA_LIMP" || d.reason == "OFFLINE_SCHEDULE" || d.reason == "WINDOW_OPEN" ||
+                    !d.inputs.is_object()) {
+                    continue;
+                }
                 if (!d.inputs.contains("temperature") || d.inputs.value("temperatureAgeMinutes", 99) > 30) continue;
                 ThermalSample s{d.at, d.inputs["temperature"].get<double>(), std::nullopt, d.on};
                 if (d.inputs.contains("outdoorTemp")) s.outdoor = d.inputs["outdoorTemp"].get<double>();
@@ -513,6 +549,51 @@ ThermalModel Controller::thermalModel(const RoomConfig& room, Instant now) {
     }
     thermal_[room.id] = {now, m};
     return m;
+}
+
+// The weather forecast: refetched every half hour (the HTTP cache keeps it an hour), for the set
+// location or the Netatmo station's. Kept for 12 hours when fetching fails.
+void Controller::refreshForecast(Instant now, std::optional<double> outdoor, TickResult& result) {
+    forecastInfo_.location = forecastLocation_;
+    forecastInfo_.locationFrom = forecastLocation_ ? "settings" : "";
+    if (!forecastLocation_) {
+        for (const auto& [key, r] : readings_) {
+            if (r.location && (!forecastInfo_.location || r.kind == "outdoor")) {
+                forecastInfo_.location = r.location;
+                forecastInfo_.locationFrom = "netatmo";
+            }
+        }
+    }
+    if (!forecastHttp_ || !forecastInfo_.location) {
+        forecastInfo_.forecast.reset();
+        return;
+    }
+    const bool due = (!forecastFetched_ || now - *forecastFetched_ >= minutes{30}) &&
+                     (!forecastFailedAt_ || now - *forecastFailedAt_ >= minutes{15});
+    if (due) {
+        try {
+            rawForecast_ = fetchForecast(*forecastHttp_, forecastInfo_.location->first, forecastInfo_.location->second);
+            forecastFetched_ = now;
+            forecastFailedAt_.reset();
+            forecastInfo_.error.clear();
+        } catch (const std::exception& e) {
+            forecastFailedAt_ = now;
+            forecastInfo_.error = e.what();
+            log::warn("Weather forecast: {}", e.what());
+        }
+    }
+    if (forecastFetched_ && now - *forecastFetched_ > hours{12}) rawForecast_ = {};
+    if (rawForecast_.empty()) {
+        forecastInfo_.forecast.reset();
+        if (!forecastInfo_.error.empty()) {
+            add(result, "forecast:error", Severity::Info,
+                "No weather forecast (" + forecastInfo_.error + "): pre-heating uses the current outdoor temperature",
+                minutes{180});
+        }
+        return;
+    }
+    forecastInfo_.forecast = std::make_shared<const OutdoorForecast>(
+        outdoor ? rawForecast_.correctedTo(*outdoor, now) : rawForecast_);
 }
 
 OfflineDuty Controller::learnedDuty(const std::string& roomId, Instant now) const {

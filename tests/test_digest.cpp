@@ -48,11 +48,47 @@ std::vector<PricePoint> recentFlat(year_month_day lastDay, int days, double pric
 TEST_CASE("Weekly summary text") {
     const auto m = weeklySummary(sampleReport(true));
     CHECK(m.title == "heatbrain: last week");
-    CHECK_THAT(m.text, ContainsSubstring("84 kr for 31 kWh"));
+    CHECK_THAT(m.text, ContainsSubstring("Last week cost 84 kr for 31 kWh"));
     CHECK_THAT(m.text, ContainsSubstring("Timing saved 12 kr (12 %)"));
     CHECK_THAT(m.text, ContainsSubstring("Bedroom 40 kr · Shed 44 kr"));
     CHECK_THAT(m.text, ContainsSubstring("No cost for: Basement"));
     CHECK_THAT(weeklySummary(sampleReport(false)).text, ContainsSubstring("would have cost"));
+}
+
+TEST_CASE("Monthly report: cost, price paid, dearest day, the month before") {
+    json report = sampleReport(true);
+    report["market"] = {{"2026-11-01", 2.0}, {"2026-11-02", 3.0}};
+    report["rooms"][0]["days"] = json::array({{{"date", "2026-11-01"}, {"cost", 10.0}}, {{"date", "2026-11-02"}, {"cost", 30.0}}});
+    report["rooms"][1]["days"] = json::array({{{"date", "2026-11-01"}, {"cost", 44.3}}});
+    const json previous{{"total", {{"kWh", 39.0}}}};
+    const auto m = monthlySummary(report, previous, "November");
+    CHECK(m.title == "heatbrain: November");
+    CHECK_THAT(m.text, ContainsSubstring("November cost 84 kr for 31 kWh"));
+    CHECK_THAT(m.text, ContainsSubstring("Average 2.70 DKK/kWh paid, against 2.50 on the market"));
+    CHECK_THAT(m.text, ContainsSubstring("Dearest day: 11-01 (54 kr)"));
+    CHECK_THAT(m.text, ContainsSubstring("20 % less energy than the month before"));
+    CHECK_THAT(monthlySummary(report, json::object(), "November").text, !ContainsSubstring("month before"));
+}
+
+TEST_CASE("Monthly report on the 1st from 08:00, once, covering the whole month before") {
+    DigestState state;
+    DigestOptions opt;
+    opt.weekly = false;
+    std::vector<std::pair<Instant, int>> asked;
+    const auto report = [&](Instant end, int days) { asked.emplace_back(end, days); return sampleReport(true); };
+    const PriceTable none;
+    CHECK(dueDigests(at(2026y / 12 / 1, 7), tz(), state, opt, report, none, {}).empty());
+    const auto m = dueDigests(at(2026y / 12 / 1, 8), tz(), state, opt, report, none, {});
+    REQUIRE(m.size() == 1);
+    CHECK(m[0].title == "heatbrain: November");
+    REQUIRE(asked.size() == 2);
+    CHECK(asked[0].first == at(2026y / 12 / 1, 0) - seconds{1});
+    CHECK(asked[0].second == 30);
+    CHECK(asked[1].first == at(2026y / 11 / 1, 0) - seconds{1});
+    CHECK(asked[1].second == 31);
+    CHECK(dueDigests(at(2026y / 12 / 1, 9), tz(), state, opt, report, none, {}).empty());
+    CHECK(dueDigests(at(2026y / 12 / 2, 8), tz(), state, opt, report, none, {}).empty());
+    CHECK(dueDigests(at(2027y / 1 / 1, 8), tz(), state, opt, report, none, {})[0].title == "heatbrain: December");
 }
 
 TEST_CASE("Price heads-up only for unusual days") {
@@ -75,7 +111,7 @@ TEST_CASE("Digests are sent once, at the right time") {
     DigestState state;
     const DigestOptions opt;
     int reports = 0;
-    const auto report = [&](Instant) { ++reports; return sampleReport(true); };
+    const auto report = [&](Instant, int) { ++reports; return sampleReport(true); };
     const PriceTable noTomorrow;
     const std::vector<PricePoint> recent;
 
@@ -93,7 +129,7 @@ TEST_CASE("Digests are sent once, at the right time") {
     CHECK(dueDigests(at(2026y / 11 / 24, 15), tz(), state, opt, report, prices, recentDays).empty());
 
     DigestState off;
-    CHECK(dueDigests(at(monday, 8), tz(), off, DigestOptions{false, false}, report, prices, recentDays).empty());
+    CHECK(dueDigests(at(monday, 8), tz(), off, DigestOptions{false, false, true, false}, report, prices, recentDays).empty());
 }
 
 TEST_CASE("Firmware notice: once per release, only when a plug is behind") {

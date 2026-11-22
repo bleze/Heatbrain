@@ -11,7 +11,10 @@
 
 #include "app/rooms.hpp"
 #include "app/thermostats.hpp"
+#include "core/forecast.hpp"
 #include "core/thermal.hpp"
+#include "core/window.hpp"
+#include "net/http.hpp"
 #include "core/alerts.hpp"
 #include "core/offline.hpp"
 #include "core/planner.hpp"
@@ -70,6 +73,20 @@ public:
     void setBookingStore(const BookingStore* bookings) { bookings_ = bookings; }
     void setOutdoorSensor(std::string ref) { outdoorSensor_ = std::move(ref); }
     void setThermostats(std::vector<ThermostatConfig> t) { thermostats_ = std::move(t); }
+    void setOpenWindow(OpenWindowConfig cfg) { openWindow_ = cfg; }
+    // Weather forecast for pre-heating and warm-up: fetched through `http` for `location` (latitude,
+    // longitude), or where the Netatmo station is when no location is set. nullptr = no forecast.
+    void setForecast(CachingHttpClient* http, std::optional<std::pair<double, double>> location) {
+        forecastHttp_ = http;
+        forecastLocation_ = location;
+    }
+    struct ForecastInfo {
+        std::optional<std::pair<double, double>> location;
+        std::string locationFrom;  // "settings" | "netatmo"
+        std::shared_ptr<const OutdoorForecast> forecast;  // corrected to the outdoor sensor
+        std::string error;
+    };
+    const ForecastInfo& forecast() const { return forecastInfo_; }
     // The outdoor reading used in the last tick, if any.
     struct OutdoorUsed {
         std::string key;   // "<source>:<sensor id>" as stored in the history
@@ -105,6 +122,15 @@ private:
     nlohmann::json applyToThermostat(const RoomConfig& room, const Decision& d, TickResult& result);
     std::vector<ThermostatConfig> thermostats_;
     ThermalModel thermalModel(const RoomConfig& room, Instant now);  // learned, refreshed hourly
+    void refreshForecast(Instant now, std::optional<double> outdoor, TickResult& result);
+    CachingHttpClient* forecastHttp_ = nullptr;
+    std::optional<std::pair<double, double>> forecastLocation_;
+    OutdoorForecast rawForecast_;
+    std::optional<Instant> forecastFetched_;
+    std::optional<Instant> forecastFailedAt_;
+    ForecastInfo forecastInfo_;
+    OpenWindowConfig openWindow_;
+    std::map<std::string, OpenWindowDetector> windows_;  // room id -> detector
     std::map<std::string, std::pair<Instant, ThermalModel>> thermal_;
     // Empty when the plug may be switched live; otherwise why not.
     std::string failsafeProblem(Plug& plug, Instant now);

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <format>
 #include <fstream>
+#include <map>
 
 namespace hb {
 
@@ -34,6 +35,7 @@ DigestState loadDigestState(const fs::path& file) {
         if (!in) return s;
         const json j = json::parse(in);
         s.lastWeekly = j.value("lastWeekly", "");
+        s.lastMonthly = j.value("lastMonthly", "");
         s.lastHeadsUp = j.value("lastHeadsUp", "");
         s.lastFirmwareCheck = j.value("lastFirmwareCheck", "");
         s.lastFirmware = j.value("lastFirmware", "");
@@ -44,6 +46,7 @@ DigestState loadDigestState(const fs::path& file) {
 
 void saveDigestState(const fs::path& file, const DigestState& s) {
     std::ofstream(file) << json{{"lastWeekly", s.lastWeekly},
+                                {"lastMonthly", s.lastMonthly},
                                 {"lastHeadsUp", s.lastHeadsUp},
                                 {"lastFirmwareCheck", s.lastFirmwareCheck},
                                 {"lastFirmware", s.lastFirmware}}
@@ -56,10 +59,14 @@ DigestOptions parseDigestOptions(const json& cfg) {
     o.weekly = cfg["notifications"].value("weeklySummary", true);
     o.headsUp = cfg["notifications"].value("priceHeadsUp", true);
     o.firmware = cfg["notifications"].value("firmwareUpdates", true);
+    o.monthly = cfg["notifications"].value("monthlyReport", true);
     return o;
 }
 
-DigestMessage weeklySummary(const json& report) {
+namespace {
+
+// "84 kr for 31 kWh", savings, cost per room and rooms without a known power.
+std::string costText(const json& report, const std::string& period) {
     const std::string cur = report.value("currency", std::string("DKK"));
     const auto& total = report.at("total");
     const double cost = total.value("cost", 0.0), kWh = total.value("kWh", 0.0), saved = total.value("saved", 0.0);
@@ -73,7 +80,7 @@ DigestMessage weeklySummary(const json& report) {
         anyLive = anyLive || r["total"].value("liveKWh", 0.0) > 0;
         perRoom.push_back(std::format("{} {}", r.value("name", "?"), money(r["total"].value("cost", 0.0), cur)));
     }
-    std::string text = std::format("{} {} for {:.0f} kWh (estimated).", anyLive ? "Last week:" : "Last week would have cost",
+    std::string text = std::format("{} {} {} for {:.0f} kWh (estimated).", period, anyLive ? "cost" : "would have cost",
                                    money(cost, cur), kWh);
     if (cost + saved > 0) {
         const double pct = saved / (cost + saved) * 100;
@@ -89,7 +96,43 @@ DigestMessage weeklySummary(const json& report) {
         for (std::size_t i = 0; i < missing.size(); ++i) text += (i ? ", " : "") + missing[i];
         text += " (set the heating power under Settings → Heating)";
     }
-    return {"heatbrain: last week", text};
+    return text;
+}
+
+}  // namespace
+
+DigestMessage weeklySummary(const json& report) { return {"heatbrain: last week", costText(report, "Last week")}; }
+
+DigestMessage monthlySummary(const json& report, const json& previous, const std::string& month) {
+    const std::string cur = report.value("currency", std::string("DKK"));
+    std::string text = costText(report, month);
+    const double kWh = report.at("total").value("kWh", 0.0), cost = report.at("total").value("cost", 0.0);
+    // What a kWh cost on average, against the market average over the same days: the effect of timing.
+    if (kWh > 0 && report.contains("market") && !report["market"].empty()) {
+        double market = 0;
+        for (const auto& [date, avg] : report["market"].items()) market += avg.get<double>();
+        market /= static_cast<double>(report["market"].size());
+        text += std::format("\nAverage {:.2f} {}/kWh paid, against {:.2f} on the market.", cost / kWh, cur, market);
+    }
+    // The dearest day for heating, over all rooms.
+    std::map<std::string, double> byDay;
+    for (const auto& r : report.at("rooms")) {
+        for (const auto& d : r.value("days", json::array())) byDay[d.value("date", "")] += d.value("cost", 0.0);
+    }
+    if (const auto dear = std::ranges::max_element(byDay, {}, [](const auto& p) { return p.second; });
+        dear != byDay.end() && dear->second > 0) {
+        text += std::format(" Dearest day: {} ({}).", dear->first.substr(5), money(dear->second, cur));
+    }
+    if (previous.contains("total")) {
+        const double before = previous["total"].value("kWh", 0.0);
+        if (before > 1 && kWh > 0) {
+            const double pct = (kWh / before - 1) * 100;
+            text += std::abs(pct) < 1 ? std::string(" About the same energy as the month before.")
+                                      : std::format(" {:.0f} % {} energy than the month before.", std::abs(pct),
+                                                    pct > 0 ? "more" : "less");
+        }
+    }
+    return {"heatbrain: " + month, text};
 }
 
 std::optional<DigestMessage> priceHeadsUp(const PriceTable& upcoming, const std::vector<PricePoint>& recent,
@@ -132,7 +175,7 @@ std::optional<DigestMessage> priceHeadsUp(const PriceTable& upcoming, const std:
 }
 
 std::vector<DigestMessage> dueDigests(Instant now, const TimeZone& tz, DigestState& state, const DigestOptions& opt,
-                                      const std::function<json(Instant)>& reportForLastWeek, const PriceTable& upcoming,
+                                      const std::function<json(Instant, int)>& report, const PriceTable& upcoming,
                                       const std::vector<PricePoint>& recent) {
     std::vector<DigestMessage> out;
     const auto local = tz.toLocal(now);
@@ -140,8 +183,26 @@ std::vector<DigestMessage> dueDigests(Instant now, const TimeZone& tz, DigestSta
 
     if (opt.weekly && isoWeekday(local) == 1 && hourOfDay(local) >= kWeeklyHour && state.lastWeekly != today) {
         // Last week = Monday 00:00 .. Sunday 23:59:59, i.e. up to just before today.
-        out.push_back(weeklySummary(reportForLastWeek(startOfLocalDay(tz, now) - seconds{1})));
+        out.push_back(weeklySummary(report(startOfLocalDay(tz, now) - seconds{1}, 7)));
         state.lastWeekly = today;
+    }
+    const year_month_day ymd{floor<days>(local)};
+    const std::string thisMonth = today.substr(0, 7);
+    if (opt.monthly && ymd.day() == day{1} && hourOfDay(local) >= kWeeklyHour && state.lastMonthly != thisMonth) {
+        // Last month, and the month before for comparison: each ends just before the next starts.
+        const auto lastMonth = ymd.year() / ymd.month() - months{1};
+        const auto monthBefore = lastMonth - months{1};
+        const auto length = [](year_month m) {
+            return static_cast<int>(static_cast<unsigned>(year_month_day_last{m / last}.day()));
+        };
+        const Instant end = startOfLocalDay(tz, now) - seconds{1};
+        const Instant endBefore = tz.toInstant(local_days{lastMonth / 1}) - seconds{1};
+        static const char* names[] = {"January", "February", "March",     "April",   "May",      "June",
+                                      "July",    "August",   "September", "October", "November", "December"};
+        const json last = report(end, length(lastMonth));
+        const json before = report(endBefore, length(monthBefore));
+        out.push_back(monthlySummary(last, before, names[static_cast<unsigned>(lastMonth.month()) - 1]));
+        state.lastMonthly = thisMonth;
     }
     const std::string tomorrow = formatLocalDate(floor<days>(local) + days{1});
     if (opt.headsUp && hourOfDay(local) >= kHeadsUpHour && state.lastHeadsUp != tomorrow) {

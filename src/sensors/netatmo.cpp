@@ -147,12 +147,21 @@ std::vector<SensorReading> parseStationsData(const json& j) {
         // home_name ("Granvænget"); station_name adds the base module in brackets ("Granvænget (Living room)"),
         // which reads as if every module were in that room.
         const std::string station = dev.value("home_name", dev.value("station_name", ""));
+        const std::size_t first = out.size();
         out.push_back(readingFrom(dev, station, "indoor"));  // the base station is indoors
-        if (!dev.contains("modules")) continue;
-        for (const auto& m : dev["modules"]) {
-            const std::string type = m.value("type", "");
-            if (type == "NAModule4") out.push_back(readingFrom(m, station, "indoor"));
-            if (type == "NAModule1") out.push_back(readingFrom(m, station, "outdoor"));
+        if (dev.contains("modules")) {
+            for (const auto& m : dev["modules"]) {
+                const std::string type = m.value("type", "");
+                if (type == "NAModule4") out.push_back(readingFrom(m, station, "indoor"));
+                if (type == "NAModule1") out.push_back(readingFrom(m, station, "outdoor"));
+            }
+        }
+        // place.location is [longitude, latitude]: where the weather forecast is for.
+        if (dev.contains("place") && dev["place"].contains("location") && dev["place"]["location"].size() == 2) {
+            const auto& l = dev["place"]["location"];
+            if (l[0].is_number() && l[1].is_number()) {
+                for (std::size_t i = first; i < out.size(); ++i) out[i].location = {{l[1].get<double>(), l[0].get<double>()}};
+            }
         }
     }
     return out;

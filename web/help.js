@@ -69,7 +69,8 @@ const HELP = {
     ],
     list: [
       "Peak coasting (default 1.0 °C): while it is expensive, heating pauses until the room is this much below target. Example: target 19 °C, 18:00 is expensive → no heating at 18.6 °C; at 17.9 °C it heats again (just back above 18 °C).",
-      "Pre-heat (default 1.0 °C): when an expensive period starts within the look-ahead and the price now is at least 15 % lower, heat up to target + this, so the room can coast. Colder outside → more (up to ×1.5), mild → less (down to ×0.5). Example: 15:00 costs 2.30, 17:00 costs 3.40, 0 °C outside → heat to about 20.3 °C before 17:00.",
+      "Pre-heat (default 1.0 °C): when an expensive period starts within the look-ahead and the price now is at least 15 % lower, heat up to target + this, so the room can coast. Colder outside during the expensive hours → more (up to ×1.5), mild → less (down to ×0.5). Example: 15:00 costs 2.30, 17:00 costs 3.40, 0 °C outside → heat to about 20.3 °C before 17:00.",
+      "Once heatbrain has learned how fast a room warms and cools (a few days of history), pre-heating is calculated instead: just enough that the room coasts through the whole expensive stretch without falling more than the peak coasting allows, at most twice the pre-heat setting - and started only as early as heating that far takes, because stored heat leaks away. On a mild evening that can mean no pre-heating at all.",
       "Peak look-ahead (default 180 min): how far ahead heatbrain looks for an expensive period to pre-heat for.",
       "Cheap boost (default 0.5 °C): in the cheapest hours, heat up to target + this - heat stored when it costs least.",
       "Hysteresis (default 0.3 °C): heating starts at target - 0.3 and stops at target + 0.3, so the relay does not click on and off every few minutes.",
@@ -90,6 +91,21 @@ const HELP = {
       "The outdoor module scales pre-heating: when it is cold outside rooms cool faster during off periods, so heatbrain stores a little more heat beforehand.",
     ],
   },
+  forecast: {
+    title: "Weather forecast",
+    body: [
+      "heatbrain fetches the hourly outdoor temperature for the next two days from Open-Meteo, a free weather service without an account. Only the position is sent, rounded to about a kilometre - by default where your Netatmo station is.",
+      "The forecast is corrected to your outdoor sensor (the difference measured now fades out over six hours) and used for: how much to pre-heat before expensive hours (the weather during those hours counts, not the weather now), how long a booking needs to warm up, and the 'Next 24 h' plan.",
+    ],
+    example: "Mild now (10 °C) but 0 °C forecast for 17-21: the room is pre-heated for 0 °C. Freezing now but mild this evening: less pre-heating.",
+  },
+  openWindow: {
+    title: "Open windows",
+    body: [
+      "When a room's temperature falls 1 °C or more within half an hour, a window or door is probably open. heatbrain then pauses that room's heating for 30 minutes and tells you (a notification, and on the dashboard). Frost protection and a manual ON still heat.",
+      "After the pause the room heats normally again; only a new fast fall pauses it once more. The cooling during a pause is left out when heatbrain learns how fast the room cools.",
+    ],
+  },
   prices: {
     title: "What a kWh costs",
     body: [
@@ -100,7 +116,7 @@ const HELP = {
     title: "Notifications",
     body: [
       "Problems (a plug unreachable, a sensor offline or low on battery, missing prices, a room that does not warm up) are sent after they have lasted a while - one missed reading does not wake you. You get a quiet 'resolved' when a problem is over, reminders every few hours while it lasts, and nothing but critical alerts during quiet hours.",
-      "Also: a weekly cost summary on Monday morning, a heads-up when tomorrow is unusually expensive or cheap, and one message when a new Tasmota release is out for your plugs (checked daily; you start the upgrade yourself).",
+      "Also: a weekly cost summary on Monday morning, a monthly report on the 1st (cost, the average price you paid against the market, the dearest day, and the energy against the month before), a heads-up when tomorrow is unusually expensive or cheap, and one message when a new Tasmota release is out for your plugs (checked daily; you start the upgrade yourself).",
     ],
   },
   away: {
@@ -256,7 +272,7 @@ function renderManual(host) {
     "heatbrain switches your radiators' plugs on and off from the price of electricity, the temperature in each room and the program you set. Everything here is also available as '?' next to the settings.");
   const toc = el("nav", { class: "toc" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "thermostats", "sensors", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
+                 "thermostats", "sensors", "forecast", "openWindow", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, card);
     el("h3", {}, sec, HELP[key].title);

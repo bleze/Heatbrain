@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <algorithm>
@@ -452,4 +453,90 @@ TEST_CASE("Plan: a heat period below the room's temperature is idle too") {
     room.minTemp = 5;
     const auto plan = planAhead(room, makePrices(), tz(), at(12), hours{24}, std::nullopt, 5.0, {}, 16.0, 0.05);
     CHECK(std::ranges::all_of(plan, [](const PlanSegment& s) { return s.kind == "idle"; }));
+}
+
+namespace {
+ThermalModel learnedRoom(double loss = 0.05, double gain = 3.0) {
+    ThermalModel m;
+    m.loss = loss;
+    m.gain = gain;
+    m.coolingStretches = 5;
+    m.heatingStretches = 5;
+    return m;
+}
+std::shared_ptr<const OutdoorForecast> flatForecast(double temperature) {
+    auto f = std::make_shared<OutdoorForecast>();
+    for (int h = 0; h < 48; ++h) f->hourly.emplace_back(tz().toInstant(kDay + hours{h}), temperature);
+    return f;
+}
+}  // namespace
+
+TEST_CASE("Price outlook knows when the expensive stretch ends") {
+    const auto o = priceOutlook(makePrices(), at(15), minutes{180});
+    REQUIRE(o.nextExpensiveAt);
+    CHECK(*o.nextExpensiveAt == at(17));
+    REQUIRE(o.nextExpensiveUntil);
+    CHECK(*o.nextExpensiveUntil == at(21));
+}
+
+TEST_CASE("Needed pre-heat: enough to coast through the stretch, none when the room holds anyway") {
+    const auto m = learnedRoom();
+    // floor 18, 5 deg outside, 4 h at loss 0.05: must start at 5 + 13 e^0.2 = 20.88
+    CHECK(neededPreheat(m, 19, 1, 5, at(17), at(21)) == Catch::Approx(1.878).epsilon(0.01));
+    CHECK(neededPreheat(m, 19, 1, 15, at(17), at(21)) == 0.0);    // mild: holds
+    CHECK(neededPreheat(m, 19, 1, 5, at(17), at(17, 30)) == 0.0); // short peak: holds
+}
+
+TEST_CASE("Learned rooms pre-heat just enough, and only as early as needed") {
+    auto in = input(at(15), 19.2);
+    in.outdoorTemp = 5.0;
+    in.thermal = learnedRoom();
+    CHECK(decide(in).reason != Reason::PreheatBeforePeak);  // 2 h ahead: too early, the heat would leak away
+
+    in.now = at(15, 45);
+    in.measuredAt = in.now;
+    const auto d = decide(in);
+    CHECK(d.reason == Reason::PreheatBeforePeak);
+    CHECK_THAT(d.detail, ContainsSubstring("20.9°C"));
+    CHECK_THAT(d.detail, ContainsSubstring("to last until 21:00"));
+    REQUIRE(d.inputs.ceiling);
+    CHECK(*d.inputs.ceiling == Catch::Approx(20.88).epsilon(0.01));
+
+    // Mild evening by the forecast: the room holds through the peak by itself, no pre-heat.
+    in.forecast = flatForecast(15.0);
+    in.now = at(16, 30);
+    in.measuredAt = in.now;
+    CHECK(decide(in).reason != Reason::PreheatBeforePeak);
+}
+
+TEST_CASE("The forecast for the peak sets the pre-heat, not the temperature right now") {
+    auto in = input(at(15), 19.6);
+    in.outdoorTemp = 15.0;              // mild now: boost 0.5, ceiling 19.5 - already there
+    in.forecast = flatForecast(-5.0);   // but freezing during the peak: boost 1.5
+    const auto d = decide(in);
+    CHECK(d.reason == Reason::PreheatBeforePeak);
+    CHECK_THAT(d.detail, ContainsSubstring("20.5°C"));
+}
+
+TEST_CASE("Window open: heating paused, frost protection and manual ON still win") {
+    auto in = input(at(10), 17.0);
+    in.windowOpen = OpenWindowEvent{at(9, 55), at(10, 25), 1.4, minutes{15}};
+    const auto d = decide(in);
+    CHECK_FALSE(d.on);
+    CHECK(d.reason == Reason::WindowOpen);
+    CHECK_THAT(d.detail, ContainsSubstring("fell 1.4° in 15 min"));
+    CHECK_THAT(d.detail, ContainsSubstring("10:25"));
+
+    auto cold = input(at(10), 4.0);
+    cold.windowOpen = in.windowOpen;
+    CHECK(decide(cold).reason == Reason::FrostProtection);
+
+    auto manual = in;
+    manual.override = ManualOverride{true, at(11)};
+    CHECK(decide(manual).reason == Reason::ManualOn);
+
+    auto later = in;
+    later.now = at(10, 30);
+    later.measuredAt = later.now;
+    CHECK(decide(later).reason != Reason::WindowOpen);
 }

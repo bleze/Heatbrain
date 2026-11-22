@@ -28,6 +28,7 @@ const REASONS = {
   KEEP_ABOVE: ["Keeping above the floor", "comfort"],
   KEEP_SATISFIED: ["Above the floor", null],
   OFFLINE_SCHEDULE: ["Wi-Fi off: night schedule", "price"],
+  WINDOW_OPEN: ["Window open? Paused", null],
 };
 const CATEGORIES = {
   comfort: "Heating: comfort",

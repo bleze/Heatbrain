@@ -19,6 +19,7 @@ struct SensorReading {
     std::optional<Instant> measuredAt;
     bool reachable = true;
     std::optional<int> batteryPercent;
+    std::optional<std::pair<double, double>> location;  // latitude, longitude of the station, if known
 };
 
 // Something that reports room temperatures. Selected by "type" in temperatureSources.
