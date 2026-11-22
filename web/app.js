@@ -350,7 +350,7 @@ function renderAway() {
       el("b", {}, t, `Away planned: ${dayHm(away.from)} → ${dayHm(away.until)}`);
       el("div", { class: "muted" }, t, `Starts by itself; every room will keep above ${temp(away.keepAbove)}C.`);
     }
-    const end = el("button", { type: "button", class: away.active ? "primary" : "" }, bar);
+    const end = el("button", { type: "button", class: away.active ? "primary" : "away-cancel" }, bar);
     end.appendChild(icon(away.active ? "home" : "trash"));
     end.appendChild(document.createTextNode(away.active ? "I'm home - end now" : "Cancel plan"));
     end.addEventListener("click", async () => {

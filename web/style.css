@@ -157,6 +157,7 @@ a { color: var(--accent); }
 .bk-target .icon { color: var(--flame-1); }
 .bk-x .icon { color: var(--critical); }
 .bk-edit .icon { color: var(--accent); }
+.away-cancel .icon { color: var(--critical); }  /* like a booking's Cancel */
 .away-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-color: var(--accent);
   background: linear-gradient(90deg, var(--accent-soft), transparent 70%), var(--surface); }
 .away-bar .grow { flex: 1; min-width: 200px; }
