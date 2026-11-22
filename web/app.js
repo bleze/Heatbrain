@@ -77,7 +77,7 @@ function el(tag, attrs = {}, parent, text) {
 }
 
 function icon(name, cls = "icon") {
-  const svg = el("svg", { class: cls, "aria-hidden": "true" });
+  const svg = el("svg", { class: cls, "aria-hidden": "true", "data-icon": name });  // data-icon: for per-icon colours in CSS
   const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
   use.setAttribute("href", `#i-${name}`);
   svg.appendChild(use);
@@ -696,6 +696,102 @@ function heatingSegments(decisions, tick, tEnd) {
   return segs;
 }
 
+// The electricity card under the room chart: the price and the power mix of the price area, on
+// the same time axis as the room chart above (so the hours line up), each with its own "now".
+// Either can be switched off in Settings -> System; with both off the card is hidden.
+function renderElectricity({ t0, t1, now, prices, W, m, ticks }) {
+  const card = $("electricity"), host = $("electricity-chart");
+  const show = state.status?.dashboard || {};
+  const mix = show.powerMix === false ? [] : (state.mix?.hours || []).filter((r) => r[0] + 3600 > t0 && r[0] < t1);
+  const showPrice = show.price !== false && prices.length > 0;
+  card.hidden = !showPrice && !mix.length;
+  host.replaceChildren();
+  $("price-summary").textContent = showPrice ? priceSummary() : "";
+  if (card.hidden) return;
+  $("electricity-title").textContent = showPrice && mix.length ? "Electricity price and power mix" : showPrice ? "Electricity price" : "Power mix";
+
+  const panelH = 90;
+  const priceTop = showPrice ? 18 : 0;
+  const mixTop = (showPrice ? priceTop + panelH + 30 : 18), mixH = mix.length ? panelH : 0;
+  const bottom = mix.length ? mixTop + mixH : priceTop + panelH;
+  const H = bottom + 24;
+  const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": "Electricity price and power mix" }, host);
+  if (t1 > now + 60) el("rect", { x: x(now), y: 18, width: x(t1) - x(now), height: bottom - 18, fill: "var(--grid)", opacity: 0.35 }, svg);
+
+  if (showPrice) {
+    el("text", { class: "panel-label", x: m.l, y: priceTop - 8 }, svg, `Price ${state.status?.currency || ""}/kWh`);
+    const pv = prices.map((p) => p[1]);
+    const pTicks = niceTicks(Math.min(0, ...pv), Math.max(...pv), 2);
+    const plo = pTicks[0], phi = pTicks[pTicks.length - 1];
+    const yP = (v) => priceTop + (1 - (v - plo) / (phi - plo)) * panelH;
+    for (const v of pTicks) {
+      el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: yP(v), y2: yP(v) }, svg);
+      el("text", { x: m.l - 6, y: yP(v) + 4, "text-anchor": "end" }, svg, v.toFixed(1));
+    }
+    drawTimeAxis(svg, x, ticks, priceTop, priceTop + panelH, mix.length ? null : H - 6);
+    const grad = el("linearGradient", { id: "price-fill", x1: 0, y1: 0, x2: 0, y2: 1 }, el("defs", {}, svg));
+    el("stop", { offset: "0", "stop-color": "#fab005", "stop-opacity": 0.35 }, grad);
+    el("stop", { offset: "1", "stop-color": "#fab005", "stop-opacity": 0.02 }, grad);
+    const line = stepPath(prices, x, yP, t1, 900);
+    // The fill as an attribute: url(#id) in the stylesheet would resolve against style.css.
+    el("path", { d: `${line}V${yP(plo)}H${x(prices[0][0])}Z`, fill: "url(#price-fill)", stroke: "none" }, svg);
+    el("path", { class: "line", d: line, "stroke-width": 1.5 }, svg);
+  }
+  if (mix.length) {
+    // A 100 % column per hour; the label row doubles as its legend (direct labels, no extra legend).
+    const lbl = el("text", { class: "panel-label", x: m.l, y: mixTop - 6 }, svg, `Power mix ${state.mix.area || ""}`);
+    let lx = m.l + lbl.getComputedTextLength() + 14;
+    for (const [key, name] of MIX_PARTS) {
+      el("rect", { x: lx, y: mixTop - 14, width: 9, height: 9, rx: 2, style: `fill: var(--mix-${key})` }, svg);
+      const t = el("text", { class: "panel-note", x: lx + 13, y: mixTop - 6 }, svg, name);
+      lx += 13 + t.getComputedTextLength() + 12;
+    }
+    // A % axis and the time grid. Columns stack from the bottom (wind first), so the share of
+    // wind - and wind + solar - reads straight off the axis.
+    const yM = (share) => mixTop + (1 - share) * mixH;
+    for (const v of [0, 0.5, 1]) {
+      el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: yM(v), y2: yM(v) }, svg);
+      el("text", { x: m.l - 6, y: yM(v) + 4, "text-anchor": "end" }, svg, `${v * 100}%`);
+    }
+    drawTimeAxis(svg, x, ticks, mixTop, mixTop + mixH, H - 6);
+    for (const r of mix) {
+      const parts = mixParts(r);
+      const total = parts.reduce((a, p) => a + p.mw, 0);
+      if (total <= 0) continue;
+      const x0 = x(Math.max(r[0], t0)), x1 = x(Math.min(r[0] + 3600, t1, now));  // the hour so far
+      let share = 0;
+      for (const p of parts) {
+        const part = p.mw / total;
+        if (part > 0) el("rect", { x: x0, y: yM(share + part), width: Math.max(1, x1 - x0), height: part * mixH, style: `fill: var(--mix-${p.key})` }, svg);
+        share += part;
+      }
+    }
+  }
+  const nowT = state.status?.now;
+  if (nowT && nowT >= t0 && nowT <= t1) {
+    el("line", { class: "now", x1: x(nowT), x2: x(nowT), y1: showPrice ? priceTop : mixTop, y2: bottom }, svg);
+  }
+  addCrosshair(svg, x, t0, t1, showPrice ? priceTop : mixTop, bottom, W, (t, evt) => {
+    const rows = [];
+    const pi = showPrice ? lastAtOrBefore(prices, t) : -1;
+    if (pi >= 0 && t - prices[pi][0] < 900) rows.push({ label: `${state.status?.currency || ""}/kWh`, value: price(prices[pi][1]) });
+    const mr = mix.find((r) => t >= r[0] && t < r[0] + 3600);
+    if (mr) {
+      const parts = mixParts(mr);
+      const total = parts.reduce((a, p) => a + p.mw, 0);
+      if (total > 0) {
+        for (const [p, [, name]] of parts.map((p, i) => [p, MIX_PARTS[i]]).reverse()) {
+          rows.push({ label: name, value: `${Math.round((p.mw / total) * 100)} %`, color: `var(--mix-${p.key})`, box: true });
+        }
+        if (mr[6] != null) rows.push({ label: "CO₂", value: `${Math.round(mr[6])} g/kWh` });
+      }
+    }
+    if (!rows.length) return hideTooltip();
+    showTooltip(evt, dayHm(t), rows);
+  });
+}
+
 // The power mix lane: [epoch, offshore wind, onshore wind, solar, power plants, imports, co2] per hour.
 const MIX_PARTS = [["wind", "Wind"], ["solar", "Solar"], ["plants", "Power plants"], ["imports", "Imports"]];
 function mixParts(r) {
@@ -779,18 +875,15 @@ function renderDetail() {
   const showStrip = !room.sensorOnly;
   const wifiTop = tempTop + tempH + (showTemp ? 34 : 0), wifiH = wifi ? 10 : 0;
   const stripTop = wifiTop + (wifi ? wifiH + 30 : 0), stripH = showStrip ? 12 : 0;
-  const priceTop = stripTop + stripH + (showStrip ? 30 : 0), priceH = 90;
-  // Power mix per hour of the price area (wind, solar, power plants, imports), under the price.
-  const mix = (state.mix?.hours || []).filter((r) => r[0] + 3600 > t0 && r[0] < t1);
-  const mixTop = priceTop + priceH + (mix.length ? 30 : 0), mixH = mix.length ? priceH : 0;  // as tall as the price, for detail
-  const H = mixTop + mixH + 24;
+  const bottom = showStrip ? stripTop + stripH : wifi ? wifiTop + wifiH : tempTop + tempH;
+  const H = bottom + 24;
   const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
-  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": `${room.name}: temperature, heating and price` }, host);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": `${room.name}: temperature and heating` }, host);
   const ticks = timeTicks(t0, t1, W - m.l - m.r);
 
   // The future: a faint wash with a label, so planned prices aren't mistaken for history.
   if (t1 > h.to + 60) {
-    el("rect", { x: x(h.to), y: tempTop, width: x(t1) - x(h.to), height: priceTop + priceH - tempTop, fill: "var(--grid)", opacity: 0.35 }, svg);
+    el("rect", { x: x(h.to), y: tempTop, width: x(t1) - x(h.to), height: bottom - tempTop, fill: "var(--grid)", opacity: 0.35 }, svg);
     // Centred in the shaded area, above the plot: the hours ahead show the plan and known prices.
     if (x(t1) - x(h.to) > 90) el("text", { class: "future-label", x: (x(h.to) + x(t1)) / 2, y: tempTop - 5, "text-anchor": "middle" }, svg, "planned");
   }
@@ -877,68 +970,17 @@ function renderDetail() {
                  fill: catColor(cat), "fill-opacity": 0.35 }, svg);
   }
 
-  // Price panel (its own y-scale: separate chart, shared x)
-  el("text", { class: "panel-label", x: m.l, y: priceTop - 8 }, svg, `Price ${state.status?.currency || ""}/kWh`);
-  const summary = priceSummary();
-  if (summary) el("text", { class: "panel-note", x: W - m.r, y: priceTop - 8, "text-anchor": "end" }, svg, summary);
-  if (prices.length) {
-    const pv = prices.map((p) => p[1]);
-    const pTicks = niceTicks(Math.min(0, ...pv), Math.max(...pv), 2);
-    const plo = pTicks[0], phi = pTicks[pTicks.length - 1];
-    const yP = (v) => priceTop + (1 - (v - plo) / (phi - plo)) * priceH;
-    for (const v of pTicks) {
-      el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: yP(v), y2: yP(v) }, svg);
-      el("text", { x: m.l - 6, y: yP(v) + 4, "text-anchor": "end" }, svg, v.toFixed(1));
-    }
-    drawTimeAxis(svg, x, ticks, priceTop, priceTop + priceH, H - 6);
-    const grad = el("linearGradient", { id: "price-fill", x1: 0, y1: 0, x2: 0, y2: 1 }, el("defs", {}, svg));
-    el("stop", { offset: "0", "stop-color": "#fab005", "stop-opacity": 0.35 }, grad);
-    el("stop", { offset: "1", "stop-color": "#fab005", "stop-opacity": 0.02 }, grad);
-    const line = stepPath(prices, x, yP, t1, 900);
-    // The fill as an attribute: url(#id) in the stylesheet would resolve against style.css.
-    el("path", { d: `${line}V${yP(plo)}H${x(prices[0][0])}Z`, fill: "url(#price-fill)", stroke: "none" }, svg);
-    el("path", { class: "line", d: line, "stroke-width": 1.5 }, svg);
-  } else {
-    drawTimeAxis(svg, x, ticks, priceTop, priceTop + priceH, H - 6);
-  }
-  if (mix.length) {
-    // A 100 % column per hour; the label row doubles as its legend (direct labels, no extra legend).
-    const lbl = el("text", { class: "panel-label", x: m.l, y: mixTop - 6 }, svg, `Power mix ${state.mix.area || ""}`);
-    let lx = m.l + lbl.getComputedTextLength() + 14;
-    for (const [key, name] of MIX_PARTS) {
-      el("rect", { x: lx, y: mixTop - 14, width: 9, height: 9, rx: 2, style: `fill: var(--mix-${key})` }, svg);
-      const t = el("text", { class: "panel-note", x: lx + 13, y: mixTop - 6 }, svg, name);
-      lx += 13 + t.getComputedTextLength() + 12;
-    }
-    // Like the price panel: a % axis and the time grid. Columns stack from the bottom (wind first),
-    // so the share of wind - and wind + solar - reads straight off the axis.
-    const yM = (share) => mixTop + (1 - share) * mixH;
-    for (const v of [0, 0.5, 1]) {
-      el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: yM(v), y2: yM(v) }, svg);
-      el("text", { x: m.l - 6, y: yM(v) + 4, "text-anchor": "end" }, svg, `${v * 100}%`);
-    }
-    drawTimeAxis(svg, x, ticks, mixTop, mixTop + mixH, null);
-    for (const r of mix) {
-      const parts = mixParts(r);
-      const total = parts.reduce((a, p) => a + p.mw, 0);
-      if (total <= 0) continue;
-      const x0 = x(Math.max(r[0], t0)), x1 = x(Math.min(r[0] + 3600, t1, h.to));  // the hour so far
-      let share = 0;
-      for (const p of parts) {
-        const part = p.mw / total;
-        if (part > 0) el("rect", { x: x0, y: yM(share + part), width: Math.max(1, x1 - x0), height: part * mixH, style: `fill: var(--mix-${p.key})` }, svg);
-        share += part;
-      }
-    }
-  }
+  // Time labels under the last panel (price and power mix have their own card below).
+  if (showStrip) drawTimeAxis(svg, x, ticks, stripTop, stripTop + stripH, H - 6);
+  else drawTimeAxis(svg, x, ticks, tempTop, tempTop + tempH, H - 6);
   const nowT = state.status?.now;
   if (nowT && nowT >= t0 && nowT <= t1) {
-    el("line", { class: "now", x1: x(nowT), x2: x(nowT), y1: tempTop, y2: (mix.length ? mixTop + mixH : priceTop + priceH) }, svg);
+    el("line", { class: "now", x1: x(nowT), x2: x(nowT), y1: tempTop, y2: bottom }, svg);
     el("text", { class: "now-label", x: x(nowT), y: tempTop - 5, "text-anchor": "middle" }, svg, "now");
   }
 
   // One crosshair, one tooltip listing every series at that time
-  addCrosshair(svg, x, t0, t1, tempTop, mix.length ? mixTop + mixH : priceTop + priceH, W, (t, evt) => {
+  addCrosshair(svg, x, t0, t1, tempTop, bottom, W, (t, evt) => {
     const rows = [];
     if (showTemp) {
       const i = lastAtOrBefore(temps, t);
@@ -972,18 +1014,10 @@ function renderDetail() {
     }
     const pi = lastAtOrBefore(prices, t);
     if (pi >= 0 && t - prices[pi][0] < 900) rows.push({ label: `${state.status?.currency || ""}/kWh`, value: price(prices[pi][1]) });
-    const mr = mix.find((r) => t >= r[0] && t < r[0] + 3600);
-    if (mr) {
-      const parts = mixParts(mr);
-      const total = parts.reduce((a, p) => a + p.mw, 0);
-      if (total > 0) {
-        const green = (parts[0].mw + parts[1].mw) / total;
-        rows.push({ label: "Wind + solar", value: `${Math.round(green * 100)} %${mr[6] != null ? ` · ${Math.round(mr[6])} g CO₂/kWh` : ""}`,
-                    color: "var(--mix-wind)", box: true });
-      }
-    }
     showTooltip(evt, dayHm(t), rows);
   });
+
+  renderElectricity({ t0, t1, now: h.to, prices, W, m, ticks });
 
   $("events-log").hidden = !!room.sensorOnly;
   if (!room.sensorOnly) renderEvents(h);

@@ -47,6 +47,9 @@ a NAS or on a PC.
 <td><img src="docs/images/booking.png" alt="Booking dialog: day, from, until and temperature"><br><sub>Book a room: heatbrain starts heating early enough by itself.</sub></td>
 </tr>
 <tr>
+<td colspan="2"><img src="docs/images/electricity.png" alt="Electricity card: the price with the hours ahead, and the power mix per hour - wind, solar, power plants and imports"></td>
+</tr>
+<tr>
 <td><img src="docs/images/settings-program.png" alt="Room settings: plugs, sensor, limits and the daily program of switch points"></td>
 <td><img src="docs/images/costs.png" alt="Heating cost: spent, energy, average price paid and saved by timing, per day and per room"></td>
 </tr>
@@ -260,9 +263,10 @@ heatbrain override bedroom clear
 home network): problems banner, a card per room (temperature, decision and reason, the next
 24 h, "Heat 1 h" / "Off 2 h" / "Book"), per room a chart of temperature + target, heating
 periods coloured by reason category (comfort / price-driven / safety-manual), Wi-Fi off
-periods, the price (every known price ahead) and the power mix of the price area (wind, solar,
-power plants, imports and CO2 per hour, from Energinet's open data), plus the switch events,
-heating cost and meter data. The outdoor card opens the same chart for the outdoor temperature. Overrides
+periods, with the planned hours ahead, plus the switch events; under it, on the same time axis,
+the electricity price (every known price ahead) and the power mix of the price area (wind, solar,
+power plants, imports and CO2 per hour, from Energinet's open data) - each can be switched off
+in Settings → System; then heating cost and meter data. The outdoor card opens the same chart for the outdoor temperature. Overrides
 from the UI are applied immediately. **Settings** edits everything in the config (rooms and
 programs, plugs incl. fail-safe and firmware upgrades, sensors, prices, notifications,
 system) with validation and backups; **Help** explains every feature, and "?" buttons show

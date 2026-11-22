@@ -298,6 +298,9 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                 {"version", hb::buildRevision()},
                 {"timezone", env.cfg.timezone},
                 {"currency", env.cfg.currency},
+                // What the dashboard shows under the room chart (Settings -> System).
+                {"dashboard", env.cfg.raw.contains("dashboard") && env.cfg.raw["dashboard"].is_object() ? env.cfg.raw["dashboard"]
+                                                                                                     : nlohmann::json::object()},
                 {"configError", nullptr},
                 {"rooms", rooms},
                 {"problems", problems},
@@ -578,7 +581,9 @@ int runDaemon(const Args& args) {
         }
         // Where the area's electricity comes from (wind, solar, ...), for the room charts.
         std::unique_ptr<hb::PowerMixSync> mix;
-        if (const std::string area = hb::spotArea(env->cfg.raw); area == "DK1" || area == "DK2") {
+        const auto& dash = env->cfg.raw.value("dashboard", nlohmann::json::object());
+        const bool mixShown = !dash.is_object() || dash.value("powerMix", true);
+        if (const std::string area = hb::spotArea(env->cfg.raw); mixShown && (area == "DK1" || area == "DK2")) {
             mix = std::make_unique<hb::PowerMixSync>(area, env->cfg.dataDir);
         }
         controlLoop(*env, board, alerts, first);

@@ -1544,6 +1544,14 @@
     const control = (S.cfg.control ||= {});
     field(g, "Control interval", num(control, "tickSeconds", { step: 60, min: 60, max: 3600, placeholder: "300", unit: "s" }),
       { hint: "at most half of each live plug's auto-off time" });
+    // What the dashboard shows under the room chart (for everyone: part of the config).
+    const dash = (S.cfg.dashboard ||= {});
+    const sp = el("div", { class: "field" }, g);
+    el("span", {}, sp, "Price panel");
+    sp.appendChild(chk(dash, "price", "Show the electricity price under the room chart", true));
+    const sm = el("div", { class: "field" }, g);
+    el("span", {}, sm, "Power mix panel");
+    sm.appendChild(chk(dash, "powerMix", "Show wind, solar, power plants and imports per hour", true));
     // Appearance: stored in this browser only, applied immediately (not part of the config).
     const ap = el("div", { class: "field" }, g);
     el("span", {}, ap, "Appearance");

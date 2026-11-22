@@ -210,6 +210,14 @@ button.link-btn:hover { background: none; text-decoration: underline; }
 .plugs { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--ink-2); }
 .chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; background: var(--surface); }
 .chip .icon { width: 13px; height: 13px; }
+/* A neutral chip's icon has a colour of its own, by what it shows (status chips colour the whole chip) */
+.chip:not(.ok):not(.warn):not(.error):not(.live) .icon[data-icon="battery"] { color: var(--good); }
+.chip:not(.ok):not(.warn):not(.error):not(.live) .icon[data-icon="clock"] { color: var(--accent); }
+.chip:not(.ok):not(.warn):not(.error):not(.live) .icon[data-icon="thermo"] { color: var(--flame-1); }
+.chip:not(.ok):not(.warn):not(.error):not(.live) .icon[data-icon="drop"] { color: var(--cat-comfort); }
+.chip:not(.ok):not(.warn):not(.error):not(.live) .icon[data-icon="flame"] { color: var(--flame-1); }
+.chip:not(.ok):not(.warn):not(.error):not(.live) .icon[data-icon="power"] { color: var(--muted); }
+.chip:not(.ok):not(.warn):not(.error):not(.live) .icon[data-icon="gauge"] { color: var(--accent); }
 .chip.live { border-color: var(--good); color: var(--good); }
 .chip.ok { border-color: var(--good); color: var(--good); }
 .chip.warn { border-color: #d39e00; color: #b07f00; }
