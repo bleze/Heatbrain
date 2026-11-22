@@ -982,6 +982,37 @@
     fw.appendChild(chk(n, "firmwareUpdates", "Tell me when a new Tasmota release is out for my plugs", true));
   }
 
+  // --- Wi-Fi off period: plugs get a night schedule, expected outages are not reported ---
+  function renderWifiOff(body) {
+    const card = el("section", { class: "card" }, body);
+    sectionHead(card, "Wi-Fi off period", "wifi", "gray",
+      "If you switch the Wi-Fi off at night: the plugs get a schedule beforehand and switch on their own clock.", "wifiOff");
+    const g = el("div", { class: "form-row" }, card);
+    const wifiOn = !!S.cfg.wifiOff;
+    const wf = el("div", { class: "field span2" }, g);
+    el("span", {}, wf, "Every night");
+    const wrow = el("div", { class: "row" }, wf);
+    toggle(wrow, wifiOn, wifiOn ? "" : "No Wi-Fi off period", (v) => {
+      if (v) S.cfg.wifiOff = { from: "23:30", to: "06:30" }; else delete S.cfg.wifiOff;
+      changed(); render();
+    });
+    if (wifiOn) { wrow.appendChild(time(S.cfg.wifiOff, "from")); el("span", {}, wrow, "–"); wrow.appendChild(time(S.cfg.wifiOff, "to", true)); }
+    el("div", { class: "hint" }, wf, wifiOn ? "when the router switches the Wi-Fi off and on" : "the Wi-Fi is always on");
+    if (wifiOn) {
+      const wk = el("div", { class: "field span2" }, g);
+      el("span", {}, wk, "At the weekend");
+      const krow = el("div", { class: "row" }, wk);
+      const weekendOn = !!S.cfg.wifiOff.weekend;
+      toggle(krow, weekendOn, weekendOn ? "" : "Same as other nights", (v) => {
+        if (v) S.cfg.wifiOff.weekend = { from: S.cfg.wifiOff.from, to: "09:00" }; else delete S.cfg.wifiOff.weekend;
+        changed(); render();
+      });
+      if (weekendOn) { krow.appendChild(time(S.cfg.wifiOff.weekend, "from")); el("span", {}, krow, "–"); krow.appendChild(time(S.cfg.wifiOff.weekend, "to", true)); }
+      el("div", { class: "hint" }, wk, "the nights ending Saturday and Sunday morning");
+    }
+    renderWifiSeen(card);
+  }
+
   // --- Wi-Fi off times as the sensors saw them -------------------------------------------
   // Netatmo uses the same Wi-Fi: gaps in its readings show when the network was really off.
   const hmOf = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -1146,28 +1177,6 @@
       b.classList.toggle("active", current === value);
     }
     el("div", { class: "hint" }, ap, "this browser only");
-    // Wi-Fi off period: plugs get a night schedule, expected outages are not reported
-    const wifiOn = !!S.cfg.wifiOff;
-    const wf = el("div", { class: "field span2" }, g);
-    const wl = el("span", {}, wf, "Wi-Fi off period");
-    helpButton(wl, "wifiOff", wf);
-    const wrow = el("div", { class: "row" }, wf);
-    toggle(wrow, wifiOn, wifiOn ? "" : "Off", (v) => { if (v) S.cfg.wifiOff = { from: "23:30", to: "06:30" }; else delete S.cfg.wifiOff; changed(); render(); });
-    if (wifiOn) { wrow.appendChild(time(S.cfg.wifiOff, "from")); el("span", {}, wrow, "–"); wrow.appendChild(time(S.cfg.wifiOff, "to", true)); }
-    el("div", { class: "hint" }, wf, "daily; plugs switch by a schedule loaded beforehand");
-    if (wifiOn) {
-      const wk = el("div", { class: "field span2" }, g);
-      el("span", {}, wk, "At the weekend");
-      const krow = el("div", { class: "row" }, wk);
-      const weekendOn = !!S.cfg.wifiOff.weekend;
-      toggle(krow, weekendOn, weekendOn ? "" : "Same as other nights", (v) => {
-        if (v) S.cfg.wifiOff.weekend = { from: S.cfg.wifiOff.from, to: "09:00" }; else delete S.cfg.wifiOff.weekend;
-        changed(); render();
-      });
-      if (weekendOn) { krow.appendChild(time(S.cfg.wifiOff.weekend, "from")); el("span", {}, krow, "–"); krow.appendChild(time(S.cfg.wifiOff.weekend, "to", true)); }
-      el("div", { class: "hint" }, wk, "the nights ending Saturday and Sunday morning");
-    }
-    renderWifiSeen(card);
     if (S.fixedWebPort) {
       // In Docker the address is chosen by the compose file's port mapping, not here.
       const wp = el("div", { class: "field" }, g);
@@ -1179,6 +1188,7 @@
       field(g, "Web UI port", num(web, "port", { step: 1, min: 1, max: 65535, placeholder: "8080" }), { hint: "takes effect after a restart" });
     }
 
+    renderWifiOff(body);
     renderTransfer(body);
 
     const raw = el("section", { class: "card" }, body);
