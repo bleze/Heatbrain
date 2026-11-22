@@ -11,7 +11,7 @@ public:
 
     PlugStatus status() override {
         if (!reachable_) return {false, std::nullopt, name_, "", "", std::nullopt, "", "simulated: unreachable"};
-        return {true, on_, name_, "simulated", "simulated", 100, "", ""};
+        return {true, on_, name_, firmware_, "simulated", 100, "", ""};
     }
     bool set(bool on) override {
         if (!reachable_) throw std::runtime_error("simulated: unreachable");
@@ -36,6 +36,7 @@ public:
     const std::optional<Instant>& keptUntil() const { return keptUntil_; }
     // For tests: Wi-Fi off, and what the device was told to follow.
     void setReachable(bool r) { reachable_ = r; }
+    void setFirmware(std::string v) { firmware_ = std::move(v); }  // "" = a status reply without it
     const std::optional<std::vector<OnSpan>>& schedule() const { return schedule_; }
     FailsafeStatus checkFailsafe() override {
         FailsafeStatus s;
@@ -51,6 +52,7 @@ private:
     bool on_ = false;
     bool provisioned_ = false;
     bool reachable_ = true;
+    std::string firmware_ = "simulated";
     std::optional<std::vector<OnSpan>> schedule_;
     int keepAlives_ = 0;
     std::optional<Instant> keptUntil_;

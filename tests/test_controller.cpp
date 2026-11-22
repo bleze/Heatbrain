@@ -98,6 +98,27 @@ TEST_CASE("Live plugs are never switched without a verified fail-safe") {
     CHECK(f.plugOn("bedroom"));
 }
 
+TEST_CASE("A plug that misses the firmware question is 'unknown', not 'firmware changed'") {
+    Fixture f;
+    f.controller->setDataDir(f.dir.path());
+    saveFirmwareRecord(f.dir.path(), "bedroom", FirmwareRecord{"simulated", true, "", ""});
+    f.plug("bedroom").sw->provision(false);
+    auto& sim = dynamic_cast<SimulatedSwitch&>(*f.plug("bedroom").sw);
+    sim.setFirmware("");
+    const auto r = f.controller->tick(f.now, true);
+    CHECK_FALSE(f.plugOn("bedroom"));  // not verified this step: not switched
+    const auto p = std::ranges::find_if(r.problems, [](const Problem& x) { return x.key == "plug:bedroom:failsafe"; });
+    REQUIRE(p != r.problems.end());
+    CHECK_THAT(p->message, Catch::Matchers::ContainsSubstring("firmware version could not be read"));
+    CHECK_THAT(p->message, !Catch::Matchers::ContainsSubstring("changed to"));
+    CHECK(p->debounce == minutes{15});  // one missed request is no alert
+
+    sim.setFirmware("simulated");
+    f.now += minutes{5};
+    f.controller->tick(f.now, true);
+    CHECK(f.plugOn("bedroom"));
+}
+
 TEST_CASE("Dry-run plugs are decided and logged but never touched") {
     Fixture f;
     const auto r = f.controller->tick(f.now, true);

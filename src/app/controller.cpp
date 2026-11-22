@@ -190,6 +190,10 @@ std::string Controller::failsafeProblem(Plug& plug, Instant now) {
                 const auto status = plug.sw->status();
                 if (!rec->verified) {
                     problem = "its last fail-safe test failed";
+                } else if (status.firmware.empty()) {
+                    // The plug did not answer the status request: unknown, not "changed".
+                    problem = "its firmware version could not be read" +
+                              (status.error.empty() ? std::string() : " (" + status.error + ")");
                 } else if (compareVersions(status.firmware, rec->version) != 0) {
                     problem = "its firmware changed to " + status.firmware + " and the fail-safe test has not been run on it";
                 }
@@ -225,10 +229,13 @@ json Controller::applyToPlugs(const RoomConfig& room, bool on, Instant now, Tick
         } else if (plug.mode == PlugMode::Live) {
             if (const std::string problem = failsafeProblem(plug, now); !problem.empty()) {
                 pj["error"] = "fail-safe not verified: not switched";
+                // Rechecked every step: a plug that misses one request is not worth a critical alert,
+                // only one whose fail-safe stays unverified (it is not switched meanwhile).
                 add(result, "plug:" + id + ":failsafe", Severity::Critical,
                     std::format("Plug '{}' is live, but {}, so heatbrain will not switch it. Fix it under "
                                 "Settings → Heating.",
-                                id, problem));
+                                id, problem),
+                    minutes{15});
             } else {
                 try {
                     const bool state = plug.sw->set(on);
