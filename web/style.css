@@ -410,6 +410,12 @@ a.chip { text-decoration: none; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend .key-line { width: 16px; height: 2px; background: var(--ink); display: inline-block; }
 .legend .key-dash { width: 16px; border-top: 2px dashed var(--muted); display: inline-block; }
+/* Wi-Fi off lane: planned = hatched outline band, seen = solid neutral bar (status-neutral, not a series colour) */
+.chart .wifi-planned { stroke: var(--axis); stroke-width: 1; }
+.chart .wifi-seen { fill: var(--ink-2); opacity: 0.55; }
+.legend .key-wifi-planned { width: 16px; height: 8px; border: 1px solid var(--axis); border-radius: 2px; display: inline-block;
+  background: repeating-linear-gradient(135deg, var(--axis) 0 1.5px, transparent 1.5px 4px); }
+.legend .key-wifi-seen { width: 16px; height: 8px; border-radius: 2px; display: inline-block; background: var(--ink-2); opacity: 0.55; }
 .chart { position: relative; width: 100%; margin-top: 8px; transition: opacity 0.2s; }
 .chart.loading { opacity: 0.5; }
 .chart svg { display: block; width: 100%; overflow: visible; }

@@ -130,6 +130,32 @@ json parseBody(const httplib::Request& req) {
     return body;
 }
 
+// Wi-Fi off for the charts: as seen (gaps in the sensor readings) and as planned (config).
+json wifiLane(const History& history, const json& cfg, Instant from, Instant to) {
+    const Instant now = floor<seconds>(system_clock::now());
+    json seen = json::array(), planned = json::array();
+    for (const auto& g : findReadingGaps(history.readingTimes(from - hours{2}, now + minutes{1}), now)) {
+        if (g.firstAfter <= from || g.lastBefore >= to) continue;
+        seen.push_back({g.lastBefore.time_since_epoch().count(), g.firstAfter.time_since_epoch().count(), g.ongoing});
+    }
+    try {
+        if (const auto plan = parseWifiOff(cfg)) {
+            const TimeZone tz(cfg.value("timezone", std::string("Europe/Copenhagen")));
+            // Every occurrence overlapping the chart, including the hours ahead.
+            for (Instant t = from - hours{24}; t < to + hours{36};) {
+                const auto p = currentOrNextOfflinePeriod(*plan, tz, t);
+                if (p.start >= to + hours{36}) break;
+                if (p.end > from) planned.push_back({p.start.time_since_epoch().count(), p.end.time_since_epoch().count()});
+                t = p.end;
+            }
+        }
+    } catch (const std::exception&) {
+        // an invalid config shows no planned periods; Settings reports the problem
+    }
+    if (seen.empty() && planned.empty()) return nullptr;
+    return json{{"seen", seen}, {"planned", planned}};
+}
+
 json failsafeJson(Plug& plug) {
     try {
         const auto fs = plug.sw->checkFailsafe();
@@ -189,7 +215,8 @@ void WebServer::routes() {
                            {"temperatures", temps},
                            {"decisions", decisions},
                            {"events", events},
-                           {"prices", prices}});
+                           {"prices", prices},
+                           {"wifi", wifiLane(history, readConfigFile(ctx_.configFile), from, to)}});
     });
 
     // Temperature history of a single sensor (e.g. the outdoor module): ?key=netatmo:02:00:...&hours=24
@@ -210,7 +237,8 @@ void WebServer::routes() {
         json prices = json::array();
         for (const auto& p : history.prices(from, to + hours{36})) prices.push_back({epoch(p.slot), p.total});
         sendJson(res, json{{"key", key}, {"from", epoch(from)}, {"to", epoch(to)}, {"temperatures", temps},
-                           {"humidity", humidity}, {"prices", prices}});
+                           {"humidity", humidity}, {"prices", prices},
+                           {"wifi", wifiLane(history, readConfigFile(ctx_.configFile), from, to)}});
     });
 
     s.Post(R"(/api/rooms/([\w-]+)/override)", [this](const httplib::Request& req, httplib::Response& res) {

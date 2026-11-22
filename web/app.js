@@ -67,7 +67,7 @@ const temp = (v) => (v == null ? "–" : `${v.toFixed(1)}°`);
 const price = (v) => (v == null ? "–" : v.toFixed(2));
 
 function el(tag, attrs = {}, parent, text) {
-  const svg = ["svg", "g", "path", "rect", "line", "text", "polyline", "defs", "linearGradient", "stop", "use"].includes(tag);
+  const svg = ["svg", "g", "path", "rect", "line", "text", "polyline", "defs", "linearGradient", "stop", "use", "pattern", "circle"].includes(tag);
   const node = svg ? document.createElementNS("http://www.w3.org/2000/svg", tag) : document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) if (v != null) node.setAttribute(k, v);
   if (text != null) node.textContent = text; // untrusted strings: textContent only
@@ -570,7 +570,7 @@ async function loadHistory() {
       if (!o) return;
       const sh = await api(`/api/sensor-history?key=${encodeURIComponent(o.key)}&hours=${state.hours}`);
       state.history = { room: { id: "__outdoor", name: `Outside · ${o.name}`, sensorOnly: true, priceOnly: false, minTemp: 0, maxTemp: 0 },
-                        from: sh.from, to: sh.to, temperatures: sh.temperatures, decisions: [], events: [], prices: sh.prices };
+                        from: sh.from, to: sh.to, temperatures: sh.temperatures, decisions: [], events: [], prices: sh.prices, wifi: sh.wifi };
     } else {
       state.history = await api(`/api/rooms/${encodeURIComponent(state.selected)}/history?hours=${state.hours}`);
     }
@@ -593,9 +593,13 @@ function heatingSegments(decisions, tick, tEnd) {
   return segs;
 }
 
-function renderLegend(room, segs) {
+function renderLegend(room, segs, wifi) {
   const host = $("legend");
   host.replaceChildren();
+  if (wifi) {
+    const p = el("span", {}, host); el("i", { class: "key-wifi-planned" }, p); p.appendChild(document.createTextNode("Wi-Fi off: planned"));
+    const s = el("span", {}, host); el("i", { class: "key-wifi-seen" }, s); s.appendChild(document.createTextNode("Wi-Fi off: seen"));
+  }
   if (!room.priceOnly) {
     const a = el("span", {}, host); el("i", { class: "key-line" }, a); a.appendChild(document.createTextNode("Temperature"));
     if (room.sensorOnly) return;  // a sensor: no target, no heating
@@ -624,13 +628,15 @@ function renderDetail() {
   const prices = h.prices.filter((p) => p[0] >= t0 - 900 && p[0] <= t1);
   const targets = decisions.map((d) => [d[0], d[3]]);
   const segs = heatingSegments(decisions, tick, h.to);
-  renderLegend(room, segs);
+  const wifi = h.wifi && (h.wifi.seen.length || h.wifi.planned.length) ? h.wifi : null;
+  renderLegend(room, segs, wifi);
 
   const W = host.clientWidth, m = { l: 40, r: 8 };
   const showTemp = !room.priceOnly;
   const tempTop = 18, tempH = showTemp ? 190 : 0;
   const showStrip = !room.sensorOnly;
-  const stripTop = tempTop + tempH + (showTemp ? 34 : 0), stripH = showStrip ? 12 : 0;
+  const wifiTop = tempTop + tempH + (showTemp ? 34 : 0), wifiH = wifi ? 10 : 0;
+  const stripTop = wifiTop + (wifi ? wifiH + 30 : 0), stripH = showStrip ? 12 : 0;
   const priceTop = stripTop + stripH + (showStrip ? 30 : 0), priceH = 90;
   const H = priceTop + priceH + 24;
   const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
@@ -671,6 +677,23 @@ function renderDetail() {
     });
     el("path", { class: "line", d }, svg);
     if (!temps.length) el("text", { class: "empty", x: W / 2, y: tempTop + tempH / 2, "text-anchor": "middle" }, svg, "No temperatures recorded yet");
+  }
+
+  // Wi-Fi lane: planned periods as a hatched band, what the sensors saw as a solid bar on top.
+  if (wifi) {
+    const pat = el("pattern", { id: "wifi-hatch", width: 4, height: 4, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" },
+                   el("defs", {}, svg));
+    // CSS variables only work in style, not in SVG presentation attributes.
+    el("line", { x1: 0, y1: 0, x2: 0, y2: 4, style: "stroke: var(--muted); stroke-width: 1.5" }, pat);
+    el("text", { class: "panel-label", x: m.l, y: wifiTop - 4 }, svg, "Wi-Fi off");
+    el("rect", { x: m.l, y: wifiTop, width: W - m.l - m.r, height: wifiH, fill: "var(--grid)", rx: 3, opacity: 0.35 }, svg);
+    const band = (a, b, attrs) => {
+      const x0 = x(Math.max(a, t0)), x1 = x(Math.min(b, t1));
+      if (x1 > x0) el("rect", { x: x0, y: wifiTop, width: Math.max(2, x1 - x0), height: wifiH, rx: 3, ...attrs }, svg);
+    };
+    // The pattern fill as an attribute: url(#id) in the stylesheet would resolve against style.css.
+    for (const [a, b] of wifi.planned) band(a, b, { class: "wifi-planned", fill: "url(#wifi-hatch)" });
+    for (const [a, b] of wifi.seen) band(a, b, { class: "wifi-seen" });
   }
 
   // Heating strip: the exact on/off periods, coloured by why
@@ -729,6 +752,16 @@ function renderDetail() {
       const [, on, reason] = decisions[si];
       const cat = on ? reasonCat(reason) || "comfort" : null;
       rows.push({ label: on ? "Heating" : "Off", value: reasonLabel(reason), color: cat ? catColor(cat) : "var(--grid)", box: true });
+    }
+    if (wifi) {
+      const p = wifi.planned.find(([a, b]) => t >= a && t < b);
+      const s = wifi.seen.find(([a, b]) => t >= a && t < b);
+      if (p || s) {
+        const parts = [];
+        if (s) parts.push(`seen ${hm(s[0])}–${s[2] ? "now" : hm(s[1])}`);
+        if (p) parts.push(`planned ${hm(p[0])}–${hm(p[1])}`);
+        rows.push({ label: "Wi-Fi off", value: parts.join(" · "), color: "var(--ink-2)", box: true });
+      }
     }
     const pi = lastAtOrBefore(prices, t);
     if (pi >= 0 && t - prices[pi][0] < 900) rows.push({ label: `${state.status?.currency || ""}/kWh`, value: price(prices[pi][1]) });
