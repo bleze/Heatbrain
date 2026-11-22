@@ -62,6 +62,7 @@ std::vector<Plug> loadPlugs(const json& cfg, HttpClient& lanHttp) {
                                                    p.failsafe);
         } else if (p.type == "simulated") {
             p.sw = std::make_unique<SimulatedSwitch>(p.name);
+            if (pj.value("provisioned", false)) p.sw->provision(false);  // dev/sandbox: as if installed
         } else {
             throw std::runtime_error("Plug " + p.id + ": unknown type '" + p.type +
                                      "' (known: tasmota, simulated)");
