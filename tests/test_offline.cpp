@@ -158,3 +158,26 @@ TEST_CASE("Night schedule: the share is learned per target, so a cool night stay
     for (const auto& s : unseen) total += duration_cast<minutes>(s.to - s.from);
     CHECK(total == minutes{105});
 }
+
+TEST_CASE("Night schedule: a warm room in a keep-above night stays silent until it would cool to the floor") {
+    // 23:30-06:30, keep above 16. At 19 degrees with 5 outside, cooling 0.05/h, the room is at
+    // 16.3 (floor + hysteresis) after ~3.5 h: only the run from about 03:00 is eligible.
+    const OfflineStart warm{at(0, 23, 30), 19.0, 0.05, 5.0, nullptr};
+    const auto spans = offlineSchedule(room(ProgramMode::Keep), nightPrices(), tz(), at(0, 23, 30), at(1, 6, 30),
+                                       OfflineDuty{0.25, 0.25}, std::nullopt, warm);
+    REQUIRE_FALSE(spans.empty());
+    CHECK(spans.front().from >= at(1, 2, 45));
+    CHECK_FALSE(scheduleOnAt(spans, at(1, 2, 30)));  // the cheap hour, but the room is still warm then
+
+    // Slow cooling (well insulated): nothing all night.
+    const OfflineStart snug{at(0, 23, 30), 19.0, 0.01, 5.0, nullptr};
+    CHECK(offlineSchedule(room(ProgramMode::Keep), nightPrices(), tz(), at(0, 23, 30), at(1, 6, 30),
+                          OfflineDuty{0.25, 0.25}, std::nullopt, snug)
+              .empty());
+
+    // Already at the floor: the whole night as before.
+    const OfflineStart cold{at(0, 23, 30), 16.0, 0.05, 5.0, nullptr};
+    const auto all = offlineSchedule(room(ProgramMode::Keep), nightPrices(), tz(), at(0, 23, 30), at(1, 6, 30),
+                                     OfflineDuty{0.25, 0.25}, std::nullopt, cold);
+    CHECK(scheduleOnAt(all, at(1, 2, 30)));
+}

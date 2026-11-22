@@ -2,11 +2,13 @@
 
 #include <chrono>
 #include <map>
+#include <memory>
 #include <cmath>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "core/forecast.hpp"
 #include "core/planner.hpp"
 #include "core/price.hpp"
 #include "core/room.hpp"
@@ -74,14 +76,26 @@ struct OfflineDuty {
     }
 };
 
+// The room's temperature just before the Wi-Fi goes off and how fast it cools: the night schedule
+// then only heats from when the room would actually get down to what the period asks.
+struct OfflineStart {
+    Instant at;
+    double temperature = 0;
+    double coolingRate = 0.05;  // per hour towards outdoors: learned, else cautious
+    std::optional<double> outdoor;
+    std::shared_ptr<const OutdoorForecast> forecast;
+};
+
 // What the room should do in [from, to) without temperature readings:
 //  - price-only rooms: exactly what the planner would do (cheapest hours);
 //  - "off" periods: off;
-//  - heat / keep periods: duty x length of each run, placed in its cheapest 15-minute slots.
+//  - heat / keep periods: duty x length of each run, placed in its cheapest 15-minute slots - with a
+//    known starting temperature only the part of the run from when the room (cooling unheated) would
+//    be below the target, so a warm room in a "keep above" night stays silent.
 // Spans are merged and sorted.
 std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz,
                                     Instant from, Instant to, const OfflineDuty& duty,
-                                    std::optional<AwayMode> away);
+                                    std::optional<AwayMode> away, std::optional<OfflineStart> start = {});
 
 bool scheduleOnAt(const std::vector<OnSpan>& spans, Instant t);
 

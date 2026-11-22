@@ -56,7 +56,7 @@ enum class Group { Off, On, Heat, Keep };
 
 std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz,
                                     Instant from, Instant to, const OfflineDuty& duty,
-                                    std::optional<AwayMode> away) {
+                                    std::optional<AwayMode> away, std::optional<OfflineStart> start) {
     // Classify every 15-minute slot.
     struct Slot {
         Instant start;
@@ -88,6 +88,24 @@ std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& pr
         slots.push_back({t, g, d.inputs.target});
     }
 
+    // The room's temperature at the end of each slot if it is not heated: from the starting
+    // temperature, cooling towards outdoors (forecast, else the outdoor reading, else 5 degrees).
+    std::vector<std::optional<double>> unheated(slots.size());
+    if (start) {
+        double t = start->temperature;
+        Instant at = start->at;
+        for (std::size_t k = 0; k < slots.size(); ++k) {
+            const Instant end = slots[k].start + kSlotLength;
+            if (end > at) {
+                const double out = (start->forecast ? start->forecast->at(end) : std::nullopt).value_or(start->outdoor.value_or(5.0));
+                const double h = duration<double, std::ratio<3600>>(end - at).count();
+                t = out + (t - out) * std::exp(-start->coolingRate * h);
+                at = end;
+            }
+            unheated[k] = t;
+        }
+    }
+
     // Heat/keep runs: the room's duty share, in the run's cheapest slots.
     std::vector<bool> on(slots.size(), false);
     for (std::size_t i = 0; i < slots.size();) {
@@ -97,10 +115,17 @@ std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& pr
         if (g == Group::On) {
             for (std::size_t k = i; k < j; ++k) on[k] = true;
         } else if (g == Group::Heat || g == Group::Keep) {
+            // From when the unheated room would be at the target (with the hysteresis): before that,
+            // heating is not needed. Without a starting temperature: the whole run.
+            std::size_t first = i;
+            if (start && slots[i].target) {
+                const double need = *slots[i].target + room.strategy.hysteresis;
+                while (first < j && unheated[first] && *unheated[first] > need) ++first;
+            }
             const double share = std::clamp(duty.forRun(g == Group::Keep, slots[i].target), 0.0, 1.0);
-            const auto count = static_cast<std::size_t>(std::lround(share * static_cast<double>(j - i)));
+            const auto count = static_cast<std::size_t>(std::lround(share * static_cast<double>(j - first)));
             std::vector<std::size_t> idx;
-            for (std::size_t k = i; k < j; ++k) idx.push_back(k);
+            for (std::size_t k = first; k < j; ++k) idx.push_back(k);
             // Cheapest first; unknown prices last; ties keep time order (fewer switch points).
             std::ranges::stable_sort(idx, [&](std::size_t a, std::size_t b) {
                 const auto pa = priceAt(prices, slots[a].start), pb = priceAt(prices, slots[b].start);

@@ -135,6 +135,8 @@ private:
     // Empty when the plug may be switched live; otherwise why not.
     std::string failsafeProblem(Plug& plug, Instant now);
     void armOffline(const OfflinePeriod& period, Instant now, std::optional<AwayMode> away);
+    // A room's fresh temperature and cooling rate, for the night schedule; nullopt without a reading.
+    std::optional<OfflineStart> offlineStart(const RoomConfig& room, Instant now);
     void disarmOffline(Instant now, bool networkBack);
     bool networkBackSince(Instant t) const;  // a sensor reading newer than t arrived
     void loadOfflineState();

@@ -457,7 +457,8 @@ TickResult Controller::tick(Instant now, bool apply) {
             // Show the night as it will run: the loaded schedule, or what would be loaded now.
             const auto spans = following ? armed->second.spans
                                          : offlineSchedule(room, prices_, tz_, std::max(now, offline->start),
-                                                           offline->end, learnedDuty(room.id, now), away);
+                                                           offline->end, learnedDuty(room.id, now), away,
+                                                           offlineStart(room, now));
             rr.plan = overlayNight(rr.plan, *offline, spans);
         }
 
@@ -639,11 +640,24 @@ OfflineDuty Controller::learnedDuty(const std::string& roomId, Instant now) cons
     return duty;
 }
 
+std::optional<OfflineStart> Controller::offlineStart(const RoomConfig& room, Instant now) {
+    if (room.priceOnly || room.sensor.empty()) return std::nullopt;
+    const SensorReading* r = findSensor(room.sensor);
+    if (!r || !r->temperature || !r->measuredAt || now - *r->measuredAt > room.strategy.staleAfter) return std::nullopt;
+    OfflineStart s;
+    s.at = *r->measuredAt;
+    s.temperature = *r->temperature;
+    if (const auto m = thermalModel(room, now); m.coolingStretches >= 3 && m.loss > 0) s.coolingRate = m.loss;
+    if (outdoorUsed_) s.outdoor = outdoorUsed_->temperature;
+    s.forecast = forecastInfo_.forecast;
+    return s;
+}
+
 void Controller::armOffline(const OfflinePeriod& period, Instant now, std::optional<AwayMode> away) {
     for (const auto& room : rooms_) {
         const auto duty = learnedDuty(room.id, now);
         const Instant horizon = period.end + kOfflineBuffer;
-        const auto spans = offlineSchedule(room, prices_, tz_, now, horizon, duty, away);
+        const auto spans = offlineSchedule(room, prices_, tz_, now, horizon, duty, away, offlineStart(room, now));
         armedRooms_[room.id] = {period.start, horizon, spans, now};
         log::info("Wi-Fi off period {:%H:%M}-{:%H:%M}: {} {} (duty heat {:.0f}%, keep {:.0f}%)",
                   tz_.toLocal(period.start), tz_.toLocal(period.end), room.id, spansText(spans, tz_),
