@@ -641,16 +641,25 @@
     el("li", {}, ol, "In the DEVI Smart app: Settings → Share house → create a one-time code. (If the iPhone app says it couldn't send the configuration, try the Android app.)");
     el("li", {}, ol, "Type the code here and press Pair, while the app stays open.");
     const row = el("div", { class: "row", style: "margin-top:8px" }, pair);
-    const code = el("input", { type: "text", inputmode: "numeric", placeholder: "one-time code", style: "width:180px", autocomplete: "off" }, row);
-    btn(row, "Pair", "check", async (b) => {
-      b.disabled = true; b.lastChild.textContent = "Pairing… (up to a minute)";
+    const code = el("input", { type: "text", inputmode: "numeric", placeholder: "one-time code", style: "width:180px", autocomplete: "off", value: S.deviCode || "" }, row);
+    code.addEventListener("input", () => { S.deviCode = code.value; });
+    const pairBtn = btn(row, S.devPairing ? "Pairing… (up to a minute)" : "Pair", "check", async () => {
+      S.devPairing = true; S.devPairResult = null; render();
       try {
-        const r = await api("/api/devi/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code.value }) });
-        toast(`Paired with ${r.houseName || "your house"}: ${r.rooms.length} thermostat(s)`);
+        const r = await api("/api/devi/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: S.deviCode || "" }) });
+        S.devPairResult = { ok: true, text: `Paired with ${r.houseName || "your house"}: ${r.rooms.length} thermostat(s). Choose "Use in heatbrain" above.` };
+        S.deviCode = "";
         await loadDevi(true);
-      } catch (e) { toast(e.message, true); }
-      b.disabled = false; b.lastChild.textContent = "Pair";
+      } catch (e) {
+        S.devPairResult = { ok: false, text: e.message };  // the code stays, for a quick retry with a new one
+      }
+      S.devPairing = false; render();
     }, "primary");
+    pairBtn.disabled = !!S.devPairing;
+    // The answer stays here (a toast is easy to miss after a minute of waiting).
+    if (S.devPairResult) {
+      el("div", { class: "hint", style: `margin-top:8px;color:var(${S.devPairResult.ok ? "--good" : "--critical"})` }, pair, S.devPairResult.text);
+    }
     if (d.error) el("div", { class: "hint", style: "color:var(--critical)" }, card, d.error);
   }
 
