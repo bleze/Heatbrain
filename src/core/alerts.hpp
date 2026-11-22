@@ -56,7 +56,9 @@ public:
     // Returns the alerts that were delivered.
     std::vector<Alert> update(Instant now, const std::vector<Problem>& active, const Deliver& deliver);
 
-    std::vector<Problem> activeProblems() const;  // for the web UI banner
+    // For the web UI banner: like notifications, a problem shows once it has lasted its debounce,
+    // so a single failed request (Netatmo answering 503 for a moment) does not flash up.
+    std::vector<Problem> activeProblems(Instant now) const;
 
 private:
     struct State {

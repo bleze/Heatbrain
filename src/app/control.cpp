@@ -413,7 +413,7 @@ void controlLoop(ControlEnv& env, hb::StatusBoard& board, std::unique_ptr<hb::Al
                 }
             }
         }
-        board.set(buildStatus(env, result, alerts.activeProblems(), now));
+        board.set(buildStatus(env, result, alerts.activeProblems(now), now));
 
         // Weekly summary (Monday morning) and tomorrow's-price heads-up.
         try {

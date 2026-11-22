@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <format>
+#include <thread>
 #include <fstream>
 
 #include "core/log.hpp"
@@ -164,6 +165,11 @@ std::vector<SensorReading> Source::read() {
         req.url = apiBase_ + "/api/getstationsdata";
         req.headers = {{"Authorization", "Bearer " + auth_.accessToken()}};
         const HttpResponse res = http_.send(req);
+        // Netatmo answers 5xx now and then for a moment: try once more before giving up this round.
+        if (res.status >= 500 && attempt == 1) {
+            std::this_thread::sleep_for(std::chrono::seconds{5});
+            continue;
+        }
         json j;
         try {
             j = json::parse(res.body);

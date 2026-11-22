@@ -98,11 +98,17 @@ TEST_CASE("Failed deliveries are retried on the next tick") {
     CHECK(r.got[0].kind == Alert::Kind::Raised);
 }
 
-TEST_CASE("Active problems are listed for the UI") {
+TEST_CASE("Active problems are listed for the UI once they have lasted their debounce") {
     AlertManager m({}, tz());
     Recorder r;
-    m.update(at(12), {plugDown()}, r.fn());
-    REQUIRE(m.activeProblems().size() == 1);  // listed even before alerting
+    m.update(at(12), {plugDown(minutes{0})}, r.fn());
+    CHECK(m.activeProblems(at(12)).size() == 1);
+
+    AlertManager n({}, tz());
+    n.update(at(12), {plugDown(minutes{15})}, r.fn());
+    CHECK(n.activeProblems(at(12, 5)).empty());  // a passing hiccup never shows
+    n.update(at(12, 15), {plugDown(minutes{15})}, r.fn());
+    CHECK(n.activeProblems(at(12, 15)).size() == 1);
 }
 
 TEST_CASE("Discord payload") {

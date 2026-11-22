@@ -58,9 +58,11 @@ std::vector<Alert> AlertManager::update(Instant now, const std::vector<Problem>&
     return sent;
 }
 
-std::vector<Problem> AlertManager::activeProblems() const {
+std::vector<Problem> AlertManager::activeProblems(Instant now) const {
     std::vector<Problem> out;
-    for (const auto& [key, st] : states_) out.push_back(st.problem);
+    for (const auto& [key, st] : states_) {
+        if (now - st.firstSeen >= st.problem.debounce) out.push_back(st.problem);
+    }
     return out;
 }
 
