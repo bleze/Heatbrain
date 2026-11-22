@@ -324,7 +324,7 @@
       }
       changed(); render();
     });
-    field(g, "Temperature sensor", s, { span2: true, hint: room.priceOnly ? "without one, the room runs the cheapest hours of each day"
+    field(g, "Temperature sensor", s, { hint: room.priceOnly ? "without one, the room runs the cheapest hours of each day"
       : (state.status?.sensors || []).length ? "" : "No sensors yet: set up Netatmo on the Sensors tab" });
   }
 
@@ -413,7 +413,7 @@
     }
 
     if (room.priceOnly) {
-      const g = el("div", { class: "form-grid" }, c);
+      const g = el("div", { class: "form-grid room-fields" }, c);
       sensorField(g, room);
       const ch = field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1, unit: "h" }), { hint: "heats only in those hours" });
       helpButton(ch.querySelector("span"), "priceOnly", g);
@@ -428,7 +428,7 @@
       return;
     }
 
-    const g = el("div", { class: "form-grid" }, c);
+    const g = el("div", { class: "form-grid room-fields" }, c);
     sensorField(g, room);
     const nb = field(g, "Never below", num(room, "minTemp", { step: 0.5, unit: "°C" }), { hint: "heats whatever the price" });
     helpButton(nb.querySelector("span"), "limits", g);
