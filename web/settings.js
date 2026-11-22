@@ -351,6 +351,17 @@
     };
     btn(seg, "Temperature", "thermo", () => setMode(false)).classList.toggle("active", !room.priceOnly);
     btn(seg, "Price only", "bolt", () => setMode(true)).classList.toggle("active", !!room.priceOnly);
+    // Order: the dashboard shows the rooms in this order.
+    const move = (dir) => {
+      const to = idx + dir;
+      if (to < 0 || to >= S.cfg.rooms.length) return;
+      [S.cfg.rooms[idx], S.cfg.rooms[to]] = [S.cfg.rooms[to], S.cfg.rooms[idx]];
+      changed(); render();
+    };
+    const up = btn(right, "", "up", () => move(-1), "ghost move-btn");
+    up.title = "Move up (earlier on the dashboard)"; up.disabled = idx === 0;
+    const down = btn(right, "", "down", () => move(1), "ghost move-btn");
+    down.title = "Move down (later on the dashboard)"; down.disabled = idx === S.cfg.rooms.length - 1;
     confirmBtn(right, "", "trash", "Delete room?", () => { S.cfg.rooms.splice(idx, 1); changed(); render(); }, "ghost danger");
 
     // Plugs, or a thermostat (then heatbrain sets its setpoint instead of switching)
@@ -1018,7 +1029,9 @@
 
     const mods = el("section", { class: "card" }, body);
     sectionHead(mods, "Modules", "wifi", "violet");
-    const sensors = state.status?.sensors || [];
+    // Indoor modules by name (Netatmo first, then the thermostats' own probes), the outdoor ones last.
+    const rank = (s) => (s.kind === "outdoor" ? 2 : s.key.startsWith("devi:") ? 1 : 0);
+    const sensors = [...(state.status?.sensors || [])].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
     if (!sensors.length) el("div", { class: "muted", style: "margin-top:12px" }, mods, "No readings yet.");
     const list = el("div", { class: "list" }, mods);
     for (const s of sensors) {
