@@ -120,7 +120,7 @@ const HELP = {
   plan: {
     title: "The next 24 hours",
     body: [
-      "Each room card shows what heatbrain intends for the coming day, worked out from the program and the known prices: heat, pre-heat before an expensive period, coast while it is expensive, a cheap boost, keep above, away or off. Whether it actually heats depends on the room's temperature at the time.",
+      "Each room card shows what heatbrain intends for the coming day, worked out from the program and the known prices: heat, pre-heat before an expensive period, coast while it is expensive, a cheap boost, keep above, away or off. In a keep-above period, 'warm enough, no heat' means the room is expected to stay above the floor by itself: worked out from its current temperature and how fast it cools (learned from its history). Whether it actually heats depends on the room's temperature at the time.",
     ],
   },
   wifiOff: {

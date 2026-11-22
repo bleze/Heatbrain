@@ -428,3 +428,20 @@ TEST_CASE("A booking wins over away mode, and the plan shows it") {
     CHECK(booked->target == 22.0);
     CHECK(plan.back().kind == "keep");
 }
+
+TEST_CASE("Plan: a warm room in a keep-above period shows as idle until it would cool to the floor") {
+    const auto room = pizzeria();  // keep above 5 all day
+    // At 16 deg with 5 outside, cooling 5 %/h: still well above 5 deg after 24 h -> idle all day.
+    const auto warm = planAhead(room, makePrices(), tz(), at(12), hours{24}, std::nullopt, 5.0, {}, 16.0, 0.05);
+    CHECK(std::ranges::all_of(warm, [](const PlanSegment& s) { return s.kind == "idle"; }));
+
+    // Cooling fast (50 %/h) from 8 deg with 0 outside: idle first, then holding the floor ("keep").
+    const auto cold = planAhead(room, makePrices(), tz(), at(12), hours{24}, std::nullopt, 0.0, {}, 8.0, 0.5);
+    REQUIRE(cold.size() >= 2);
+    CHECK(cold.front().kind == "idle");
+    CHECK(cold.back().kind == "keep");
+
+    // Without a current temperature the plan is as before.
+    const auto unknown = planAhead(room, makePrices(), tz(), at(12), hours{24}, std::nullopt, 5.0);
+    CHECK(unknown.front().kind == "keep");
+}

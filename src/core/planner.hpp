@@ -123,7 +123,9 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 // What a room is set to do over the coming hours, for display. Each slot is decided by the
 // real planner assuming the room sits at its target, which yields the intent per period:
 //   "heat" (to target, as needed), "preheat", "coast" (expensive: lets it cool a little),
-//   "boost" (cheapest hours), "keep" (keep above), "away", "booked" (incl. warm-up), "off".
+//   "boost" (cheapest hours), "keep" (keep above), "away", "booked" (incl. warm-up), "off", and
+//   "idle": a keep-above period in which the room is predicted to stay warm enough by itself
+//   (from its current temperature, cooling towards outdoors at `coolingRate` per hour).
 struct PlanSegment {
     Instant from;
     Instant to;
@@ -132,6 +134,7 @@ struct PlanSegment {
 };
 std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz, Instant now,
                                    std::chrono::hours horizon, std::optional<AwayMode> away,
-                                   std::optional<double> outdoorTemp, const std::vector<Booking>& bookings = {});
+                                   std::optional<double> outdoorTemp, const std::vector<Booking>& bookings = {},
+                                   std::optional<double> currentTemp = {}, std::optional<double> coolingRate = {});
 
 }  // namespace hb

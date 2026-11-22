@@ -407,7 +407,13 @@ TickResult Controller::tick(Instant now, bool apply) {
                                   tz_.toLocal(a.until), tz_.toLocal(a.loadedAt), spansText(a.spans, tz_));
         }
         rr.changed = prev == lastOn_.end() || prev->second != rr.decision.on;
-        rr.plan = planAhead(room, prices_, tz_, now, hours{24}, away, outdoor, bookings);
+        {
+            // From the room's current temperature, cooling at its learned rate (once it has seen enough).
+            std::optional<double> current, cooling;
+            if (in.temperature && in.measuredAt && now - *in.measuredAt <= room.strategy.staleAfter) current = in.temperature;
+            if (const auto m = thermalModel(room, now); m.coolingStretches >= 3 && m.loss > 0) cooling = m.loss;
+            rr.plan = planAhead(room, prices_, tz_, now, hours{24}, away, outdoor, bookings, current, cooling);
+        }
         if (offline && offline->start < now + hours{24}) {
             // Show the night as it will run: the loaded schedule, or what would be loaded now.
             const auto spans = following ? armed->second.spans

@@ -282,6 +282,7 @@ const PLAN = {
   coast: () => "coast - expensive",
   boost: () => "cheap boost",
   keep: (t) => `keep above ${temp(t)}`,
+  idle: () => "warm enough, no heat",
   away: (t) => `away - keep above ${temp(t)}`,
   booked: (t) => `booked - ${temp(t)}`,
   off: () => "off",

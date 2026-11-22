@@ -1,5 +1,7 @@
 #include "core/planner.hpp"
 
+#include <cmath>
+
 #include <algorithm>
 #include <map>
 #include <format>
@@ -350,8 +352,14 @@ std::optional<Booking> bookingAt(const std::vector<Booking>& bookings, Instant t
 
 std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz, Instant now,
                                    std::chrono::hours horizon, std::optional<AwayMode> away,
-                                   std::optional<double> outdoorTemp, const std::vector<Booking>& bookings) {
+                                   std::optional<double> outdoorTemp, const std::vector<Booking>& bookings,
+                                   std::optional<double> currentTemp, std::optional<double> coolingRate) {
     std::vector<PlanSegment> out;
+    // The room's temperature as it is likely to go: it cools towards outdoors while not heated and is
+    // back at the target after a heating period. Only used to tell "keep above" apart from "idle".
+    std::optional<double> room_t = currentTemp;
+    const double outside = outdoorTemp.value_or(5.0);
+    const double cool = std::exp(-coolingRate.value_or(0.05) * 0.25);  // per 15 minutes; cautious default
     for (Instant t = floorToSlot(now); t < now + horizon; t += kSlotLength) {
         // The target in effect at t, so the planner sees a room that is exactly at target.
         PlannerInput in;
@@ -383,6 +391,16 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
             case Reason::CheapHours:
             case Reason::NoPricesFallback: kind = "heat"; break;
             default: kind = room.priceOnly ? (d.on ? "heat" : "off") : "heat"; break;
+        }
+        if (room_t) {
+            if (kind == "keep" || kind == "off" || kind == "away") {
+                *room_t = outside + (*room_t - outside) * cool;
+                const double floor = kind == "off" ? room.frostTemp : d.inputs.target.value_or(room.frostTemp);
+                if (kind == "keep" && *room_t > floor + room.strategy.hysteresis) kind = "idle";
+                *room_t = std::max(*room_t, floor);  // heating holds it at the floor
+            } else if (d.inputs.target) {
+                *room_t = std::max(*room_t, *d.inputs.target - (kind == "coast" ? room.strategy.peakAllowedDrop : 0.0));
+            }
         }
         const std::optional<double> target = (kind == "off") ? std::nullopt : d.inputs.target;
         if (!out.empty() && out.back().kind == kind && out.back().target == target) {
