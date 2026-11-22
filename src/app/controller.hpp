@@ -49,7 +49,10 @@ public:
     const std::vector<RoomConfig>& rooms() const { return rooms_; }
     const PriceTable& prices() const { return prices_; }
     const std::map<std::string, SensorReading>& readings() const { return readings_; }
-    void setDataDir(std::filesystem::path dir) { dataDir_ = std::move(dir); }
+    void setDataDir(std::filesystem::path dir) {
+        dataDir_ = std::move(dir);
+        loadReadings();
+    }
     void setAwayStore(const AwayStore* away) { away_ = away; }
     void setOutdoorSensor(std::string ref) { outdoorSensor_ = std::move(ref); }
     // The outdoor reading used in the last tick, if any.
@@ -91,6 +94,11 @@ private:
     bool networkBackSince(Instant t) const;  // a sensor reading newer than t arrived
     void loadOfflineState();
     void saveOfflineState() const;
+    // The last good readings survive a restart (<dataDir>/readings.json): a restart during a
+    // short Netatmo outage then behaves like a continuous run (readings count for 30 min).
+    void loadReadings();
+    void saveReadings() const;
+    std::set<std::string> sourcesAnswered_;  // sources that answered in the current tick
 
     const TimeZone& tz_;
     PriceModel& priceModel_;

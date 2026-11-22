@@ -43,6 +43,7 @@ add_library(heatbrain_io STATIC
   src/providers/energidataservice.cpp
   src/providers/basic_components.cpp
   src/providers/price_model.cpp
+  src/providers/eloverblik.cpp
   src/plugs/tasmota.cpp
   src/plugs/plugs.cpp
   src/sensors/netatmo.cpp
@@ -57,6 +58,7 @@ add_library(heatbrain_io STATIC
   src/app/cost_report.cpp
   src/app/digest.cpp
   src/app/transfer.cpp
+  src/app/meter_sync.cpp
 )
 target_link_libraries(heatbrain_io PUBLIC
   heatbrain_core
@@ -99,6 +101,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_digest.cpp
     tests/test_transfer.cpp
     tests/test_offline.cpp
+    tests/test_eloverblik.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE

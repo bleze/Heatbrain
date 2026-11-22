@@ -123,9 +123,12 @@ void Controller::refreshPrices(Instant now, TickResult& result) {
 }
 
 void Controller::readSensors(TickResult& result) {
+    sourcesAnswered_.clear();
     for (auto& src : sources_) {
         try {
-            for (auto& r : src->read()) {
+            auto fresh = src->read();
+            sourcesAnswered_.insert(src->id());
+            for (auto& r : fresh) {
                 const std::string key = src->id() + ":" + r.sensorId;
                 if (!r.reachable) {
                     add(result, "sensor:" + key + ":offline", Severity::Warning,
@@ -311,7 +314,7 @@ TickResult Controller::tick(Instant now, bool apply) {
         if (reading) {
             in.temperature = reading->temperature;
             in.measuredAt = reading->measuredAt;
-        } else if (!room.sensor.empty() && !reading && !sources_.empty()) {
+        } else if (!room.sensor.empty() && !reading && sourcesAnswered_.contains(room.sensor.substr(0, room.sensor.find(':')))) {
             add(result, "room:" + room.id + ":sensor", Severity::Warning,
                 std::format("Room '{}': sensor '{}' not found", room.name, room.sensor));
         }
@@ -347,7 +350,7 @@ TickResult Controller::tick(Instant now, bool apply) {
 
         if (rr.decision.reason == Reason::StaleDataLimp) {
             add(result, "room:" + room.id + ":limp", Severity::Warning,
-                std::format("Room '{}' is in limp mode: {}", room.name, rr.decision.detail));
+                std::format("Room '{}' is in limp mode: {}", room.name, rr.decision.detail), minutes{15});
         }
         if (rr.decision.on && rr.decision.inputs.temperature && *rr.decision.inputs.temperature < room.minTemp) {
             add(result, "room:" + room.id + ":not-warming", Severity::Warning,
@@ -377,6 +380,8 @@ TickResult Controller::tick(Instant now, bool apply) {
             return expectedWhileOffline(p.key) && (onSchedule || now >= offline->start || p.key.starts_with("plug:"));
         });
     }
+
+    if (apply) saveReadings();
 
     if (apply && history_) {
         try {
@@ -596,6 +601,46 @@ bool Controller::dryRunHasFailsafe(Plug& plug, Instant now) {
     }
     dryRunFailsafe_[plug.id] = {installed, now};
     return installed;
+}
+
+void Controller::loadReadings() {
+    if (dataDir_.empty() || !std::filesystem::exists(dataDir_ / "readings.json")) return;
+    try {
+        const json j = json::parse(std::ifstream(dataDir_ / "readings.json"));
+        const json items = j.value("readings", json::object());
+        for (const auto& [key, r] : items.items()) {
+            SensorReading s;
+            s.sensorId = r.value("sensorId", "");
+            s.name = r.value("name", "");
+            s.station = r.value("station", "");
+            s.kind = r.value("kind", "");
+            if (r.contains("temperature")) s.temperature = r["temperature"].get<double>();
+            if (r.contains("humidity")) s.humidity = r["humidity"].get<double>();
+            if (r.contains("measuredAt")) s.measuredAt = Instant{seconds{r["measuredAt"].get<long long>()}};
+            s.reachable = r.value("reachable", true);
+            if (r.contains("battery")) s.batteryPercent = r["battery"].get<int>();
+            readings_[key] = std::move(s);
+        }
+    } catch (const std::exception& e) {
+        log::warn("Ignoring unreadable readings.json: {}", e.what());
+    }
+}
+
+void Controller::saveReadings() const {
+    if (dataDir_.empty()) return;
+    json items = json::object();
+    for (const auto& [key, r] : readings_) {
+        json j{{"sensorId", r.sensorId}, {"name", r.name}, {"station", r.station}, {"kind", r.kind}, {"reachable", r.reachable}};
+        if (r.temperature) j["temperature"] = *r.temperature;
+        if (r.humidity) j["humidity"] = *r.humidity;
+        if (r.measuredAt) j["measuredAt"] = r.measuredAt->time_since_epoch().count();
+        if (r.batteryPercent) j["battery"] = *r.batteryPercent;
+        items[key] = std::move(j);
+    }
+    const auto tmp = dataDir_ / "readings.json.tmp";
+    std::ofstream(tmp) << json{{"readings", items}}.dump();
+    std::error_code ec;
+    std::filesystem::rename(tmp, dataDir_ / "readings.json", ec);
 }
 
 }  // namespace hb

@@ -1,5 +1,7 @@
 #include "app/config_service.hpp"
 
+#include "app/meter_sync.hpp"
+
 #include <algorithm>
 #include <format>
 #include <fstream>
@@ -67,6 +69,7 @@ json maskSecrets(const json& cfg) {
     if (out.contains("plugs")) {
         for (auto& p : out["plugs"]) maskField(p, "password");
     }
+    if (out.contains("meter") && out["meter"].is_object()) maskField(out["meter"], "refreshToken");
     if (out.contains("notifications") && out["notifications"].contains("channels")) {
         for (auto& c : out["notifications"]["channels"]) {
             maskField(c, "webhookUrl");
@@ -89,6 +92,10 @@ json unmaskSecrets(json incoming, const json& stored) {
     }
     if (incoming.contains("plugs")) {
         for (auto& p : incoming["plugs"]) restoreField(p, findById(stored, "plugs", p), "password");
+    }
+    if (incoming.contains("meter") && incoming["meter"].is_object()) {
+        restoreField(incoming["meter"], stored.contains("meter") && stored["meter"].is_object() ? &stored["meter"] : nullptr,
+                     "refreshToken");
     }
     if (incoming.contains("notifications") && incoming["notifications"].contains("channels")) {
         auto& channels = incoming["notifications"]["channels"];
@@ -130,6 +137,7 @@ std::vector<std::string> validateConfig(const json& cfg, const fs::path& dataDir
     check("Plugs", [&] { plugs = loadPlugs(cfg, offline); });
     check("Rooms", [&] { parseRooms(cfg, plugs); });
     check("Wi-Fi off period", [&] { parseWifiOff(cfg); });
+    check("Meter", [&] { parseMeterConfig(cfg); });
     check("Temperature sources", [&] { loadTemperatureSources(cfg, offline, dataDir, [] { return Instant{}; }); });
     check("Notifications", [&] { loadNotifications(cfg, offline); });
     check("Web", [&] {

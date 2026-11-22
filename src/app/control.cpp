@@ -14,6 +14,7 @@
 #include "app/controller.hpp"
 #include "app/cost_report.hpp"
 #include "app/digest.hpp"
+#include "app/meter_sync.hpp"
 #include "app/rooms.hpp"
 #include "core/log.hpp"
 #include "notify/notifier.hpp"
@@ -423,6 +424,15 @@ int runDaemon(const Args& args) {
             continue;
         }
         web.setRooms(env->controller->rooms());
+        // Meter readings in the background while this configuration runs.
+        std::unique_ptr<hb::MeterSync> meter;
+        try {
+            if (const auto mc = hb::parseMeterConfig(env->cfg.raw)) {
+                meter = std::make_unique<hb::MeterSync>(*mc, env->cfg.dataDir, *env->tz);
+            }
+        } catch (const std::exception& e) {
+            hb::log::warn("Meter: {}", e.what());
+        }
         controlLoop(*env, board, alerts, first);
         first = false;
         if (g_reload) hb::log::info("Configuration changed - reloading");

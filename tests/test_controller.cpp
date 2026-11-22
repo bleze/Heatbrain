@@ -332,3 +332,26 @@ TEST_CASE("Dry-run plugs with a fail-safe get their watchdog fed, never switched
     CHECK_FALSE(f.plugOn("spare"));
     CHECK(r.rooms[1].plugs[0].value("watchdog", false));
 }
+
+TEST_CASE("A restart during a Netatmo outage keeps using the last readings for a while") {
+    Fixture f;
+    f.controller->setDataDir(f.dir.path());
+    f.controller->tick(f.now, true);  // a good reading, saved
+
+    // Restart five minutes later; Netatmo is down.
+    f.sensors->fail = true;
+    Controller again(f.tz, f.prices, f.sources, f.plugs, parseRooms(f.cfg, f.plugs), &f.overrides, &f.history);
+    again.setDataDir(f.dir.path());
+    const auto r = again.tick(f.now + minutes{5}, true);
+    CHECK(reasonCode(r.rooms[0].decision.reason) != "STALE_DATA_LIMP");
+    for (const auto& p : r.problems) CHECK_FALSE(p.key.ends_with(":sensor"));  // not "sensor not found"
+}
+
+TEST_CASE("Limp alerts wait 15 minutes") {
+    Fixture f;
+    f.sensors->fail = true;
+    const auto r = f.controller->tick(f.now, true);
+    const auto limp = std::ranges::find_if(r.problems, [](const Problem& p) { return p.key == "room:bedroom:limp"; });
+    REQUIRE(limp != r.problems.end());
+    CHECK(limp->debounce == minutes{15});
+}

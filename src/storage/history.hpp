@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "core/price.hpp"
+#include "providers/eloverblik.hpp"
 #include "core/time.hpp"
 
 struct sqlite3;
@@ -57,6 +58,10 @@ public:
     std::vector<TemperatureRecord> temperatures(const std::string& roomId, Instant from, Instant to) const;
     std::vector<TemperatureRecord> sensorTemperatures(const std::string& sensorKey, Instant from, Instant to) const;
     std::vector<PricePoint> prices(Instant from, Instant to) const;
+    // Household meter readings (Eloverblik), replaced when fetched again.
+    void recordMeter(const std::vector<MeterReading>& readings);
+    std::vector<MeterReading> meterReadings(Instant from, Instant to) const;
+    std::optional<MeterReading> lastMeterReading() const;
     // Times of all stored readings (any sensor), sorted: shows when the sensors were online.
     std::vector<Instant> readingTimes(Instant from, Instant to) const;
 

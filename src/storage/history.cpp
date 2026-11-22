@@ -100,6 +100,7 @@ History::History(const std::filesystem::path& dbFile) {
             PRIMARY KEY (sensor_key, ts));
         CREATE INDEX IF NOT EXISTS temperatures_room_ts ON temperatures(room_id, ts);
         CREATE TABLE IF NOT EXISTS prices (slot INTEGER PRIMARY KEY, total REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS meter (start INTEGER PRIMARY KEY, seconds INTEGER NOT NULL, kwh REAL NOT NULL);
     )");
 }
 
@@ -191,6 +192,36 @@ std::vector<TemperatureRecord> History::sensorTemperatures(const std::string& se
     return out;
 }
 
+void History::recordMeter(const std::vector<MeterReading>& readings) {
+    exec("BEGIN");
+    try {
+        Stmt s(db_, "INSERT OR REPLACE INTO meter VALUES (?,?,?)");
+        for (const auto& r : readings) {
+            s.reset();
+            s.bind(1, r.start).bind(2, static_cast<long long>(duration_cast<seconds>(r.length).count())).bind(3, r.kWh);
+            s.step();
+        }
+        exec("COMMIT");
+    } catch (...) {
+        exec("ROLLBACK");
+        throw;
+    }
+}
+
+std::vector<MeterReading> History::meterReadings(Instant from, Instant to) const {
+    Stmt s(db_, "SELECT start, seconds, kwh FROM meter WHERE start>=? AND start<? ORDER BY start");
+    s.bind(1, from).bind(2, to);
+    std::vector<MeterReading> out;
+    while (s.step()) out.push_back({s.instant(0), duration_cast<minutes>(seconds{s.i64(1)}), s.dbl(2)});
+    return out;
+}
+
+std::optional<MeterReading> History::lastMeterReading() const {
+    Stmt s(db_, "SELECT start, seconds, kwh FROM meter ORDER BY start DESC LIMIT 1");
+    if (!s.step()) return std::nullopt;
+    return MeterReading{s.instant(0), duration_cast<minutes>(seconds{s.i64(1)}), s.dbl(2)};
+}
+
 std::vector<Instant> History::readingTimes(Instant from, Instant to) const {
     Stmt s(db_, "SELECT DISTINCT ts FROM temperatures WHERE ts>=? AND ts<? ORDER BY ts");
     s.bind(1, from).bind(2, to);
@@ -222,7 +253,11 @@ void History::replaceFrom(const std::filesystem::path& file) {
     try {
         exec("BEGIN");
         try {
-            for (const char* table : {"decisions", "temperatures", "prices"}) {
+            for (const char* table : {"decisions", "temperatures", "prices", "meter"}) {
+                // Older exports have no meter table: keep what is here then.
+                Stmt has(db_, "SELECT count(*) FROM src.sqlite_master WHERE type='table' AND name=?");
+                has.bind(1, std::string(table));
+                if (!has.step() || has.i64(0) == 0) continue;
                 exec((std::string("DELETE FROM main.") + table).c_str());
                 exec((std::string("INSERT INTO main.") + table + " SELECT * FROM src." + table).c_str());
             }
@@ -243,6 +278,11 @@ void History::prune(Instant olderThan) {
         Stmt s(db_, (std::string("DELETE FROM ") + table + " WHERE ts<?").c_str());
         s.bind(1, olderThan);
         s.step();
+    }
+    {
+        Stmt m(db_, "DELETE FROM meter WHERE start<?");
+        m.bind(1, olderThan);
+        m.step();
     }
     Stmt s(db_, "DELETE FROM prices WHERE slot<?");
     s.bind(1, olderThan);

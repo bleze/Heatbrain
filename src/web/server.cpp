@@ -21,6 +21,7 @@
 #include "plugs/tasmota.hpp"
 #include "storage/history.hpp"
 #include "app/transfer.hpp"
+#include "app/meter_sync.hpp"
 #include "core/offline.hpp"
 
 namespace hb {
@@ -353,6 +354,34 @@ void WebServer::routes() {
                             {"ongoing", g.ongoing}});
         }
         sendJson(res, json{{"gaps", gaps}, {"now", now.time_since_epoch().count()}});
+    });
+
+    // Household meter (Eloverblik): status for Settings, "fetch now", and use vs. radiators.
+    s.Get("/api/meter/status", [this](const httplib::Request&, httplib::Response& res) {
+        json st = loadMeterStatus(ctx_.dataDir);
+        bool configured = false;
+        try {
+            configured = parseMeterConfig(readConfigFile(ctx_.configFile)).has_value();
+        } catch (const std::exception&) {
+        }
+        st["configured"] = configured;
+        sendJson(res, st);
+    });
+    s.Post("/api/meter/sync", [](const httplib::Request&, httplib::Response& res) {
+        MeterSync::requestNow();
+        sendJson(res, json{{"requested", true}});
+    });
+    s.Get("/api/usage", [this](const httplib::Request& req, httplib::Response& res) {
+        const int dayCount = req.has_param("days") ? std::clamp(std::atoi(req.get_param_value("days").c_str()), 1, 31) : 7;
+        History history(ctx_.dataDir / "history.db");
+        // Ending with the newest reading: the meter lags a day behind.
+        const auto last = history.lastMeterReading();
+        const Instant to = last ? last->start + last->length : floor<seconds>(system_clock::now());
+        const Instant from = to - days{dayCount};
+        json out = usageReport(readConfigFile(ctx_.configFile), history, from, to);
+        out["from"] = epoch(from);
+        out["to"] = epoch(to);
+        sendJson(res, out);
     });
 
     s.Post("/api/config/validate", [this](const httplib::Request& req, httplib::Response& res) {
