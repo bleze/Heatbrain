@@ -622,12 +622,8 @@ let renderRooms = function () {
     const inp = r.inputs || {};
     // Price-only rooms have no temperature: the current price is what drives them.
     const hero = el("div", { class: "hero" }, card, r.priceOnly ? price(inp.price) : temp(inp.temperature));
+    // Only the unit for price-only rooms: the target and mode are in the reason just below.
     if (r.priceOnly) el("small", {}, hero, `${state.status.currency}/kWh · no sensor`);
-    else if (inp.mode === "away") el("small", {}, hero, `away · keep above ${temp(inp.target)}`);
-    else if (inp.mode === "booked") el("small", {}, hero, `booked · ${temp(inp.target)}`);
-    else if (inp.mode === "off") el("small", {}, hero, `off ${inp.targetLabel || ""}`.trim());
-    else if (inp.mode === "keep") el("small", {}, hero, `keep above ${temp(inp.target)}`);
-    else if (inp.target != null) el("small", {}, hero, `target ${temp(inp.target)}`);
     if (!r.priceOnly && r.humidity != null) {
       const hum = el("small", { class: "hum", title: "Humidity" }, hero);
       hum.appendChild(icon("drop"));
