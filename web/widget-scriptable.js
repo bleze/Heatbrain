@@ -10,16 +10,27 @@ let BASE = BASES[0];
 const fm = FileManager.local();
 const cacheFile = fm.joinPath(fm.documentsDirectory(), "heatbrain-status.json");
 
-async function loadStatus() {
-  for (const base of BASES) {
-    try {
+// Ask every address at once; the first good answer wins (no waiting for a timeout at home or away).
+function firstAnswer(timeout) {
+  return new Promise((resolve) => {
+    let pending = BASES.length;
+    if (!pending) resolve(null);
+    for (const base of BASES) {
       const req = new Request(`${base}/api/status`);
-      req.timeoutInterval = 6;
-      const s = await req.loadJSON();
-      fm.writeString(cacheFile, JSON.stringify(s));
-      BASE = base;
-      return { s, live: true };
-    } catch (e) { /* try the next address */ }
+      req.timeoutInterval = timeout;
+      req.loadJSON().then(
+        (s) => { if (s && s.rooms) resolve({ base, s }); else if (--pending === 0) resolve(null); },
+        () => { if (--pending === 0) resolve(null); });
+    }
+  });
+}
+
+async function loadStatus() {
+  const hit = await firstAnswer(8);
+  if (hit) {
+    BASE = hit.base;
+    fm.writeString(cacheFile, JSON.stringify(hit.s));
+    return { s: hit.s, live: true };
   }
   if (fm.fileExists(cacheFile)) return { s: JSON.parse(fm.readString(cacheFile)), live: false };
   return { s: null, live: false };
@@ -55,14 +66,8 @@ function addText(stack, text, size, color, bold = false) {
 // A tap runs this script with ?open=1: pick the address that answers now (home or Tailscale)
 // and open it in Safari. (The widget's own link would be whatever answered at its last refresh.)
 async function openReachable() {
-  for (const base of BASES) {
-    try {
-      const req = new Request(`${base}/api/status`);
-      req.timeoutInterval = 3;
-      await req.load();
-      if (req.response && req.response.statusCode === 200) { Safari.open(base); return; }
-    } catch (e) { /* next */ }
-  }
+  const hit = await firstAnswer(5);
+  if (hit) { Safari.open(hit.base); return; }
   const a = new Alert();
   a.title = "heatbrain is not reachable";
   a.message = BASES.length > 1 ? "Check the Wi-Fi, or that Tailscale is on." : "Connect to your home Wi-Fi.";
