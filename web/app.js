@@ -304,7 +304,7 @@ function makeStepper({ value, step = 1, min, max, unit, label }) {
   return { wrap, input };
 }
 
-let awayFormOpen = false;
+let awayFormOpen = null;  // null: follow whether an away period is in place
 // Wi-Fi off period: a quiet note while it runs (or is about to), and any plug that missed its schedule.
 function renderWifiOff() {
   const bar = $("wifi-bar");
@@ -325,15 +325,24 @@ function renderWifiOff() {
   for (const e of w.errors) el("div", { class: "wifi-error" }, t, `Not loaded: ${e} - this plug runs limp mode while the Wi-Fi is off.`);
 }
 
+// Away: the header button opens and closes the panel (lit while a period is planned or running).
+// The panel shows the period with "end"/"cancel", or the form. The form keeps what was typed
+// across the 30 s refresh.
+let awayDraft = null;
 function renderAway() {
   const bar = $("away-bar"), headerBtn = $("away-btn");
   const away = state.status?.away;
-  headerBtn.hidden = !!away || !state.status?.rooms?.length;
+  headerBtn.hidden = !state.status?.rooms?.length;
+  if (awayFormOpen === null) awayFormOpen = !!away;  // a period in place: shown until closed
+  headerBtn.setAttribute("aria-pressed", String(!!awayFormOpen));
+  headerBtn.classList.toggle("lit", !!away);
+  headerBtn.title = away ? (away.active ? `Away until ${dayHm(away.until)}` : `Away planned from ${dayHm(away.from)}`) : "Plan an away period";
   bar.replaceChildren();
+  bar.hidden = !awayFormOpen;
+  if (!awayFormOpen) return;
+  bar.appendChild(badge("plane", "violet"));
+  const t = el("div", { class: "grow" }, bar);
   if (away) {
-    bar.hidden = false;
-    bar.appendChild(badge("plane", "violet"));
-    const t = el("div", { class: "grow" }, bar);
     if (away.active) {
       el("b", {}, t, `Away until ${dayHm(away.until)}`);
       el("div", { class: "muted" }, t, `Every room keeps above ${temp(away.keepAbove)}C; programs resume afterwards.`);
@@ -349,57 +358,194 @@ function renderAway() {
       try {
         await api("/api/away", { method: "DELETE" });
         toast(away.active ? "Welcome home - programs are back" : "Away plan cancelled");
+        awayFormOpen = false;
         setTimeout(refreshStatus, 1200);
       } catch (e) { toast(e.message, true); end.disabled = false; }
     });
     return;
   }
-  bar.hidden = !awayFormOpen;
-  if (!awayFormOpen) return;
-  bar.appendChild(badge("plane", "violet"));
-  const t = el("div", { class: "grow" }, bar);
   const ga = el("b", {}, t, "Going away? ");
   if (typeof helpButton === "function") helpButton(ga, "away", t);
   el("div", { class: "muted" }, t, "Plan it ahead: it starts and ends by itself. Every room only keeps above the temperature you choose.");
   const local = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  const fromLabel = el("label", { class: "field" }, bar);
-  el("span", {}, fromLabel, "From");
-  const from = el("input", { type: "datetime-local", "aria-label": "Away from" }, fromLabel);
-  const f = new Date(); f.setMinutes(0, 0, 0); f.setHours(f.getHours() + 1);
-  from.value = local(f);
-  const untilLabel = el("label", { class: "field" }, bar);
-  el("span", {}, untilLabel, "Until");
-  const until = el("input", { type: "datetime-local", "aria-label": "Away until" }, untilLabel);
-  const d = new Date(); d.setDate(d.getDate() + 2); d.setHours(18, 0, 0, 0);
-  until.value = local(d);
+  if (!awayDraft) {
+    const f = new Date(); f.setMinutes(0, 0, 0); f.setHours(f.getHours() + 1);
+    const u = new Date(); u.setDate(u.getDate() + 2); u.setHours(18, 0, 0, 0);
+    awayDraft = { from: local(f), until: local(u), keep: 12 };
+  }
+  const d = awayDraft;
+  const dt = (label, key) => {
+    const l = el("label", { class: "field" }, bar);
+    el("span", {}, l, label);
+    const i = el("input", { type: "datetime-local", "aria-label": `Away ${label.toLowerCase()}`, value: d[key] }, l);
+    i.addEventListener("input", () => { d[key] = i.value; });
+  };
+  dt("From", "from");
+  dt("Until", "until");
   const keepLabel = el("label", { class: "field" }, bar);
   el("span", {}, keepLabel, "Keep above");
-  const { wrap: keepBox, input: keep } = makeStepper({ value: 12, step: 0.5, min: 5, max: 20, unit: "°C", label: "Keep above" });
+  const { wrap: keepBox, input: keep } = makeStepper({ value: d.keep, step: 0.5, min: 5, max: 20, unit: "°C", label: "Keep above" });
+  keep.addEventListener("input", () => { d.keep = Number(keep.value); });
+  keep.addEventListener("change", () => { d.keep = Number(keep.value); });
   keepLabel.appendChild(keepBox);
   const start = el("button", { type: "button", class: "primary" }, bar);
   start.appendChild(icon("plane"));
   start.appendChild(document.createTextNode("Save away period"));
   start.addEventListener("click", async () => {
-    const fromTs = Math.floor(new Date(from.value).getTime() / 1000);
-    const untilTs = Math.floor(new Date(until.value).getTime() / 1000);
+    const fromTs = Math.floor(new Date(d.from).getTime() / 1000);
+    const untilTs = Math.floor(new Date(d.until).getTime() / 1000);
     start.disabled = true;
     try {
       await api("/api/away", { method: "POST", headers: { "Content-Type": "application/json" },
                                body: JSON.stringify({ from: fromTs, until: untilTs, keepAbove: Number(keep.value) }) });
-      awayFormOpen = false;
+      awayDraft = null;  // the panel now shows the saved period
       toast(fromTs * 1000 > Date.now() ? "Away mode planned" : "Away mode started");
       setTimeout(refreshStatus, 1200);
     } catch (e) { toast(e.message, true); start.disabled = false; }
   });
-  const cancel = el("button", { type: "button", class: "ghost" }, bar, "Cancel");
-  cancel.addEventListener("click", () => { awayFormOpen = false; renderAway(); });
 }
 $("away-btn").addEventListener("click", () => {
-  awayFormOpen = true;
-  if (location.hash.startsWith("#settings")) location.hash = "";  // the panel lives on the dashboard
+  awayFormOpen = !awayFormOpen;
+  if (location.hash.startsWith("#settings") || location.hash.startsWith("#help")) { location.hash = ""; awayFormOpen = true; }
   renderAway();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (awayFormOpen) window.scrollTo({ top: 0, behavior: "smooth" });
 });
+
+// Book: the header button opens a panel to book a room (preselected: the room whose chart is open).
+// The room warms up early by itself and follows its program again afterwards.
+let bookOpen = false;
+let bookDraft = null;
+const pad2 = (n) => String(n).padStart(2, "0");
+const isoDate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const bookableRooms = () => (state.status?.rooms || []).filter((r) => !r.priceOnly);
+
+function renderBook() {
+  const bar = $("book-bar"), headerBtn = $("book-btn");
+  const rooms = bookableRooms();
+  headerBtn.hidden = !rooms.length;
+  headerBtn.setAttribute("aria-pressed", String(bookOpen));
+  bar.replaceChildren();
+  bar.hidden = !bookOpen || !rooms.length;
+  if (bar.hidden) return;
+  if (!bookDraft || !rooms.some((r) => r.id === bookDraft.room)) {
+    let target = 22;
+    try { target = Number(localStorage.getItem("hb.bookingTarget")) || 22; } catch { /* private mode */ }
+    const room = rooms.find((r) => r.id === state.selected) || rooms[0];
+    bookDraft = { room: room.id, date: isoDate(new Date()), from: "16:00", until: "23:00", target };
+  }
+  const d = bookDraft;
+  const roomOf = () => rooms.find((r) => r.id === d.room);
+  const maxFor = () => (roomOf()?.maxTemp ?? 30) - 0.5;  // never above the room's maximum
+  d.target = Math.min(d.target, maxFor());
+  bar.appendChild(badge("calendar", "violet"));
+  const t = el("div", { class: "grow" }, bar);
+  const ga = el("b", {}, t, "Book a room ");
+  if (typeof helpButton === "function") helpButton(ga, "bookings", t);
+  el("div", { class: "muted" }, t, "It starts heating early enough by itself and goes back to the program afterwards. An end before the start means the next day.");
+  const field = (label) => { const l = el("label", { class: "field" }, bar); el("span", {}, l, label); return l; };
+  const sel = el("select", { "aria-label": "Room" }, field("Room"));
+  for (const r of rooms) {
+    const o = el("option", { value: r.id }, sel, r.name);
+    if (r.id === d.room) o.selected = true;
+  }
+  sel.addEventListener("change", () => { d.room = sel.value; renderBook(); });
+  for (const [label, key, attrs] of [["Day", "date", { type: "date" }], ["From", "from", { type: "time", step: 900 }], ["Until", "until", { type: "time", step: 900 }]]) {
+    const i = el("input", { ...attrs, value: d[key], "aria-label": label }, field(label));
+    i.addEventListener("input", () => { d[key] = i.value; });
+  }
+  const { wrap: tBox, input: tIn } = makeStepper({ value: d.target, step: 0.5, min: 5, max: maxFor(), unit: "°C", label: "Temperature" });
+  const syncT = () => { d.target = Number(tIn.value); };
+  tIn.addEventListener("input", syncT);
+  tIn.addEventListener("change", syncT);
+  field("Temperature").appendChild(tBox);
+  const save = el("button", { type: "button", class: "primary" }, bar);
+  save.appendChild(icon("check"));
+  save.appendChild(document.createTextNode("Book"));
+  const err = el("div", { class: "hint", style: "color:var(--critical);flex-basis:100%" }, bar);
+  save.addEventListener("click", async () => {
+    syncT();
+    const room = roomOf();
+    const from = new Date(`${d.date}T${d.from}`);
+    const until = new Date(`${d.date}T${d.until}`);
+    if (until <= from) until.setDate(until.getDate() + 1);
+    if (room && d.target > room.maxTemp - 0.5) { err.textContent = `${room.name} never heats above ${temp(room.maxTemp)}: choose at most ${temp(room.maxTemp - 0.5)}`; return; }
+    save.disabled = true;
+    err.textContent = "";
+    try {
+      await api(`/api/rooms/${encodeURIComponent(d.room)}/bookings`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: Math.floor(from / 1000), until: Math.floor(until / 1000), target: d.target }),
+      });
+      try { localStorage.setItem("hb.bookingTarget", String(d.target)); } catch { /* private mode */ }
+      toastMaybe(`${room?.name || d.room} booked`);
+      bookOpen = false;
+      bookDraft = null;
+      setTimeout(refreshStatus, 1500);
+    } catch (e) { err.textContent = e.message; save.disabled = false; }
+  });
+}
+$("book-btn").addEventListener("click", () => {
+  bookOpen = !bookOpen;
+  if (location.hash.startsWith("#settings") || location.hash.startsWith("#help")) { location.hash = ""; bookOpen = true; }
+  renderBook();
+  if (bookOpen) window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+// Every booking in one card under the rooms (only when there are any), soonest first.
+function renderBookingsCard() {
+  const card = $("bookings");
+  const all = (state.status?.rooms || []).flatMap((r) => (r.bookings || []).map((b) => ({ ...b, roomName: r.name })))
+    .sort((a, b) => a.from - b.from);
+  card.hidden = !all.length;
+  card.replaceChildren();
+  if (!all.length) return;
+  const head = el("div", { class: "card-head" }, card);
+  const h2 = el("h2", {}, head);
+  h2.appendChild(badge("calendar", "violet"));
+  h2.appendChild(document.createTextNode("Bookings"));
+  if (typeof helpButton === "function") helpButton(h2, "bookings", head);
+  const list = el("div", { class: "bk-list" }, card);
+  for (const b of all) bookingRow(list, b);
+}
+
+// One booking: room and time, when warming starts (and on what basis), the target, and end/cancel.
+function bookingRow(host, b) {
+  const now = Date.now() / 1000;
+  const underway = b.active && now >= b.from, warming = b.active && !underway;
+  const row = el("div", { class: `bk-row${b.active ? " active" : ""}` }, host);
+  row.appendChild(badge(underway || warming ? "flame" : "calendar", underway || warming ? "warm" : "violet"));
+  const main = el("div", { class: "bk-main" }, row);
+  const what = el("div", { class: "bk-what" }, main);
+  el("b", {}, what, b.roomName);
+  what.appendChild(document.createTextNode(` · ${dayHm(b.from)}–${hm(b.until)}`));
+  const line = (iconName, tone, text, title) => {
+    const l = el("div", { class: `bk-line tone-${tone}`, title: title || "" }, main);
+    l.appendChild(icon(iconName));
+    l.appendChild(document.createTextNode(text));
+  };
+  const h = b.warmupMinutes / 60;
+  const dur = h >= 10 ? `${Math.round(h)} h` : `${Math.round(h * 2) / 2} h`;
+  const how = b.basis === "learned" ? `about ${dur}, from how fast the room has warmed before`
+    : `${dur} as set for the room, until heatbrain has learned how fast it warms`;
+  if (underway) line("flame", "orange", `Booked until ${hm(b.until)}, then back to the program`);
+  else if (warming) line("flame", "orange", `Warming up since ${dayHm(b.warmupFrom)} (${how})`);
+  else line("clock", "violet", `Starts warming ${dayHm(b.warmupFrom)} (${how})`);
+  if (b.reachable === false) line("alert", "red", `May not reach ${temp(b.target)} in time`);
+  const tgt = el("span", { class: "chip bk-target" }, row);
+  tgt.appendChild(icon("thermo"));
+  tgt.appendChild(document.createTextNode(temp(b.target)));
+  const x = el("button", { type: "button", class: "ghost bk-x", title: b.active ? "End the booking now" : "Cancel the booking" }, row);
+  x.appendChild(icon(b.active ? "undo" : "trash"));
+  x.appendChild(document.createTextNode(b.active ? "End" : "Cancel"));
+  x.addEventListener("click", async () => {
+    x.disabled = true;
+    try {
+      await api(`/api/bookings/${encodeURIComponent(b.id)}`, { method: "DELETE" });
+      toastMaybe(b.active ? "Booking ended - back to the program" : "Booking cancelled");
+      setTimeout(refreshStatus, 1500);
+    } catch (err) { alertInline(err); x.disabled = false; }
+  });
+}
 
 // ---------------------------------------------------------------------------------------
 // Room cards
@@ -451,8 +597,6 @@ let renderRooms = function () {
       el("div", { class: "override-note" }, card, `Manual ${r.override.on ? "ON" : "OFF"} until ${hm(r.override.until)}`);
     }
 
-    renderBookings(card, r);
-
     // Pinned to the bottom so plan, plugs and buttons line up across cards of different text length
     const foot = el("div", { class: "room-foot" }, card);
     if (r.plan?.length) planStrip(foot, r.plan);
@@ -483,145 +627,8 @@ let renderRooms = function () {
     };
     act("Heat 1 h", "flame", "act-heat", (b) => setOverride(r.id, true, 60, b));
     act("Off 2 h", "power", "act-off", (b) => setOverride(r.id, false, 120, b));
-    if (!r.priceOnly) act("Book", "calendar", "act-book", () => openBooking(r));
     if (r.override) act("Back to auto", "undo", "", (b) => clearOverride(r.id, b));
   }
-}
-
-// ---------------------------------------------------------------------------------------
-// Room bookings: "22 deg on Saturday 16:00-23:00". The room warms up early by itself and
-// follows its program again afterwards. The draft survives the 30 s re-render.
-let bookingDraft = null;
-const pad2 = (n) => String(n).padStart(2, "0");
-const isoDate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-
-// One booking row: what, when it starts warming (and on what basis), and a cancel/end button.
-function bookingRow(host, b, compact) {
-  const row = el("div", { class: `booking${b.active ? " active" : ""}` }, host);
-  row.appendChild(icon("calendar"));
-  const now = Date.now() / 1000;
-  const text = b.active && now >= b.from ? `Booked until ${hm(b.until)} · ${temp(b.target)}`
-    : b.active ? `Warming up for ${hm(b.from)}–${hm(b.until)} · ${temp(b.target)}`
-    : `Booked ${dayHm(b.from)}–${hm(b.until)} · ${temp(b.target)}`;
-  const span = el("span", {}, row, text);
-  if (!(b.active && now >= b.from)) {
-    const h = b.warmupMinutes / 60;
-    const dur = h >= 10 ? `${Math.round(h)} h` : `${Math.round(h * 2) / 2} h`;
-    const how = b.basis === "learned" ? `about ${dur}, from how fast the room has warmed before`
-      : `${dur} as set for the room, until heatbrain has learned how fast it warms`;
-    const when = b.active ? `Warming since ${dayHm(b.warmupFrom)}` : `Starts warming ${dayHm(b.warmupFrom)}`;
-    // On the card one short line (the full reason on hover); in the list the whole explanation.
-    el("small", { class: "muted", style: "display:block;font-weight:400", title: `${when} (${how})` }, span, compact ? when : `${when} (${how})`);
-    if (b.reachable === false) el("small", { style: "display:block;color:var(--critical)" }, span, `May not reach ${temp(b.target)} in time`);
-  }
-  const x = el("button", { type: "button", class: "ghost", title: b.active ? "End the booking now" : "Cancel the booking", "aria-label": "Cancel booking" }, row);
-  x.appendChild(icon(b.active ? "undo" : "trash"));
-  x.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    x.disabled = true;
-    try {
-      await api(`/api/bookings/${encodeURIComponent(b.id)}`, { method: "DELETE" });
-      toastMaybe(b.active ? "Booking ended - back to the program" : "Booking cancelled");
-      $("bookings-dialog")?.close();
-      setTimeout(refreshStatus, 1500);
-    } catch (err) { alertInline(err); x.disabled = false; }
-  });
-}
-
-// The card shows the next booking only (cards stay the same size); more open a list.
-function renderBookings(card, r) {
-  const all = r.bookings || [];
-  if (!all.length) return;
-  bookingRow(card, all[0], true);
-  if (all.length > 1) {
-    const more = el("button", { type: "button", class: "link-btn" }, card, `+${all.length - 1} more booking${all.length > 2 ? "s" : ""}`);
-    more.addEventListener("click", (e) => { e.stopPropagation(); bookingList(r); });
-  }
-}
-
-function bookingList(r) {
-  let dlg = $("bookings-dialog");
-  if (!dlg) {
-    dlg = el("dialog", { id: "bookings-dialog", class: "booking-dialog" }, document.body);
-    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
-  }
-  dlg.replaceChildren();
-  const head = el("div", { class: "booking-head" }, dlg);
-  head.appendChild(badge("calendar", "violet"));
-  el("b", {}, head, `Bookings · ${r.name}`);
-  const list = el("div", { class: "booking-list" }, dlg);
-  for (const b of r.bookings || []) bookingRow(list, b, false);
-  const row = el("div", { class: "actions" }, dlg);
-  const add = el("button", { type: "button", class: "primary" }, row);
-  add.appendChild(icon("plus"));
-  add.appendChild(document.createTextNode("New booking"));
-  add.addEventListener("click", () => { dlg.close(); openBooking(r); });
-  const close = el("button", { type: "button" }, row);
-  close.appendChild(document.createTextNode("Close"));
-  close.addEventListener("click", () => dlg.close());
-  dlg.showModal();
-}
-
-function openBooking(r) {
-  let target = 22;
-  try { target = Number(localStorage.getItem("hb.bookingTarget")) || 22; } catch { /* private mode */ }
-  bookingDraft = { room: r.id, date: isoDate(new Date()), from: "16:00", until: "23:00", target: Math.min(target, r.maxTemp - 0.5) };
-  bookingDialog(r);
-}
-
-// One dialog for all rooms, outside the cards (they are redrawn every 30 s).
-function bookingDialog(r) {
-  let dlg = $("booking-dialog");
-  if (!dlg) {
-    dlg = el("dialog", { id: "booking-dialog", class: "booking-dialog" }, document.body);
-    dlg.addEventListener("close", () => { bookingDraft = null; });
-    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });  // click outside
-  }
-  dlg.replaceChildren();
-  const d = bookingDraft;
-  const head = el("div", { class: "booking-head" }, dlg);
-  head.appendChild(badge("calendar", "violet"));
-  el("b", {}, head, `Book ${r.name}`);
-  if (typeof helpButton === "function") helpButton(head, "bookings", head);  // the text goes under the title, inside the dialog
-  const f = el("div", { class: "booking-form" }, dlg);
-  const field = (label, attrs, key) => {
-    const l = el("label", {}, f);
-    el("span", { class: "muted" }, l, label);
-    const i = el("input", { ...attrs, value: d[key] }, l);
-    i.addEventListener("input", () => { d[key] = attrs.type === "number" ? Number(i.value) : i.value; });
-    return i;
-  };
-  field("Day", { type: "date" }, "date");
-  field("From", { type: "time", step: 900 }, "from");
-  field("Until", { type: "time", step: 900 }, "until");
-  field("Temperature", { type: "number", step: 0.5, min: 5, max: r.maxTemp - 0.5, style: "width:5.5em" }, "target");
-  el("div", { class: "hint" }, dlg, "It starts heating early enough by itself and goes back to the program afterwards. An end before the start means the next day.");
-  const err = el("div", { class: "hint", style: "color:var(--critical)" }, dlg);
-  const row = el("div", { class: "actions" }, dlg);
-  const save = el("button", { type: "button", class: "primary" }, row);
-  save.appendChild(icon("check"));
-  save.appendChild(document.createTextNode("Book"));
-  save.addEventListener("click", async () => {
-    const from = new Date(`${d.date}T${d.from}`);
-    const until = new Date(`${d.date}T${d.until}`);
-    if (until <= from) until.setDate(until.getDate() + 1);
-    save.disabled = true;
-    err.textContent = "";
-    try {
-      await api(`/api/rooms/${encodeURIComponent(r.id)}/bookings`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: Math.floor(from / 1000), until: Math.floor(until / 1000), target: d.target }),
-      });
-      try { localStorage.setItem("hb.bookingTarget", String(d.target)); } catch { /* private mode */ }
-      dlg.close();
-      toastMaybe(`${r.name} booked`);
-      setTimeout(refreshStatus, 1500);
-    } catch (e) { err.textContent = e.message; save.disabled = false; }
-  });
-  const cancel = el("button", { type: "button" }, row);
-  cancel.appendChild(document.createTextNode("Cancel"));
-  cancel.addEventListener("click", () => dlg.close());
-  dlg.showModal();
 }
 
 function toastMaybe(msg) { if (typeof toast === "function") toast(msg); else $("updated").textContent = msg; }
@@ -1082,7 +1089,9 @@ async function refreshStatus() {
     renderProblems();
     renderWifiOff();
     renderAway();
+    renderBook();
     renderRooms();
+    renderBookingsCard();
     window.Costs?.load();
     window.Usage?.load();
     if (state.selected) {

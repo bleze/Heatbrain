@@ -123,15 +123,15 @@ const HELP = {
   away: {
     title: "Away mode",
     body: [
-      "Plan a period (from - until) and every room only keeps above the temperature you choose; price-only rooms stay off. It starts and ends by itself - set it the evening before an early flight. Manual overrides and frost protection still work.",
+      "Plan a period (from - until) and every room only keeps above the temperature you choose; price-only rooms stay off. It starts and ends by itself - set it the evening before an early flight. Manual overrides and frost protection still work. The Away button at the top opens and closes the panel; it stays lit while a period is planned or running.",
     ],
   },
   bookings: {
     title: "Bookings",
     body: [
-      "For a room you only use now and then: press Book on its card and say when you need it and how warm - say 22 deg on Saturday 16:00-23:00. The room heats to that temperature from early enough before the start until the end, also through expensive hours (someone is there), then follows its program again. A booking wins over the program and away mode; manual buttons and the room's maximum still apply.",
+      "For a room you only use now and then: press Book at the top, choose the room and say when you need it and how warm - say 22 deg on Saturday 16:00-23:00. The room heats to that temperature from early enough before the start until the end, also through expensive hours (someone is there), then follows its program again. A booking wins over the program and away mode; manual buttons and the room's maximum still apply.",
       "How early it starts is learned from the room's own history: how fast it cools towards the outdoor temperature and how fast it warms when heated. From the room's current temperature and the weather that gives the warm-up time, with a margin - a few hours for a radiator, a day or more for floor heating in concrete. Until heatbrain has seen the room heat for a while, it uses the room's warm-up setting (Settings -> Rooms). Once warming has started it does not stop again.",
-      "If the card says the room may not reach the temperature in time, book earlier or check the room's maximum.",
+      "All bookings are listed in the Bookings card above the rooms, soonest first, with when warming starts - end or cancel them there. If a booking says the room may not reach the temperature in time, book earlier or check the room's maximum.",
     ],
   },
   plan: {

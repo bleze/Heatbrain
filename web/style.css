@@ -138,9 +138,33 @@ a { color: var(--accent); }
 .outdoor-card { background: linear-gradient(180deg, var(--cool-tint), transparent 60%), var(--surface); }
 .away-btn { border-radius: 999px; }
 .away-btn .icon { color: var(--accent); }  /* same as the plane on the away panel */
+/* Header toggles (Book, Away): pressed = its panel is open; lit = something is in place (an away period) */
+.hdr-toggle[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.hdr-toggle.lit { background: var(--accent-fill); color: var(--accent-ink); border-color: var(--accent-fill); }
+.hdr-toggle.lit .icon { color: var(--accent-ink); }
+/* The bookings card: one row per booking */
+.bk-list { display: flex; flex-direction: column; margin-top: 10px; }
+.bk-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+.bk-row:first-child { border-top: none; }
+.bk-main { flex: 1; min-width: 0; }
+.bk-what { font-size: 14px; }
+.bk-line { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
+.bk-line .icon { width: 14px; height: 14px; }
+.bk-line.tone-violet .icon { color: var(--accent); }
+.bk-line.tone-orange .icon { color: var(--flame-1); }
+.bk-line.tone-red { color: var(--critical); }
+.bk-target { font-weight: 600; }
+.bk-target .icon { color: var(--flame-1); }
+.bk-x .icon { color: var(--critical); }
 .away-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-color: var(--accent);
   background: linear-gradient(90deg, var(--accent-soft), transparent 70%), var(--surface); }
 .away-bar .grow { flex: 1; min-width: 200px; }
+/* Form fields and buttons line up along the bottom (the inputs), the icon and text stay centred;
+   the button is as tall as the inputs. A status panel (no fields) keeps its button centred. */
+.away-bar:has(.field) { align-items: flex-end; }
+.away-bar:has(.field) > .badge, .away-bar:has(.field) > .grow { align-self: center; }
+.away-bar:has(.field) > button { height: 36px; }
+.away-bar .hint:empty { display: none; }
 .wifi-bar { display: flex; align-items: center; gap: 12px; }
 .wifi-bar .grow { flex: 1; min-width: 200px; }
 .wifi-bar .wifi-error { color: var(--critical); margin-top: 4px; font-size: 13px; }
