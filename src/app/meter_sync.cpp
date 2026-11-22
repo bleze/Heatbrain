@@ -91,13 +91,25 @@ void MeterSync::syncOnce() {
         if (const auto first = history.firstMeterReading(); !complete && first && first->start > nowSec() - kBackfillLimit) {
             const Instant olderTo = first->start;
             const Instant olderFrom = olderTo - kBackfillChunk;
-            const auto older = client.readings(chosen->id, formatLocalDate(tz_.toLocal(olderFrom)),
-                                               formatLocalDate(tz_.toLocal(olderTo)));
-            history.recordMeter(older);
-            log::info("Meter: {} older readings ({} - {})", older.size(), formatLocalDate(tz_.toLocal(olderFrom)),
-                      formatLocalDate(tz_.toLocal(olderTo)));
-            if (older.empty()) status["historyComplete"] = true;  // nothing further back on the account
-            readings.insert(readings.end(), older.begin(), older.end());
+            try {
+                const auto older = client.readings(chosen->id, formatLocalDate(tz_.toLocal(olderFrom)),
+                                                   formatLocalDate(tz_.toLocal(olderTo)));
+                history.recordMeter(older);
+                log::info("Meter: {} older readings ({} - {})", older.size(), formatLocalDate(tz_.toLocal(olderFrom)),
+                          formatLocalDate(tz_.toLocal(olderTo)));
+                if (older.empty()) status["historyComplete"] = true;  // nothing further back on the account
+                readings.insert(readings.end(), older.begin(), older.end());
+            } catch (const std::exception& e) {
+                // Eloverblik keeps data back to a cut-off date (#30017 "ToDate is not after the cut-off
+                // date"): that is the end of the history, not a failure.
+                const std::string what = e.what();
+                if (what.find("30017") != std::string::npos || what.find("cut-off") != std::string::npos) {
+                    status["historyComplete"] = true;
+                    log::info("Meter: all history fetched (Eloverblik keeps data back to its cut-off date)");
+                } else {
+                    log::warn("Meter: older history: {}", what);  // the recent readings still count
+                }
+            }
         }
 
         json pts = json::array();
