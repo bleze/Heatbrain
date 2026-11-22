@@ -825,10 +825,15 @@
     const g = el("div", { class: "form-row" }, card);
     // The section only exists in the config once a token is entered.
     const m = S.cfg.meter || {};
-    const tf = el("div", { class: "field span2" }, g);
+    // A long token: a full-width textarea, shown as dots except while editing.
+    const tf = el("div", { class: "field token-field" }, card);
+    card.insertBefore(tf, g);
     el("span", {}, tf, "Token from eloverblik.dk");
-    const ti = el("input", { type: "password", placeholder: "paste the token (Data sharing → Create token)", value: m.refreshToken || "" }, tf);
-    ti.addEventListener("focus", () => { if (ti.value === MASK) ti.select(); });
+    const ti = el("textarea", { rows: 3, class: "token-input", spellcheck: "false", autocomplete: "off",
+                                placeholder: "Paste the token here: on eloverblik.dk log in with MitID → Data sharing → Create token" }, tf);
+    ti.value = m.refreshToken || "";
+    ti.addEventListener("focus", () => { ti.classList.add("editing"); if (ti.value === MASK) ti.select(); });
+    ti.addEventListener("blur", () => ti.classList.remove("editing"));
     ti.addEventListener("input", () => {
       if (ti.value) S.cfg.meter = { type: "eloverblik", ...(S.cfg.meter || {}), refreshToken: ti.value };
       else delete S.cfg.meter;
