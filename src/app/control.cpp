@@ -180,7 +180,6 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                            const std::vector<hb::Problem>& active, Instant now) {
     using nlohmann::json;
     const auto overrides = env.overrides->load();
-    const auto bookings = env.bookings->load();
     json rooms = json::array();
     for (const auto& r : result.rooms) {
         json room{{"id", r.room->id},
@@ -200,15 +199,17 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
         }
         room["plan"] = plan;
         json booked = json::array();
-        for (const auto& b : bookings) {
-            if (b.room != r.room->id) continue;
+        for (const auto& b : r.bookings) {
             booked.push_back({{"id", b.id}, {"target", b.booking.target},
                               {"from", b.booking.from.time_since_epoch().count()},
                               {"until", b.booking.until.time_since_epoch().count()},
-                              {"warmupFrom", (b.booking.from - r.room->warmup).time_since_epoch().count()},
+                              {"warmupFrom", (b.booking.from - b.booking.warmup).time_since_epoch().count()},
+                              {"warmupMinutes", b.booking.warmup.count()},
+                              {"basis", b.basis}, {"reachable", b.reachable},
                               {"active", b.booking.coversAt(now)}});
         }
         room["bookings"] = booked;
+        if (r.thermal) room["thermal"] = {{"gain", r.thermal->gain}, {"loss", r.thermal->loss}};
         room["maxTemp"] = r.room->maxTemp;
         if (auto it = overrides.find(r.room->id); it != overrides.end() && it->second.until > now) {
             room["override"] = {{"on", it->second.on}, {"until", it->second.until.time_since_epoch().count()}};

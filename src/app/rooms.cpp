@@ -241,6 +241,7 @@ std::vector<StoredBooking> BookingStore::load() const {
             StoredBooking s{b.at("id").get<std::string>(), b.at("room").get<std::string>(),
                             Booking{b.at("target").get<double>(), Instant{seconds{b.at("from").get<long long>()}},
                                     Instant{seconds{b.at("until").get<long long>()}}}};
+            if (b.contains("warmingSince")) s.warmingSince = Instant{seconds{b["warmingSince"].get<long long>()}};
             if (s.booking.until > now) out.push_back(std::move(s));
         }
     } catch (const std::exception&) {
@@ -266,6 +267,7 @@ void BookingStore::save(const std::vector<StoredBooking>& all) const {
         j.push_back({{"id", s.id}, {"room", s.room}, {"target", s.booking.target},
                      {"from", s.booking.from.time_since_epoch().count()},
                      {"until", s.booking.until.time_since_epoch().count()}});
+        if (s.warmingSince) j.back()["warmingSince"] = s.warmingSince->time_since_epoch().count();
     }
     fs::path tmp = file_;
     tmp += ".tmp";
@@ -284,6 +286,14 @@ std::string BookingStore::add(const std::string& roomId, const Booking& b) const
     all.push_back({id, roomId, b});
     save(all);
     return id;
+}
+
+void BookingStore::markWarming(const std::string& id, Instant since) const {
+    auto all = load();
+    for (auto& s : all) {
+        if (s.id == id && !s.warmingSince) s.warmingSince = since;
+    }
+    save(all);
 }
 
 bool BookingStore::remove(const std::string& id) const {

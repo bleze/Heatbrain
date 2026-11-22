@@ -69,6 +69,7 @@ add_library(heatbrain_core STATIC
   src/core/version.cpp
   src/core/base64.cpp
   src/core/offline.cpp
+  src/core/thermal.cpp
 )
 target_include_directories(heatbrain_core PUBLIC src)
 target_compile_definitions(heatbrain_core PRIVATE HEATBRAIN_REVISION="${HEATBRAIN_REVISION}")
@@ -133,6 +134,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_http_client.cpp
     tests/test_netatmo.cpp
     tests/test_planner.cpp
+    tests/test_thermal.cpp
     tests/test_controller.cpp
     tests/test_alerts.cpp
     tests/test_config_service.cpp

@@ -48,7 +48,8 @@ private:
 struct StoredBooking {
     std::string id;
     std::string room;
-    Booking booking;  // warmup comes from the room's config (forRoom)
+    Booking booking;  // warmup comes from the room's config (forRoom) or the controller's estimate
+    std::optional<Instant> warmingSince;  // when warming up started: it never stops early after that
 };
 class BookingStore {
 public:
@@ -57,6 +58,7 @@ public:
     std::vector<Booking> forRoom(const RoomConfig& room) const;
     std::string add(const std::string& roomId, const Booking& b) const;  // throws invalid_argument on overlap
     bool remove(const std::string& id) const;
+    void markWarming(const std::string& id, Instant since) const;
 
 private:
     void save(const std::vector<StoredBooking>& all) const;

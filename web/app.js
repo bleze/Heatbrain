@@ -556,8 +556,17 @@ function renderBookings(card, r) {
     const now = Date.now() / 1000;
     const text = b.active && now >= b.from ? `Booked until ${hm(b.until)} · ${temp(b.target)}`
       : b.active ? `Warming up for ${hm(b.from)}–${hm(b.until)} · ${temp(b.target)}`
-      : `Booked ${dayHm(b.from)}–${hm(b.until)} · ${temp(b.target)} (warms up from ${hm(b.warmupFrom)})`;
-    el("span", {}, row, text);
+      : `Booked ${dayHm(b.from)}–${hm(b.until)} · ${temp(b.target)}`;
+    const span = el("span", {}, row, text);
+    if (!(b.active && now >= b.from)) {
+      const h = b.warmupMinutes / 60;
+      const dur = h >= 10 ? `${Math.round(h)} h` : `${Math.round(h * 2) / 2} h`;
+      const how = b.basis === "learned" ? `about ${dur}, from how fast the room has warmed before`
+        : `${dur} as set for the room, until heatbrain has learned how fast it warms`;
+      el("small", { class: "muted", style: "display:block;font-weight:400" }, span,
+        b.active ? `Warming since ${dayHm(b.warmupFrom)} (${how})` : `Starts warming ${dayHm(b.warmupFrom)} (${how})`);
+      if (b.reachable === false) el("small", { style: "display:block;color:var(--critical)" }, span, `May not reach ${temp(b.target)} in time`);
+    }
     const x = el("button", { type: "button", class: "ghost", title: b.active ? "End the booking now" : "Cancel the booking", "aria-label": "Cancel booking" }, row);
     x.appendChild(icon(b.active ? "undo" : "trash"));
     x.addEventListener("click", async (e) => {

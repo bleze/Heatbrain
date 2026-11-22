@@ -11,6 +11,7 @@
 
 #include "app/rooms.hpp"
 #include "app/thermostats.hpp"
+#include "core/thermal.hpp"
 #include "core/alerts.hpp"
 #include "core/offline.hpp"
 #include "core/planner.hpp"
@@ -21,8 +22,19 @@
 
 namespace hb {
 
+// A booking as the controller plans it: when warming up starts and on what that is based.
+struct BookingPlan {
+    std::string id;
+    Booking booking;            // warmup = the estimate (or the room's setting)
+    std::string basis;          // "learned" (from the room's history) | "set" (the room's warm-up setting)
+    bool reachable = true;      // false: the room may not reach the target in time (or at all)
+    std::optional<Instant> warmingSince;
+};
+
 struct RoomResult {
     const RoomConfig* room = nullptr;
+    std::vector<BookingPlan> bookings;
+    std::optional<ThermalModel> thermal;  // when learned well enough to use
     Decision decision;
     std::vector<PlanSegment> plan;  // next 24 h
     bool changed = false;
@@ -92,6 +104,8 @@ private:
     nlohmann::json applyToPlugs(const RoomConfig& room, bool on, Instant now, TickResult& result);
     nlohmann::json applyToThermostat(const RoomConfig& room, const Decision& d, TickResult& result);
     std::vector<ThermostatConfig> thermostats_;
+    ThermalModel thermalModel(const RoomConfig& room, Instant now);  // learned, refreshed hourly
+    std::map<std::string, std::pair<Instant, ThermalModel>> thermal_;
     // Empty when the plug may be switched live; otherwise why not.
     std::string failsafeProblem(Plug& plug, Instant now);
     void armOffline(const OfflinePeriod& period, Instant now, std::optional<AwayMode> away);

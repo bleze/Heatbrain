@@ -355,11 +355,42 @@ TickResult Controller::tick(Instant now, bool apply) {
         if (auto it = overrides.find(room.id); it != overrides.end()) in.override = it->second;
         in.away = away;
         in.outdoorTemp = outdoor;
-        const auto bookings = bookings_ && !room.priceOnly ? bookings_->forRoom(room) : std::vector<Booking>{};
+        // Bookings: warm up as long as the room needs - learned from its history, from the current
+        // and the outdoor temperature - or the room's warm-up setting until that is known.
+        std::vector<BookingPlan> bookingPlans;
+        std::vector<Booking> bookings;
+        std::optional<ThermalModel> learned;
+        if (bookings_ && !room.priceOnly) {
+            const ThermalModel model = thermalModel(room, now);
+            if (model.usable()) learned = model;
+            const bool freshTemp = in.temperature && in.measuredAt && now - *in.measuredAt <= room.strategy.staleAfter;
+            for (const auto& s : bookings_->load()) {
+                if (s.room != room.id) continue;
+                BookingPlan bp{s.id, s.booking, "set", true, s.warmingSince};
+                bp.booking.warmup = room.warmup;
+                if (learned && freshTemp) {
+                    const auto est = estimateWarmup(*learned, *in.temperature, s.booking.target, outdoor.value_or(5.0));
+                    bp.booking.warmup = est.duration;
+                    bp.basis = "learned";
+                    bp.reachable = est.reachable;
+                }
+                if (s.warmingSince) {
+                    bp.booking.warmup = std::max(bp.booking.warmup, duration_cast<minutes>(s.booking.from - *s.warmingSince));
+                }
+                if (apply && !s.warmingSince && bp.booking.coversAt(now)) {
+                    bookings_->markWarming(s.id, now);
+                    bp.warmingSince = now;
+                }
+                bookings.push_back(bp.booking);
+                bookingPlans.push_back(std::move(bp));
+            }
+        }
         in.booking = bookingAt(bookings, now);
 
         RoomResult rr;
         rr.room = &room;
+        rr.bookings = std::move(bookingPlans);
+        rr.thermal = learned;
         rr.decision = decideRoom(room, in, prices_, tz_);
         const auto armed = armedRooms_.find(room.id);
         const bool following = armed != armedRooms_.end() && now < armed->second.until && !networkBack;
@@ -448,6 +479,33 @@ void Controller::setOfflineWindow(std::optional<WifiOffPlan> plan, minutes lead)
     offlineWindow_ = plan;
     offlineLead_ = lead;
     loadOfflineState();
+}
+
+// How fast the room warms and cools, from three weeks of its own decisions (temperature, outdoor
+// temperature, heating or not). Refitted once an hour.
+ThermalModel Controller::thermalModel(const RoomConfig& room, Instant now) {
+    if (auto it = thermal_.find(room.id); it != thermal_.end() && now - it->second.first < hours{1}) {
+        return it->second.second;
+    }
+    ThermalModel m;
+    if (history_) {
+        try {
+            std::vector<ThermalSample> samples;
+            for (const auto& d : history_->decisions(room.id, now - days{21}, now, false)) {
+                // Only real states: not limp mode or night schedules (the plug did its own thing).
+                if (d.reason == "STALE_DATA_LIMP" || d.reason == "OFFLINE_SCHEDULE" || !d.inputs.is_object()) continue;
+                if (!d.inputs.contains("temperature") || d.inputs.value("temperatureAgeMinutes", 99) > 30) continue;
+                ThermalSample s{d.at, d.inputs["temperature"].get<double>(), std::nullopt, d.on};
+                if (d.inputs.contains("outdoorTemp")) s.outdoor = d.inputs["outdoorTemp"].get<double>();
+                samples.push_back(s);
+            }
+            m = fitThermalModel(samples);
+        } catch (const std::exception& e) {
+            log::warn("Learning how fast {} warms up: {}", room.id, e.what());
+        }
+    }
+    thermal_[room.id] = {now, m};
+    return m;
 }
 
 OfflineDuty Controller::learnedDuty(const std::string& roomId, Instant now) const {

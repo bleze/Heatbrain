@@ -374,7 +374,7 @@
     helpButton(nb.querySelector("span"), "limits", g);
     field(g, "Never above", num(room, "maxTemp", { step: 0.5, unit: "°C" }), { hint: "hard stop, even when manual" });
     field(g, "Frost protection", num(room, "frostTemp", { step: 0.5, placeholder: "5", unit: "°C" }));
-    field(g, "Warm-up for bookings", num(room, "warmupMinutes", { step: 15, min: 0, max: 720, placeholder: "180", unit: "min" }), { hint: "a booked room starts heating this early" });
+    field(g, "Warm-up for bookings", num(room, "warmupMinutes", { step: 15, min: 0, max: 720, placeholder: "180", unit: "min" }), { hint: "until heatbrain has learned how fast the room warms (concrete floors: 12+ h)" });
 
     const ph = el("h3", {}, c, "Daily program ");
     helpButton(ph, ["program", "modes"]);
