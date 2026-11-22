@@ -24,6 +24,7 @@ PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 cd "$PROJECT_DIR" || fail "folder $PROJECT_DIR not found"
 echo "heatbrain update in $PROJECT_DIR ($(date '+%Y-%m-%d %H:%M'))"
 
+[ "$(id -u)" = 0 ] || fail "runs as $(id -un), but only root may use Docker: Task Scheduler -> Edit -> General -> User: root"
 command -v docker >/dev/null 2>&1 || fail "docker not found (is Container Manager installed?)"
 if docker compose version >/dev/null 2>&1; then
     DC="docker compose"
