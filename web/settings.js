@@ -1641,7 +1641,9 @@
       S.plugStatus = null;
       toast("Saved - heatbrain is applying the new settings");
       render();
-      setTimeout(refreshStatus, 2500);
+      // heatbrain restarts with the new settings; ask until the status of its first step is in, so the
+      // dashboard (room order, names, programs) is current when you go back to it.
+      if (typeof refreshAfterTick === "function") refreshAfterTick(); else setTimeout(refreshStatus, 2500);
     } catch (e) {
       toast(e.message, true);
     } finally {
