@@ -1153,6 +1153,7 @@ async function refreshStatus() {
     window.Usage?.load();
     if (state.selected) {
       if (!state.history) await loadHistory();
+      else renderDetail();  // the planned part (target, heating ahead) comes from the status: redraw with it
     } else if (s.rooms.length) {
       await selectRoom(s.rooms[0].id, false);
     }
@@ -1195,10 +1196,14 @@ function route() {
   if (view === "dashboard" && state.status) { window.Costs?.render(); window.Usage?.render(); if (state.history) renderDetail(); }
   // The dashboard isn't refreshed while hidden: fetch now rather than show what it had (or
   // nothing, if the server was restarting when the page loaded) until the next 30 s tick.
-  if (view === "dashboard" && routed) refreshStatus();
+  if (view === "dashboard" && routed) { refreshStatus(); loadHistory(); }
   routed = true;
 }
 let routed = false;
+// Back to the tab (or the phone app) after a while: fetch fresh status and chart at once.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !$("view-dashboard").hidden && state.status) { refreshStatus(); loadHistory(); }
+});
 window.addEventListener("hashchange", route);
 
 refreshStatus().then(route);
