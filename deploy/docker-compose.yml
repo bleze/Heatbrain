@@ -19,4 +19,4 @@ services:
       - /volume1/docker/heatbrain:/data
     environment:
       - TZ=Europe/Copenhagen
-    stop_grace_period: 15s  # heatbrain handles SIGTERM and stops cleanly
+    stop_grace_period: 60s  # heatbrain finishes its control step and exits cleanly (slow plugs take a while)

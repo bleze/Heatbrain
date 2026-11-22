@@ -41,16 +41,25 @@ done
     fail "no compose file in $PROJECT_DIR (it has: $(ls | xargs)) - copy this script into the Container Manager project folder"
 echo "using: $DC with $COMPOSE_FILE"
 
-before=$(docker inspect --format '{{.Image}}' heatbrain 2>/dev/null || echo none)
+IMAGE=$(docker inspect --format '{{.Config.Image}}' heatbrain 2>/dev/null || echo "ghcr.io/bleze/heatbrain:latest")
+running=$(docker inspect --format '{{.Image}}' heatbrain 2>/dev/null || echo none)
 echo "pulling the newest image..."
 $DC pull heatbrain || fail "pull failed (internet? ghcr.io reachable?)"
-echo "starting..."
-$DC up -d heatbrain || fail "start failed"
-after=$(docker inspect --format '{{.Image}}' heatbrain 2>/dev/null || echo none)
+newest=$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || echo unknown)
 
-if [ "$before" = "$after" ]; then
+if [ "$running" = "$newest" ]; then
     echo "heatbrain is up to date"
-else
-    echo "heatbrain updated and restarted"
-    docker image prune -f >/dev/null 2>&1  # remove the replaced image
+    exit 0
 fi
+
+# Stop it properly first: heatbrain finishes its control step (a slow plug can take a while) and
+# exits cleanly. Letting Docker replace it directly allows only 15 s before a forced kill, which
+# DSM reports as "stopped unexpectedly".
+if [ "$running" != none ]; then
+    echo "stopping heatbrain (up to 60 s)..."
+    $DC stop -t 60 heatbrain || fail "stop failed"
+fi
+echo "starting the new version..."
+$DC up -d heatbrain || fail "start failed"
+echo "heatbrain updated and restarted"
+docker image prune -f >/dev/null 2>&1  # remove the replaced image
