@@ -133,6 +133,7 @@ json loadMeterStatus(const fs::path& dataDir) {
 json usageReport(const json& cfg, const History& history, Instant from, Instant to) {
     std::map<std::string, double> watts;
     for (const auto& p : cfg.value("plugs", json::array())) watts[p.value("id", "")] = p.value("watts", 0.0);
+    for (const auto& t : cfg.value("thermostats", json::array())) watts[t.value("id", "")] = t.value("watts", 0.0);
 
     // When each live plug was on: from one decision to the next (capped: a gap means no control).
     struct On { Instant a, b; double w; };

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(heatbrain VERSION 0.1.0 LANGUAGES CXX)
+project(heatbrain VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +21,30 @@ find_package(httplib CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(unofficial-sodium CONFIG REQUIRED)
+find_package(protobuf-c CONFIG REQUIRED)
+
+# --- OpenSDG (vendored, GPL-3.0): SecureDeviceGrid client for Danfoss DEVIreg Smart thermostats ---
+set(OPENSDG_DIR ${CMAKE_SOURCE_DIR}/third_party/opensdg)
+add_library(opensdg STATIC
+  ${OPENSDG_DIR}/library/client.c
+  ${OPENSDG_DIR}/library/grid.c
+  ${OPENSDG_DIR}/library/logging.c
+  ${OPENSDG_DIR}/library/peer.c
+  ${OPENSDG_DIR}/library/socket.c
+  ${OPENSDG_DIR}/library/tunnel_protocol.c
+  ${OPENSDG_DIR}/library/utils.c
+  ${OPENSDG_DIR}/library/mainloop_events.c
+  ${OPENSDG_DIR}/library/control_protocol.pb-c.c
+  $<IF:$<BOOL:${WIN32}>,${OPENSDG_DIR}/library/mainloop_win32.c,${OPENSDG_DIR}/library/mainloop_poll.c>
+)
+target_include_directories(opensdg PUBLIC ${OPENSDG_DIR}/include PRIVATE ${OPENSDG_DIR}/library)
+target_compile_definitions(opensdg PUBLIC OPENSDG_STATIC PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(opensdg PRIVATE unofficial-sodium::sodium protobuf-c::protobuf-c
+                      PUBLIC $<IF:$<BOOL:${WIN32}>,Ws2_32,pthread>)
+if(MSVC)
+  target_compile_options(opensdg PRIVATE /W1)  # third-party C: keep its warnings out of our build
+endif()
 
 # --- Pure logic: no IO, no network. Everything here is unit-testable. ---
 add_library(heatbrain_core STATIC
@@ -61,12 +85,16 @@ add_library(heatbrain_io STATIC
   src/app/digest.cpp
   src/app/transfer.cpp
   src/app/meter_sync.cpp
+  src/devices/dominion.cpp
+  src/devices/devi.cpp
+  src/app/thermostats.cpp
 )
 target_link_libraries(heatbrain_io PUBLIC
   heatbrain_core
   httplib::httplib
   nlohmann_json::nlohmann_json
   OpenSSL::SSL OpenSSL::Crypto
+  opensdg
   unofficial::sqlite3::sqlite3
 )
 target_compile_definitions(heatbrain_io PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
@@ -104,6 +132,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_transfer.cpp
     tests/test_offline.cpp
     tests/test_eloverblik.cpp
+    tests/test_dominion.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE

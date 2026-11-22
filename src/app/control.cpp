@@ -72,6 +72,12 @@ std::unique_ptr<ControlEnv> loadControlEnv(const Args& args) {
     e->controller->setDataDir(e->cfg.dataDir);
     e->controller->setAwayStore(e->away.get());
     e->controller->setOutdoorSensor(e->cfg.raw.value("outdoorSensor", std::string()));
+    // Thermostats (DEVIreg Smart): their own sensors are a temperature source too.
+    hb::DeviRegistry::instance().setDataDir(e->cfg.dataDir);
+    if (auto thermostats = hb::parseThermostats(e->cfg.raw); !thermostats.empty()) {
+        e->sources.push_back(std::make_unique<hb::DeviSource>(thermostats));
+        e->controller->setThermostats(std::move(thermostats));
+    }
     // Load the night schedule two control steps before the Wi-Fi goes off (at least 10 minutes).
     e->controller->setOfflineWindow(hb::parseWifiOff(e->cfg.raw),
                                     std::max(minutes{10}, duration_cast<minutes>(e->tick * 2)));

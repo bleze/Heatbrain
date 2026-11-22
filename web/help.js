@@ -139,6 +139,14 @@ const HELP = {
       "Widget: with the free iPhone app Scriptable, heatbrain gets a home-screen widget showing each room's temperature and target, a flame when it heats, the price now and the cheapest hour ahead. iOS refreshes widgets by itself, usually every 10-15 minutes; tapping it opens heatbrain. It needs to reach heatbrain: at home that's your network; away from home only through Tailscale (free; Synology package + iPhone app), whose address you can add before copying the script. Never forward a router port to heatbrain - it has no login. When nothing answers, the widget shows the last data it got.",
     ],
   },
+  thermostats: {
+    title: "Thermostats (DEVIreg Smart)",
+    body: [
+      "A thermostat regulates the floor heating by itself; heatbrain only sets its temperature: the room's target normally, a little lower while electricity is expensive (and 17-21), a little higher before an expensive period and in the cheapest hours, and frost protection when the program says off. In Live, heatbrain switches the thermostat to manual mode, so the DEVI app's own schedule no longer applies; in Dry-run it only shows what it would set.",
+      "There is no fail-safe to install: if heatbrain or the network is gone, the thermostat keeps the last temperature it was given. The thermostat's wall sensor is available as a temperature source (devi:<name>), and its floor probe as devi:<name>-floor; you can also use a Netatmo module in the room.",
+      "The connection goes through Danfoss's servers (as the DEVI app does), so it needs the internet. Pair once with a one-time code from the DEVI app (Settings -> Share house).",
+    ],
+  },
   transfer: {
     title: "Moving heatbrain (export and import)",
     body: [
@@ -240,7 +248,7 @@ function renderManual(host) {
     "heatbrain switches your radiators' plugs on and off from the price of electricity, the temperature in each room and the program you set. Everything here is also available as '?' next to the settings.");
   const toc = el("nav", { class: "toc" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "sensors", "prices", "meter", "away", "wifiOff", "notifications", "phone", "costs", "transfer"];
+                 "thermostats", "sensors", "prices", "meter", "away", "wifiOff", "notifications", "phone", "costs", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, card);
     el("h3", {}, sec, HELP[key].title);

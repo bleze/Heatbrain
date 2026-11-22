@@ -70,6 +70,8 @@ struct WebContext {
 //   GET    /api/meter/status                household meter (Eloverblik): points, last reading, error
 //   POST   /api/meter/sync                  fetch meter readings now
 //   GET    /api/usage?days=N                measured household use vs. heatbrain's radiators
+//   GET    /api/devi                        paired DEVIreg Smart thermostats and their state
+//   POST   /api/devi/pair                   {"code": "<from the DEVI app>"}: pair, list thermostats
 //   POST   /api/export?history=1            everything needed to move heatbrain, as one JSON file
 //   POST   /api/import                      that file: validate, back up, replace, reload
 //   GET    /api/plugs                       live status + fail-safe check of configured plugs

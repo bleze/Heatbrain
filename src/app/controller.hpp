@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include "app/rooms.hpp"
+#include "app/thermostats.hpp"
 #include "core/alerts.hpp"
 #include "core/offline.hpp"
 #include "core/planner.hpp"
@@ -55,6 +56,7 @@ public:
     }
     void setAwayStore(const AwayStore* away) { away_ = away; }
     void setOutdoorSensor(std::string ref) { outdoorSensor_ = std::move(ref); }
+    void setThermostats(std::vector<ThermostatConfig> t) { thermostats_ = std::move(t); }
     // The outdoor reading used in the last tick, if any.
     struct OutdoorUsed {
         std::string key;   // "<source>:<sensor id>" as stored in the history
@@ -87,6 +89,8 @@ private:
     void readSensors(TickResult& result);
     const SensorReading* findSensor(const std::string& ref) const;
     nlohmann::json applyToPlugs(const RoomConfig& room, bool on, Instant now, TickResult& result);
+    nlohmann::json applyToThermostat(const RoomConfig& room, const Decision& d, TickResult& result);
+    std::vector<ThermostatConfig> thermostats_;
     // Empty when the plug may be switched live; otherwise why not.
     std::string failsafeProblem(Plug& plug, Instant now);
     void armOffline(const OfflinePeriod& period, Instant now, std::optional<AwayMode> away);

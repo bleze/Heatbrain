@@ -1,6 +1,7 @@
 #include "app/config_service.hpp"
 
 #include "app/meter_sync.hpp"
+#include "app/thermostats.hpp"
 
 #include <algorithm>
 #include <format>
@@ -138,6 +139,7 @@ std::vector<std::string> validateConfig(const json& cfg, const fs::path& dataDir
     check("Rooms", [&] { parseRooms(cfg, plugs); });
     check("Wi-Fi off period", [&] { parseWifiOff(cfg); });
     check("Meter", [&] { parseMeterConfig(cfg); });
+    check("Thermostats", [&] { parseThermostats(cfg); });
     check("Temperature sources", [&] { loadTemperatureSources(cfg, offline, dataDir, [] { return Instant{}; }); });
     check("Notifications", [&] { loadNotifications(cfg, offline); });
     check("Web", [&] {

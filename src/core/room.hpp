@@ -56,6 +56,7 @@ struct RoomConfig {
     std::string id;
     std::string name;
     std::vector<std::string> plugIds;
+    std::string thermostat;         // thermostat id instead of plugs (heatbrain sets its setpoint)
     std::string sensor;             // "<source>:<sensor id or name>", empty for price-only
     double minTemp = 15.0;          // in heat periods: heat below this whatever the price
     double maxTemp = 23.0;          // never heat above this

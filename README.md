@@ -241,3 +241,10 @@ From a terminal:
 
 Debug builds keep their data in `./data` (git-ignored): `heatbrain.json` is created from
 `config/heatbrain.example.json` on first run, and API responses are cached in `data/cache`.
+
+## License
+
+heatbrain is free software under the **GNU General Public License v3.0** (see `LICENSE`).
+It includes [OpenSDG](https://github.com/Sonic-Amiga/opensdg) (GPL-3.0, `third_party/opensdg`)
+to talk to Danfoss DEVIreg Smart thermostats over Trifork's SecureDeviceGrid, a proprietary
+protocol; that support is meant for controlling your own thermostats, not for commercial use.

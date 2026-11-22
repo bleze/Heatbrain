@@ -63,8 +63,13 @@ RoomConfig parseRoom(const json& rj) {
     RoomConfig r;
     r.id = rj.at("id").get<std::string>();
     r.name = rj.value("name", r.id);
-    r.plugIds = rj.at("plugs").get<std::vector<std::string>>();
-    if (r.plugIds.empty()) throw std::runtime_error("'plugs' is empty");
+    r.thermostat = rj.value("thermostat", std::string());
+    if (r.thermostat.empty()) {
+        r.plugIds = rj.at("plugs").get<std::vector<std::string>>();
+        if (r.plugIds.empty()) throw std::runtime_error("'plugs' is empty");
+    } else if (rj.contains("priceOnly")) {
+        throw std::runtime_error("a thermostat room needs a temperature, not 'priceOnly'");
+    }
     r.sensor = rj.value("sensor", std::string());
     r.minTemp = rj.value("minTemp", r.minTemp);
     r.maxTemp = rj.value("maxTemp", r.maxTemp);
@@ -181,6 +186,11 @@ std::vector<RoomConfig> parseRooms(const json& cfg, const std::vector<Plug>& plu
             throw std::runtime_error("Room " + id + ": " + e.what());
         }
         if (!roomIds.insert(r.id).second) throw std::runtime_error("Duplicate room id: " + r.id);
+        if (!r.thermostat.empty()) {
+            bool known = false;
+            for (const auto& t : cfg.value("thermostats", json::array())) known |= t.value("id", "") == r.thermostat;
+            if (!known) throw std::runtime_error("Room " + r.id + ": unknown thermostat '" + r.thermostat + "'");
+        }
         for (const auto& p : r.plugIds) {
             if (std::ranges::none_of(plugs, [&](const Plug& pl) { return pl.id == p; })) {
                 throw std::runtime_error("Room " + r.id + ": unknown plug '" + p + "'");

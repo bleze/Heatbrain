@@ -510,7 +510,11 @@ let renderRooms = function () {
     const plugs = el("div", { class: "plugs" }, foot);
     for (const p of r.plugs || []) {
       let text = null, cls = "", ic = "plug";
-      if (p.error) { text = `${p.id} · ${p.error}`; cls = "error"; ic = "alert"; }
+      if (p.thermostat && !p.error) {
+        // A thermostat: always worth showing what it is (or would be) set to.
+        text = `${p.id} · ${p.mode === "live" ? "set to" : "would set"} ${Number(p.setpoint).toFixed(1)}°${p.floor != null ? ` · floor ${p.floor.toFixed(1)}°` : ""}`;
+        ic = "thermo"; cls = p.mode === "live" ? "" : "dryrun";
+      } else if (p.error) { text = `${p.id} · ${p.error}`; cls = "error"; ic = "alert"; }
       else if (p.schedule) { text = `${p.id} · night schedule`; ic = "wifi"; }
       else if (p.mode !== "live") { text = `${p.id} · dry-run`; cls = "dryrun"; }
       if (!text) continue;

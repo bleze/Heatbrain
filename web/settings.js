@@ -320,11 +320,24 @@
     btn(seg, "Price only", "bolt", () => setMode(true)).classList.toggle("active", !!room.priceOnly);
     confirmBtn(right, "", "trash", "Delete room?", () => { S.cfg.rooms.splice(idx, 1); changed(); render(); }, "ghost danger");
 
-    // Plugs
+    // Plugs, or a thermostat (then heatbrain sets its setpoint instead of switching)
     const plugsRow = el("div", { class: "row", style: "margin-top:12px" }, c);
-    el("span", { class: "muted" }, plugsRow, "Plugs:");
-    const plugs = S.cfg.plugs || [];
-    if (!plugs.length) el("span", { class: "hint" }, plugsRow, "add plugs on the Plugs tab first");
+    el("span", { class: "muted" }, plugsRow, room.thermostat ? "Thermostat:" : "Plugs:");
+    const plugs = room.thermostat ? [] : S.cfg.plugs || [];
+    if (!room.thermostat && !plugs.length && !(S.cfg.thermostats || []).length) el("span", { class: "hint" }, plugsRow, "add plugs (or a thermostat) on the Plugs tab first");
+    for (const t of S.cfg.thermostats || []) {
+      const on = room.thermostat === t.id;
+      if (!on && room.plugs?.length) continue;  // plugs chosen: no thermostat pills
+      const pill = el("button", { type: "button", class: `pick${on ? " on" : ""}`, "aria-pressed": on }, plugsRow);
+      pill.appendChild(icon(on ? "check" : "thermo"));
+      pill.appendChild(document.createTextNode(t.name || t.id));
+      pill.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (on) delete room.thermostat;
+        else { room.thermostat = t.id; delete room.plugs; delete room.priceOnly; if (!room.sensor) room.sensor = `devi:${t.id}`; }
+        changed(); render();
+      });
+    }
     for (const p of plugs) {
       // Pick several from a list: selectable pills (on/off settings use switches).
       const on = (room.plugs || []).includes(p.id);
@@ -556,6 +569,88 @@
     if (plugs.length && S.plugStatus === null && !plugStatusLoading) { refreshPlugStatus(); refreshJobs(); }
     const list = el("div", { class: "list" }, card);
     plugs.forEach((p, idx) => renderPlug(list, p, idx));
+    renderThermostats(body);
+  }
+
+  // --- Thermostats (DEVIreg Smart): pairing, and which of them heatbrain controls -------
+  async function loadDevi(force = false) {
+    if (!force && S.devi && Date.now() - S.devi.at < 20_000) return;
+    try { S.devi = { at: Date.now(), ...(await api("/api/devi")) }; render(); } catch { /* optional */ }
+  }
+  function renderThermostats(body) {
+    loadDevi();
+    const d = S.devi || {};
+    const card = el("section", { class: "card" }, body);
+    sectionHead(card, "Thermostats", "thermo", "violet",
+      "DEVIreg Smart floor heating: heatbrain sets the thermostat's temperature by price and program, and it regulates by itself.", "thermostats");
+    const list = el("div", { class: "list" }, card);
+    const cfgT = arr(S.cfg, "thermostats");
+    for (const room of d.rooms || []) {
+      const t = cfgT.find((x) => x.peerId === room.peerId);
+      const c = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, list);
+      const head = el("div", { class: "item-head" }, c);
+      const left = el("div", { class: "row" }, head);
+      left.appendChild(badge("thermo", room.heating ? "warm" : "gray"));
+      el("b", {}, left, t ? t.name || t.id : room.name);
+      el("span", { class: "muted" }, left, d.houseName ? `DEVI · ${d.houseName}` : "DEVI");
+      const right = el("div", { class: "row" }, head);
+      if (t) {
+        const seg = el("div", { class: "segmented mode-seg", role: "radiogroup", "aria-label": "Thermostat mode" }, right);
+        for (const [value, label, tip] of [["dryrun", "Dry-run", "heatbrain decides and logs, but does not change the thermostat"],
+                                           ["live", "Live", "heatbrain sets the thermostat's temperature (manual mode)"]]) {
+          const b = btn(seg, label, value === "live" ? "bolt" : null, () => { t.mode = value; changed(); render(); });
+          b.title = tip;
+          b.classList.toggle("active", (t.mode || "dryrun") === value);
+          if (value === "live") b.classList.add("live");
+        }
+        confirmBtn(right, "", "trash", "Stop using this thermostat?", () => {
+          cfgT.splice(cfgT.indexOf(t), 1);
+          for (const r of S.cfg.rooms || []) if (r.thermostat === t.id) delete r.thermostat;
+          changed(); render();
+        }, "ghost danger");
+      } else {
+        btn(right, "Use in heatbrain", "plus", () => {
+          cfgT.push({ id: slug(room.name, new Set(cfgT.map((x) => x.id))), type: "devi", name: room.name, peerId: room.peerId, mode: "dryrun" });
+          changed(); render();
+        }, "primary");
+      }
+      const chips = el("div", { class: "plugs", style: "margin-top:10px" }, c);
+      const chip = (cls, iconName, text) => { const ch = el("span", { class: `chip ${cls}` }, chips); ch.appendChild(icon(iconName)); ch.appendChild(document.createTextNode(text)); };
+      if (room.error) chip("error", "alert", room.error);
+      else if (!room.connected) chip("", "clock", "connecting…");
+      else {
+        chip("ok", "wifi", "connected");
+        if (room.roomTemp != null) chip("", "thermo", `room ${room.roomTemp.toFixed(1)}°`);
+        if (room.floorTemp != null) chip("", "thermo", `floor ${room.floorTemp.toFixed(1)}°`);
+        if (room.mode) chip(room.mode === "manual" ? "ok" : "warn", "gauge", room.mode);
+        if (room.manualSetpoint != null) chip("", "flame", `set to ${room.manualSetpoint.toFixed(1)}°`);
+        if (room.heating != null) chip(room.heating ? "warn" : "", "power", room.heating ? "heating" : "not heating");
+      }
+      if (t) {
+        const g = el("div", { class: "form-grid" }, c);
+        field(g, "Name", txt(t, "name", { placeholder: room.name }));
+        field(g, "Heating power", num(t, "watts", { step: 50, min: 0, placeholder: "1200", unit: "W" }), { hint: "for cost estimates" });
+        el("div", { class: "hint", style: "margin-top:6px" }, c, "Choose it as the room's device on the Rooms tab. In Live, heatbrain switches the thermostat to manual mode, so its own schedule no longer applies.");
+      }
+    }
+    // Pairing
+    const pair = d.paired ? section(card, "devi-pair") : el("div", { style: "margin-top:12px" }, card);
+    if (d.paired) el("summary", {}, pair, "Pair again (e.g. after adding a thermostat in the DEVI app)");
+    const ol = el("ol", { class: "phone-steps" }, pair);
+    el("li", {}, ol, "In the DEVI Smart app: Settings → Share house → create a one-time code. (If the iPhone app says it couldn't send the configuration, try the Android app.)");
+    el("li", {}, ol, "Type the code here and press Pair, while the app stays open.");
+    const row = el("div", { class: "row", style: "margin-top:8px" }, pair);
+    const code = el("input", { type: "text", inputmode: "numeric", placeholder: "one-time code", style: "width:180px", autocomplete: "off" }, row);
+    btn(row, "Pair", "check", async (b) => {
+      b.disabled = true; b.lastChild.textContent = "Pairing… (up to a minute)";
+      try {
+        const r = await api("/api/devi/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code.value }) });
+        toast(`Paired with ${r.houseName || "your house"}: ${r.rooms.length} thermostat(s)`);
+        await loadDevi(true);
+      } catch (e) { toast(e.message, true); }
+      b.disabled = false; b.lastChild.textContent = "Pair";
+    }, "primary");
+    if (d.error) el("div", { class: "hint", style: "color:var(--critical)" }, card, d.error);
   }
 
   // Job log: full while running; afterwards one summary line with the log behind "Show log".

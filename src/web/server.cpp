@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <set>
 #include <format>
 #include <fstream>
 #include <future>
@@ -22,6 +23,7 @@
 #include "storage/history.hpp"
 #include "app/transfer.hpp"
 #include "app/meter_sync.hpp"
+#include "app/thermostats.hpp"
 #include "core/offline.hpp"
 
 namespace hb {
@@ -384,6 +386,60 @@ void WebServer::routes() {
         out["from"] = epoch(from);
         out["to"] = epoch(to);
         sendJson(res, out);
+    });
+
+    // DEVIreg Smart thermostats: what is paired and how they are doing, and pairing itself.
+    s.Get("/api/devi", [this](const httplib::Request&, httplib::Response& res) {
+        DeviRegistry::instance().setDataDir(ctx_.dataDir);
+        json out{{"paired", false}, {"rooms", json::array()}};
+        try {
+            const auto id = DeviRegistry::instance().identity();
+            if (!id || id->rooms.empty()) return sendJson(res, out);
+            std::set<std::string> configured;
+            for (const auto& t : readConfigFile(ctx_.configFile).value("thermostats", json::array())) {
+                configured.insert(t.value("peerId", ""));
+            }
+            out["paired"] = true;
+            out["houseName"] = id->houseName;
+            for (const auto& r : id->rooms) {
+                json room{{"name", r.name}, {"peerId", r.peerId}, {"configured", configured.contains(r.peerId)}};
+                try {
+                    auto th = DeviRegistry::instance().get(r.peerId);
+                    if (!th->state().updated) th->refresh();  // first look: connect and ask
+                    const DeviState st = th->state();
+                    room["connected"] = st.connected;
+                    if (!st.error.empty()) room["error"] = st.error;
+                    if (st.roomTemp) room["roomTemp"] = *st.roomTemp;
+                    if (st.floorTemp) room["floorTemp"] = *st.floorTemp;
+                    if (st.manualSetpoint) room["manualSetpoint"] = *st.manualSetpoint;
+                    if (st.controlState) room["mode"] = dominion::controlStateName(*st.controlState);
+                    if (st.heating) room["heating"] = *st.heating;
+                } catch (const std::exception& e) {
+                    room["connected"] = false;
+                    room["error"] = e.what();
+                }
+                out["rooms"].push_back(room);
+            }
+        } catch (const std::exception& e) {
+            out["error"] = e.what();
+        }
+        sendJson(res, out);
+    });
+    s.Post("/api/devi/pair", [this](const httplib::Request& req, httplib::Response& res) {
+        const json body = parseBody(req);
+        try {
+            const auto id = deviPair(ctx_.dataDir, body.value("code", ""), body.value("phoneName", "heatbrain"));
+            DeviRegistry::instance().setDataDir(ctx_.dataDir);
+            DeviRegistry::instance().reload();
+            json rooms = json::array();
+            for (const auto& r : id.rooms) rooms.push_back({{"name", r.name}, {"peerId", r.peerId}});
+            sendJson(res, json{{"paired", true}, {"houseName", id.houseName}, {"rooms", rooms}});
+        } catch (const std::invalid_argument& e) {
+            sendError(res, 400, e.what());
+        } catch (const std::exception& e) {
+            log::warn("DEVI pairing failed: {}", e.what());
+            sendError(res, 502, e.what());
+        }
     });
 
     s.Post("/api/config/validate", [this](const httplib::Request& req, httplib::Response& res) {

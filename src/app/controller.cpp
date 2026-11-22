@@ -30,6 +30,7 @@ void add(TickResult& r, std::string key, Severity sev, std::string msg, minutes 
 bool expectedWhileOffline(const std::string& key) {
     const auto endsWith = [&](std::string_view suffix) { return key.ends_with(suffix); };
     return (key.starts_with("plug:") && (endsWith(":unreachable") || endsWith(":mismatch") || endsWith(":failsafe"))) ||
+           (key.starts_with("thermostat:") && endsWith(":unreachable")) ||
            (key.starts_with("sensor:") && endsWith(":offline")) ||
            (key.starts_with("room:") && (endsWith(":limp") || endsWith(":not-warming")));
 }
@@ -248,6 +249,38 @@ json Controller::applyToPlugs(const RoomConfig& room, bool on, Instant now, Tick
     return out;
 }
 
+// A thermostat room: work out the setpoint and, for a live thermostat, make sure it is in manual
+// mode with that setpoint (written only when it differs - the thermostat keeps it by itself).
+json Controller::applyToThermostat(const RoomConfig& room, const Decision& d, TickResult& result) {
+    json out = json::array();
+    const auto t = std::ranges::find_if(thermostats_, [&](const ThermostatConfig& c) { return c.id == room.thermostat; });
+    if (t == thermostats_.end()) return out;
+    const double sp = thermostatSetpoint(room, d);
+    json tj{{"id", t->id}, {"thermostat", true}, {"mode", t->live ? "live" : "dryrun"}, {"setpoint", sp}};
+    try {
+        auto th = DeviRegistry::instance().get(t->peerId);
+        const DeviState s = th->state();  // refreshed by the DEVI temperature source this step
+        if (s.heating) tj["state"] = *s.heating;
+        if (s.manualSetpoint) tj["deviSetpoint"] = *s.manualSetpoint;
+        if (s.controlState) tj["deviMode"] = dominion::controlStateName(*s.controlState);
+        if (s.floorTemp) tj["floor"] = *s.floorTemp;
+        if (s.windowOpen && *s.windowOpen) tj["windowOpen"] = true;
+        if (t->live) {
+            const bool manual = s.controlState && *s.controlState == dominion::ControlState::Manual;
+            if (!manual || !s.manualSetpoint || std::abs(*s.manualSetpoint - sp) > 0.05) {
+                th->setManualSetpoint(sp);
+                tj["written"] = true;
+            }
+        }
+    } catch (const std::exception& e) {
+        tj["error"] = e.what();
+        add(result, "thermostat:" + t->id + ":unreachable", Severity::Warning,
+            std::format("Thermostat '{}': {}", t->name, e.what()), minutes{15});
+    }
+    out.push_back(std::move(tj));
+    return out;
+}
+
 TickResult Controller::tick(Instant now, bool apply) {
     TickResult result;
     try {
@@ -361,7 +394,8 @@ TickResult Controller::tick(Instant now, bool apply) {
         }
 
         if (apply) {
-            rr.plugs = applyToPlugs(room, rr.decision.on, now, result);
+            rr.plugs = room.thermostat.empty() ? applyToPlugs(room, rr.decision.on, now, result)
+                                               : applyToThermostat(room, rr.decision, result);
             lastOn_[room.id] = rr.decision.on;
             if (history_) {
                 history_->recordDecision({now, room.id, rr.decision.on, rr.changed,
