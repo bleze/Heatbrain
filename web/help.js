@@ -125,6 +125,13 @@ const HELP = {
       "A plug whose clock is not synchronised, or whose rule slots 2 and 3 hold your own rules, gets no schedule - you are told, and it runs limp mode for the night.",
     ],
   },
+  meter: {
+    title: "Your meter (Eloverblik)",
+    body: [
+      "Eloverblik (Energinet's DataHub) has your electricity meter's readings, whatever your supplier. Log in on eloverblik.dk with MitID, go to Data sharing and create a token, then paste it here and save. heatbrain fetches the readings every 6 hours (or with 'Fetch now'); they arrive about a day late, so the dashboard shows the past, not today.",
+      "The dashboard's 'Electricity use' card shows the household's measured use per quarter or hour, with the part heatbrain's radiators drew in the same intervals (live plugs that were on × their power) at the bottom. If the radiators ever look bigger than the measured total, a radiator's power is probably set too high under Settings → Plugs.",
+    ],
+  },
   transfer: {
     title: "Moving heatbrain (export and import)",
     body: [
@@ -226,7 +233,7 @@ function renderManual(host) {
     "heatbrain switches your radiators' plugs on and off from the price of electricity, the temperature in each room and the program you set. Everything here is also available as '?' next to the settings.");
   const toc = el("nav", { class: "toc" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "sensors", "prices", "away", "wifiOff", "notifications", "costs", "transfer"];
+                 "sensors", "prices", "meter", "away", "wifiOff", "notifications", "costs", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, card);
     el("h3", {}, sec, HELP[key].title);

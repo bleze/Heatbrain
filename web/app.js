@@ -850,6 +850,7 @@ async function refreshStatus() {
     renderRooms();
     renderPriceChart();
     window.Costs?.load();
+    window.Usage?.load();
     if (state.selected) {
       if (!state.history) await loadHistory();
     } else if (s.rooms.length) {
@@ -870,7 +871,7 @@ document.querySelectorAll(".range button").forEach((b) =>
 let resizeTimer;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { if (state.status) renderPriceChart(); window.Costs?.render(); if (state.history) renderDetail(); }, 150);
+  resizeTimer = setTimeout(() => { if (state.status) renderPriceChart(); window.Costs?.render(); window.Usage?.render(); if (state.history) renderDetail(); }, 150);
 });
 
 // ---------------------------------------------------------------------------------------
@@ -884,7 +885,7 @@ function route() {
   if (view === "help" && typeof renderManual === "function" && !$("view-help").childElementCount) renderManual($("view-help"));
   document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === view));
   if (view === "settings" && window.Settings) window.Settings.open();
-  if (view === "dashboard" && state.status) { renderPriceChart(); window.Costs?.render(); if (state.history) renderDetail(); }
+  if (view === "dashboard" && state.status) { renderPriceChart(); window.Costs?.render(); window.Usage?.render(); if (state.history) renderDetail(); }
 }
 window.addEventListener("hashchange", route);
 

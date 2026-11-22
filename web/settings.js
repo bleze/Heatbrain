@@ -811,6 +811,57 @@
     ["schedule", "Time-of-day schedule"],
   ];
 
+  // Household meter (Eloverblik): measured use, a day behind, shown next to the radiators.
+  async function loadMeterStatus(force = false) {
+    if (!force && S.meterStatus && Date.now() - S.meterStatus.at < 60_000) return;
+    try { S.meterStatus = { at: Date.now(), ...(await api("/api/meter/status")) }; render(); } catch { /* optional */ }
+  }
+  function renderMeter(body) {
+    loadMeterStatus();
+    const st = S.meterStatus || {};
+    const card = el("section", { class: "card" }, body);
+    sectionHead(card, "Your meter (Eloverblik)", "gauge", "amber",
+      "Measured use from your electricity meter, about a day behind - shown on the dashboard next to what the radiators drew.", "meter");
+    const g = el("div", { class: "form-row" }, card);
+    // The section only exists in the config once a token is entered.
+    const m = S.cfg.meter || {};
+    const tf = el("div", { class: "field span2" }, g);
+    el("span", {}, tf, "Token from eloverblik.dk");
+    const ti = el("input", { type: "password", placeholder: "paste the token (Data sharing → Create token)", value: m.refreshToken || "" }, tf);
+    ti.addEventListener("focus", () => { if (ti.value === MASK) ti.select(); });
+    ti.addEventListener("input", () => {
+      if (ti.value) S.cfg.meter = { type: "eloverblik", ...(S.cfg.meter || {}), refreshToken: ti.value };
+      else delete S.cfg.meter;
+      changed();
+    });
+    el("div", { class: "hint" }, tf, "stored on this heatbrain only, shown as ********");
+    const points = st.points || [];
+    if (points.length > 1) {
+      field(g, "Meter", sel(S.cfg.meter ||= { type: "eloverblik" }, "meteringPoint",
+        [["", "First consumption meter"], ...points.map((p) => [p.id, `${p.address || p.id} (${p.type})`])]), { wide: true });
+    }
+    const line = el("div", { class: `meter-status${st.error ? " error" : ""}` }, card);
+    if (!st.configured) {
+      line.textContent = "Not connected. Enter a token and save.";
+    } else if (st.error) {
+      line.textContent = `Problem: ${st.error}`;
+    } else if (st.lastReading) {
+      line.textContent = `Connected to ${st.address || st.meteringPoint}${st.supplier ? ` (${st.supplier})` : ""} · data until ${dayHm(st.lastReading)} · ${st.resolutionMinutes}-minute values · checked ${dayHm(st.lastSync)}`;
+    } else {
+      line.textContent = "Connected - fetching the first readings…";
+    }
+    if (st.configured) {
+      const row = el("div", { class: "row", style: "margin-top:8px" }, card);
+      btn(row, "Fetch now", "wifi", async (b) => {
+        b.disabled = true; b.lastChild.textContent = "Fetching…";
+        try { await api("/api/meter/sync", { method: "POST" }); } catch (e) { toast(e.message, true); }
+        // The fetch runs in the background; look again shortly.
+        setTimeout(() => loadMeterStatus(true), 6000);
+        setTimeout(() => loadMeterStatus(true), 20000);
+      }, "ghost");
+    }
+  }
+
   function renderPrices(body) {
     const price = (S.cfg.price ||= { components: [] });
     const card = el("section", { class: "card" }, body);
@@ -875,6 +926,7 @@
       btn(r, "", "trash", () => { surcharges.splice(i, 1); changed(); render(); }, "ghost danger row-delete");
     });
     btn(el("div", { style: "margin-top:8px" }, sc), "Add surcharge", "plus", () => { surcharges.push({ name: "Moms", percent: 25 }); changed(); render(); });
+    renderMeter(body);
   }
 
   // --- Notifications ------------------------------------------------------------------

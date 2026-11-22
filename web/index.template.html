@@ -120,6 +120,20 @@
       </div>
       <div class="hint" id="cost-note"></div>
     </section>
+
+    <section class="card" id="usage" hidden>
+      <div class="card-head">
+        <h2><span class="badge badge-amber"><svg class="icon"><use href="#i-bolt"/></svg></span>Electricity use <span class="muted" style="font-weight:400;font-size:13px">from your meter</span><span id="usage-help"></span></h2>
+        <div class="range" role="group" aria-label="Usage period" id="usage-range">
+          <button data-days="2">2 days</button>
+          <button data-days="7" class="active">7 days</button>
+          <button data-days="30">30 days</button>
+        </div>
+      </div>
+      <div class="tiles" id="usage-tiles"></div>
+      <div class="legend"><span><i class="swatch" style="background:var(--flame-1)"></i>Radiators (heatbrain, estimated)</span><span><i class="swatch" style="background:var(--ink-2);opacity:.45"></i>Everything else (measured − radiators)</span></div>
+      <div class="chart" id="usage-chart"></div>
+    </section>
   </main>
 
   <main id="view-settings" hidden>
@@ -139,6 +153,7 @@
   <script src="app.js"></script>
   <script src="settings.js"></script>
   <script src="costs.js"></script>
+  <script src="usage.js"></script>
   <script src="help.js"></script>
 </body>
 </html>

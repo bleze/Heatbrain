@@ -227,6 +227,11 @@ button.ghost:hover { background: color-mix(in srgb, var(--ink) 9%, transparent);
 .wifi-seen table { max-width: 520px; }
 .wifi-seen .seen-ok { color: var(--good); }
 .wifi-seen .seen-warn { color: #c48a00; font-weight: 600; }
+/* Electricity use: radiators (warm) under the rest of the household (neutral) */
+.chart .use-heat { fill: var(--flame-1); }
+.chart .use-rest { fill: var(--ink-2); opacity: 0.45; }
+.meter-status { margin-top: 10px; font-size: 13px; }
+.meter-status.error { color: var(--critical); }
 /* Export / import */
 .transfer { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
 .transfer > div { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface); }
