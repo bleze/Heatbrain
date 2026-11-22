@@ -17,7 +17,7 @@ async function loadStatus() {
       req.timeoutInterval = 6;
       const s = await req.loadJSON();
       fm.writeString(cacheFile, JSON.stringify(s));
-      BASE = base;  // tapping the widget opens the address that answered
+      BASE = base;
       return { s, live: true };
     } catch (e) { /* try the next address */ }
   }
@@ -52,12 +52,30 @@ function addText(stack, text, size, color, bold = false) {
   return t;
 }
 
+// A tap runs this script with ?open=1: pick the address that answers now (home or Tailscale)
+// and open it in Safari. (The widget's own link would be whatever answered at its last refresh.)
+async function openReachable() {
+  for (const base of BASES) {
+    try {
+      const req = new Request(`${base}/api/status`);
+      req.timeoutInterval = 3;
+      await req.load();
+      if (req.response && req.response.statusCode === 200) { Safari.open(base); return; }
+    } catch (e) { /* next */ }
+  }
+  const a = new Alert();
+  a.title = "heatbrain is not reachable";
+  a.message = BASES.length > 1 ? "Check the Wi-Fi, or that Tailscale is on." : "Connect to your home Wi-Fi.";
+  a.addAction("OK");
+  await a.present();
+}
+
 async function build() {
   const { s, live } = await loadStatus();
   const w = new ListWidget();
   w.backgroundColor = C.bg;
   w.setPadding(12, 14, 12, 14);
-  w.url = BASE;
+  w.url = `${URLScheme.forRunningScript()}?open=1`;
   w.refreshAfterDate = new Date(Date.now() + 10 * 60 * 1000);
   const family = config.widgetFamily || "medium";
 
@@ -109,7 +127,11 @@ async function build() {
   return w;
 }
 
-const widget = await build();
-if (config.runsInWidget) Script.setWidget(widget);
-else await widget.presentMedium();
+if (!config.runsInWidget && args.queryParameters && args.queryParameters.open) {
+  await openReachable();  // tapped on the home screen
+} else {
+  const widget = await build();
+  if (config.runsInWidget) Script.setWidget(widget);
+  else await widget.presentMedium();
+}
 Script.complete();
