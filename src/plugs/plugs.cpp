@@ -119,7 +119,7 @@ fs::path originalBackup(const fs::path& dataDir, const Plug& plug) {
 bool backupHasFailsafe(const json& backup) {
     // Both variants of heatbrain's watchdog rule start with this (see tasmotaFailsafeRule).
     const std::string rules = backup.contains("rule1") ? backup["rule1"].value("rules", "") : "";
-    return rules.find("ON System#Boot DO RuleTimer1 ") != std::string::npos;
+    return isHeatbrainFailsafeRule(rules) || rules.find("ON System#Boot DO RuleTimer1 ") != std::string::npos;
 }
 
 std::optional<FirmwareRecord> loadFirmwareRecord(const fs::path& dataDir, const std::string& plugId) {

@@ -27,5 +27,7 @@ int tasmotaPulseTime(std::chrono::seconds d);
 
 // Rule1 text implementing the watchdog + limp mode.
 std::string tasmotaFailsafeRule(const FailsafeConfig& cfg);
+// True for any rule tasmotaFailsafeRule writes, whatever its timings (both limp variants).
+bool isHeatbrainFailsafeRule(const std::string& rules);
 
 }  // namespace hb

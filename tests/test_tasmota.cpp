@@ -308,3 +308,19 @@ TEST_CASE("Wi-Fi off: refused when the plug's clock is wrong or its rule slots h
         CHECK(f.device.extraRules["Rule2"] == "ON Button1#State DO Power1 2 ENDON");
     }
 }
+
+TEST_CASE("Reinstalling the fail-safe replaces an earlier heatbrain rule, not someone else's") {
+    Fixture f;
+    f.sw.provision(false);  // limp 10 / 50
+    const std::string old = f.device.rules;
+    CHECK(isHeatbrainFailsafeRule(old));
+    FailsafeConfig quiet;
+    quiet.limpOn = std::chrono::minutes{0};  // "stay off"
+    TasmotaSwitch again{f.http, "192.168.1.38", "", quiet};
+    again.provision(false);
+    CHECK(f.device.rules == tasmotaFailsafeRule(quiet));
+    CHECK(isHeatbrainFailsafeRule(f.device.rules));
+
+    f.device.rules = "ON Button1#State DO Power1 2 ENDON";
+    CHECK_THROWS_WITH(again.provision(false), Catch::Matchers::ContainsSubstring("not heatbrain's"));
+}

@@ -58,6 +58,7 @@ fi
 if [ "$running" != none ]; then
     echo "stopping heatbrain (up to 60 s)..."
     $DC stop -t 60 heatbrain || fail "stop failed"
+    echo "old version exited with code $(docker inspect --format '{{.State.ExitCode}}' heatbrain 2>/dev/null || echo '?') (0 = clean stop)"
 fi
 echo "starting the new version..."
 $DC up -d heatbrain || fail "start failed"

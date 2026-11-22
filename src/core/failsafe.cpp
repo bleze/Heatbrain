@@ -1,5 +1,7 @@
 #include "core/failsafe.hpp"
 
+#include <regex>
+
 #include <format>
 #include <stdexcept>
 
@@ -28,6 +30,13 @@ int tasmotaPulseTime(seconds d) {
     if (d <= seconds{11}) return static_cast<int>(d.count() * 10);
     const auto v = d.count() + 100;
     return static_cast<int>(v > 64900 ? 64900 : v);
+}
+
+bool isHeatbrainFailsafeRule(const std::string& rules) {
+    static const std::regex ours(
+        R"(^ON System#Boot DO RuleTimer1 \d+ ENDON ON Rules#Timer=1 DO (Power1 Off|Backlog Power1 On; RuleTimer2 \d+) ENDON)"
+        R"(( ON Rules#Timer=2 DO Backlog Power1 Off; RuleTimer1 \d+ ENDON)?$)");
+    return std::regex_match(rules, ours);
 }
 
 std::string tasmotaFailsafeRule(const FailsafeConfig& cfg) {

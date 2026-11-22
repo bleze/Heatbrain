@@ -138,9 +138,12 @@ json TasmotaSwitch::backup() {
 void TasmotaSwitch::provision(bool overwriteRules) {
     const std::string ours = tasmotaFailsafeRule(failsafe_);
     const std::string existing = command("Rule1").at("Rule1").value("Rules", "");
-    if (!existing.empty() && existing != ours && !overwriteRules) {
-        throw std::runtime_error(host_ + ": Rule1 is already in use: \"" + existing +
-                                 "\". Re-run with --force to replace it (a backup is kept).");
+    // An earlier heatbrain fail-safe (other timings) is simply replaced; only someone else's rule
+    // is protected.
+    if (!existing.empty() && existing != ours && !isHeatbrainFailsafeRule(existing) && !overwriteRules) {
+        throw std::runtime_error(host_ + ": Rule1 holds a rule that is not heatbrain's: \"" + existing +
+                                 "\". Remove it in the plug's console (Rule1 \"), or replace it with "
+                                 "'heatbrain plug <id> provision --force' (a backup is kept).");
     }
     command("Timers 0");
     command("PowerOnState 0");
