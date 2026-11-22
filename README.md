@@ -1,29 +1,102 @@
 # heatbrain
 
-Price- and temperature-aware heating control for Tasmota smart plugs.
+**Electric heating that follows the electricity price, not just the thermostat.**
 
-heatbrain fetches electricity prices (spot + grid tariffs + taxes) and room temperatures,
-decides per room when the radiators should run, and switches Tasmota plugs accordingly.
-It runs as a single C++ process with a web UI, in Docker on a NAS or locally while developing.
+heatbrain decides, room by room, when the heaters should run. It uses the price of each
+15-minute slot, the temperature in every room, the weather ahead and what it has learned about
+how fast each room warms and cools. It then switches Tasmota smart plugs, or sets the setpoint
+of DEVIreg Smart floor thermostats. It runs as one small C++ program with a web UI, in Docker on
+a NAS or on a PC.
 
-## Status
+![Dashboard: a card per room with its temperature, what it is doing and why, and the plan for the next 24 hours](docs/images/dashboard.png)
 
-| Milestone | State |
-|---|---|
-| 1. Price model (configurable providers) + `prices` command | done |
-| 2. Tasmota plugs + on-plug fail-safe (`discover`, `plugs`, `plug`) | done |
-| 3. Netatmo temperatures (OAuth, rotating tokens) + `temps` | done |
-| 4. Planner + scheduler loop + history (`plan`, `run`, `history`, `override`) | done |
-| 5. Notifications (ntfy, Discord) + web UI with settings, help, costs | done |
-| 6. Docker image + GitHub Actions, deploy to Synology | next |
+## What it does
+
+- **Heats when it's cheap, coasts when it's dear.** Every 5 minutes each room is decided from
+  its daily program and the prices for the next 24 hours. heatbrain pre-heats before expensive
+  hours, lets the room cool a little during them and stores extra heat in the cheapest hours.
+  On days with flat prices it is a plain thermostat.
+- **Learns each room.** From its own history heatbrain learns how fast a room cools towards
+  the outdoor temperature and how fast it warms when heated. Pre-heating is then calculated:
+  just enough to coast through the whole expensive stretch, and started as late as possible,
+  because stored heat leaks away. On a mild evening that can mean no pre-heating at all.
+- **Looks at the weather ahead.** An hourly forecast from Open-Meteo (free, no account),
+  corrected to your own outdoor sensor, sizes the pre-heating for the weather *during* the
+  expensive hours.
+- **Bookings.** "The pizzeria at 22° on Saturday 16-23": heatbrain works out when to start
+  heating, from the room's current temperature, the forecast and what it has learned. That can
+  be a day ahead for a concrete floor. Afterwards the room goes back to its program.
+- **Away mode, Wi-Fi-off nights, open windows.** A planned away period keeps every room
+  just above a floor. For a network that is switched off at night, a schedule is loaded onto
+  each plug beforehand. A room whose temperature falls fast (a window open) pauses its heating
+  for a while.
+- **Safe by design.** Every plug carries its own dead-man switch and a limp-mode watchdog,
+  so a crash or a lost network never means "heat forever" (see [Fail-safe](#fail-safe)).
+- **Knows what it costs.** Cost per room per day, the average price paid against the market
+  and what the timing saved, plus the household's real consumption from the meter
+  (Eloverblik).
+- **Tells you.** Alerts (plug unreachable, sensor offline, a room not warming up), a
+  weekly summary, a monthly report and a heads-up when tomorrow is unusually expensive or
+  cheap. Sent by ntfy (phone push without an account) or Discord.
+- **Explains itself.** Every decision is logged with its reason, in plain language and with
+  the inputs it was based on. Every setting has a "?" with the full explanation.
+
+<table>
+<tr>
+<td width="60%"><img src="docs/images/room-chart.png" alt="Room chart: temperature, target, heating periods coloured by reason, Wi-Fi off periods and the price, with the planned hours ahead"></td>
+<td><img src="docs/images/booking.png" alt="Booking dialog: day, from, until and temperature"><br><sub>Book a room: heatbrain starts heating early enough by itself.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/images/settings-program.png" alt="Room settings: plugs, sensor, limits and the daily program of switch points"></td>
+<td><img src="docs/images/costs.png" alt="Heating cost: spent, energy, average price paid and saved by timing, per day and per room"></td>
+</tr>
+</table>
+
+## Hardware
+
+| What | Supported | Notes |
+|---|---|---|
+| Heaters on smart plugs | Tasmota (e.g. Sonoff Basic R2) | heatbrain installs a fail-safe on each plug and tests it per firmware version |
+| Floor heating | Danfoss DEVIreg Smart | paired from the DEVI app with a one-time code; heatbrain sets the setpoint and reads the floor temperature and real heating time |
+| Room temperatures | Netatmo Weather Station (indoor modules), DEVIreg Smart's own sensors | |
+| Outdoor temperature | Netatmo outdoor module, plus the Open-Meteo forecast | |
+| Prices | Energi Data Service (DK1/DK2 spot, Danish grid tariffs) | any country via time-of-day `schedule` components |
+| Meter data | Eloverblik (Danish smart meters) | hourly household consumption, about a day behind |
+
+## Quick start (Docker)
+
+```yaml
+services:
+  heatbrain:
+    image: ghcr.io/bleze/heatbrain:latest
+    restart: unless-stopped
+    ports: ["8080:8080"]
+    volumes: ["/volume1/docker/heatbrain:/data"]
+    environment: ["TZ=Europe/Copenhagen"]
+```
+
+Open `http://<host>:8080` and set it up under **Settings**: prices, Netatmo, plugs, rooms.
+Plugs start in **dry-run**: heatbrain decides and logs, but switches nothing until you set a
+plug to Live. The web UI has no login: keep it on your home network and never forward a
+router port to it. Full steps for a Synology NAS are under [Deployment](#deployment-synology-ds1821--any-docker-host).
+
+# How it works
 
 ## Architecture
 
 ```
-src/core/       Pure logic, no IO: time/DST, tariffs, schedules, price totals, (planner)
+src/core/       Pure logic, no IO: time/DST, tariffs, price outlook, planner, thermal model,
+                forecast, open-window detection, alerts, costs
 src/net/        HTTP client + file cache (public APIs are rate limited)
-src/providers/  Pluggable data sources, selected by "type" in config
-src/app/        Config loading, CLI, (scheduler, web server)
+src/providers/  Prices (Energi Data Service), meter data (Eloverblik), weather (Open-Meteo)
+src/sensors/    Temperature sources (Netatmo)
+src/plugs/      Tasmota plugs with the on-plug fail-safe; a simulated plug for development
+src/devices/    DEVIreg Smart thermostats (SecureDeviceGrid via OpenSDG)
+src/storage/    SQLite history (decisions, temperatures, prices, meter readings)
+src/notify/     ntfy and Discord
+src/web/        HTTP server and JSON API for the web UI
+src/app/        Config, CLI, the control loop, settings, digests, cost report
+web/            The web UI: plain HTML/JS/CSS, no build step
 ```
 
 Nothing in `core` knows about Denmark. Country-specific data sources live in `providers`
@@ -101,22 +174,47 @@ planner decides each room, checking in this order:
 
 | # | Rule | Reason code |
 |---|---|---|
+| – | A booking replaces the program (heat to its target, from the warm-up start until its end, never coasting); an away period replaces it with "keep above" | |
 | 1 | At/above `maxTemp`: OFF, even with manual ON | `ABOVE_MAX` |
 | 2 | Manual override (OFF still heats below `frostTemp`) | `MANUAL_ON`, `MANUAL_OFF`, `FROST_PROTECTION` |
-| 3 | Program says off: only frost protection | `SCHEDULED_OFF` |
-| 4 | Away period: keep above the away temperature | `AWAY_OFF` |
+| 3 | Temperature fell fast (1 °C within 30 min): window open? Paused for 30 min | `WINDOW_OPEN` |
+| 4 | Program says off: only frost protection | `SCHEDULED_OFF` |
 | 5 | Temperature missing or older than 30 min: 10 min ON / 50 min OFF | `STALE_DATA_LIMP` |
-| 6 | Keep-above period: heat only below the floor | `KEEP_ABOVE`, `KEEP_SATISFIED` |
+| 6 | Keep-above period (or away): heat only below the floor | `KEEP_ABOVE`, `KEEP_SATISFIED` |
 | 7 | Below `minTemp`: ON whatever the price | `BELOW_MIN` |
 | 8 | Expensive slot: coast down to target − 1.0 °C | `PEAK_AVOID`, `BELOW_COMFORT_DURING_PEAK` |
-| 9 | Expensive slot within 3 h and clearly cheaper now: heat to target + 1.0 °C (×0.5–1.5 by outdoor temperature) | `PREHEAT_BEFORE_PEAK` |
+| 9 | Expensive slot within 3 h and clearly cheaper now: pre-heat (see below) | `PREHEAT_BEFORE_PEAK` |
 | 10 | Among the cheapest slots: heat to target + 0.5 °C | `CHEAP_BOOST` |
 | 11 | Thermostat with ±0.3 °C hysteresis | `BELOW_TARGET`, `TARGET_REACHED`, `HOLD_ON`, `HOLD_OFF` |
 
 "Expensive" = top quarter of the next 24 h *and* 15% above the median; "cheapest" = bottom
 quarter *and* 10% below the median, so flat-price days fall back to a plain thermostat.
-All margins are configurable per room (`strategy`). The outdoor module (configurable, or
-the first Netatmo outdoor module) scales pre-heating: colder outside, more stored heat.
+All margins are configurable per room (`strategy`).
+
+**Pre-heating.** Until a room's heating model is learned, it heats to target + 1.0 °C, scaled
+×0.5–1.5 by the outdoor temperature expected during the expensive hours (forecast, else the
+outdoor sensor now). Once learned, heatbrain calculates instead: the temperature the room must
+have when the expensive stretch starts so that, cooling towards the forecast outdoor
+temperature at its learned rate, it ends the stretch no lower than target − the allowed drop.
+That is capped at twice the pre-heat setting, and pre-heating only starts as early as heating
+that far takes.
+
+**The heating model.** `dT/dt = gain · heating − loss · (T − T_outdoor)`, fitted per room from
+the last 21 days of decisions (90-minute stretches of steady heating or not; limp mode, night
+schedules and open windows are left out) and refitted hourly. It is used once it has seen at
+least three cooling and three heating stretches. It also gives bookings their warm-up time
+(×1.25 + 30 min, at most 48 h) and the "Next 24 h" plan its "warm enough, no heat" periods.
+
+**Weather forecast.** Hourly temperatures for two days from Open-Meteo, for the position of the
+Netatmo station or a place searched in Settings → Sensors (only the position, rounded to about
+1 km, is sent). It is corrected to the outdoor sensor: the difference measured now fades out
+over six hours.
+
+**Thermostats.** A room can have a DEVIreg Smart instead of plugs. In Live, heatbrain puts the
+thermostat in manual mode and sets its setpoint from the decision (target, pre-heat or boost
+ceiling, the coasting floor, or frost protection when off); the thermostat regulates by itself
+and keeps its last setpoint if heatbrain is gone. Pairing uses a one-time code from the DEVI
+app's "Share house".
 
 **Away mode** is a planned period (from – until, set from the dashboard's Away button,
 stored in `data/away.json`): every room only keeps above the chosen temperature, price-only
@@ -134,8 +232,12 @@ share of time the room actually heated in such periods over the last 7 days (25 
 is enough history), in the cheapest quarters; price-only rooms get their cheapest hours.
 Expected plug/sensor outages are not reported during the period and 20 minutes after.
 
-**Plan preview:** each room card shows the next 24 h worked out from the program and the
-known prices (heat / pre-heat / coast / boost / keep / away / off).
+**Plan preview:** each room card shows the next 24 h worked out from the program, the known
+prices, bookings and the forecast (heat / pre-heat / coast / boost / keep / booked / away / off,
+and "warm enough, no heat" where the room is predicted to stay above what the period asks).
+
+**Bookings** (the dashboard's Book button, stored in `data/bookings.json`): a target
+temperature from – until. Warming up starts by itself as early as the room needs.
 
 ### Decision log
 
@@ -155,25 +257,29 @@ heatbrain override bedroom clear
 ## Web UI
 
 `heatbrain run` serves a web UI on port 8080 (`web` in config; no login, keep it on your
-home network): problems banner, price chart for today and tomorrow, a card per room
-(temperature, decision and reason, plugs, "Heat 1 h" / "Off 2 h" / "Back to auto"), and
-per room a chart of temperature + target, heating periods coloured by reason category
-(comfort / price-driven / safety-manual) and price, with the hours ahead, plus the switch
-event table. The outdoor card opens the same chart for the outdoor temperature. Overrides
+home network): problems banner, a card per room (temperature, decision and reason, the next
+24 h, "Heat 1 h" / "Off 2 h" / "Book"), per room a chart of temperature + target, heating
+periods coloured by reason category (comfort / price-driven / safety-manual), Wi-Fi off
+periods and the price, with the planned hours ahead, plus the switch events, the price chart,
+heating cost and meter data. The outdoor card opens the same chart for the outdoor temperature. Overrides
 from the UI are applied immediately. **Settings** edits everything in the config (rooms and
 programs, plugs incl. fail-safe and firmware upgrades, sensors, prices, notifications,
 system) with validation and backups; **Help** explains every feature, and "?" buttons show
 the same text next to the settings. Light/dark/system theme. The frontend is plain HTML/JS in `web/` (no build step); in dev builds it is served
 straight from the source folder, so edits only need a browser refresh.
 
-## Heating cost
+## Heating cost and meter data
 
-The dashboard estimates what each radiator costs: on-time from the decision log × the
-radiator's wattage (set per plug in Settings → Heating) × the actual price in each 15-minute
-slot. It shows cost, energy, the average price paid against each day's average price, and
-what the timing saved. Dry-run plugs show what they *would* have cost. The Sonoff Basic
-has no power metering, so these are estimates; plugs with metering (POW R3, S31, ...)
-could report measured energy later.
+The dashboard shows what each room's heating costs: for plugs, on-time from the decision log ×
+the heating power (Settings → Heating) × the actual price in each 15-minute slot; for
+thermostats, the heating time the thermostat itself reports × its power. It shows cost, energy,
+the average price paid against each day's average price, and what the timing saved. Dry-run
+plugs show what they *would* have cost. The Sonoff Basic has no power metering, so plug
+figures are estimates.
+
+With an Eloverblik token (Settings → Prices), heatbrain also fetches the household's hourly
+consumption from the meter and shows it next to the heating: household, heating, everything
+else.
 
 ## Notifications
 
@@ -181,13 +287,16 @@ Pluggable notifiers selected in config: **`ntfy`** (phone push without an accoun
 the ntfy app and subscribe to a random topic; optional token for self-hosted servers) and
 `discord` (channel webhook). Set up and test from Settings → Notifications.
 
-Digests: a weekly cost summary on Monday at 08:00 and a heads-up at 14:00 when tomorrow is
-at least 20 % more expensive or cheaper than today (both optional).
+Digests (each optional): a weekly cost summary on Monday at 08:00; a monthly report on the
+1st (cost per room, the average price paid against the market, the dearest day, and the energy
+against the month before); a heads-up at 14:00 when tomorrow is at least 20 % more expensive or
+cheaper than the past week; and a message when a new Tasmota release is out for your plugs.
 
 Alerts: plug unreachable, plug state differs from commanded state, Netatmo re-login
 required, Netatmo module offline / low battery, stale temperature (room in limp mode),
 tomorrow's prices missing by ~15:00, room below minimum despite heating (open window /
-radiator off), heatbrain restarted.
+radiator off), window open (heating paused), thermostat unreachable, a live plug whose
+fail-safe is not verified, heatbrain restarted.
 
 Rules: alert only after a problem persists (debounce), send a "resolved" message on
 recovery, repeat ongoing problems at most every few hours, optional quiet hours for
