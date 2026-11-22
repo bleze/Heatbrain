@@ -77,7 +77,7 @@
       el("a", { href: "#settings" }, td, "Settings → Heating");
     }
     $("cost-note").textContent =
-      "Plugs: estimated as radiator power × time the plug was on × the actual price in each 15-minute slot " +
+      "Plugs: estimated as heating power × time the plug was on × the actual price in each 15-minute slot " +
       "(the Sonoff Basic can't measure power, and a radiator's own thermostat may switch it off now and then). " +
       "Thermostats: the time the thermostat itself reports heating × its power - measured time, not an estimate.";
   }

@@ -675,8 +675,9 @@
       }
       if (t) {
         const g = el("div", { class: "form-grid" }, c);
-        field(g, "Name", txt(t, "name", { placeholder: room.name }));
-        field(g, "Heating power", num(t, "watts", { step: 50, min: 0, placeholder: "1200", unit: "W" }), { hint: "for cost estimates" });
+        // Name spans two columns like a plug's address, so the power lines up with the plugs' power.
+        field(g, "Name", txt(t, "name", { placeholder: room.name }), { span2: true });
+        field(g, "Heating power", num(t, "watts", { step: 50, min: 0, placeholder: "1200", unit: "W" }), { hint: "from the DEVI app" });
         el("div", { class: "hint", style: "margin-top:6px" }, c, "Choose it as the room's device on the Rooms tab. In Live, heatbrain switches the thermostat to manual mode, so its own schedule no longer applies.");
       }
     }
@@ -811,7 +812,7 @@
           }, "ghost", `${p.id}:restore`, "Removing fail-safe…");
       }
     }
-    field(g, "Radiator power", num(p, "watts", { step: 50, min: 0, placeholder: "1500", unit: "W" }),
+    field(g, "Heating power", num(p, "watts", { step: 50, min: 0, placeholder: "1500", unit: "W" }),
       { hint: "from the radiator's label" });
 
     // Live status
