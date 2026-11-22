@@ -33,6 +33,7 @@ enum class Reason {
     KeepSatisfied,          // "keep above" period: above the floor, off
     NoPricesFallback,       // price-only room without prices: heat outside avoid windows
     AwayOff,                // price-only room while away
+    OfflineSchedule,        // Wi-Fi off period: the plug follows the schedule loaded onto it
 };
 
 std::string_view reasonCode(Reason r);  // "PREHEAT_BEFORE_PEAK", stable for storage/UI

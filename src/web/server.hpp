@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <map>
 #include <functional>
+#include <optional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -44,7 +45,8 @@ struct WebConfig {
     int port = 8080;
 };
 
-WebConfig parseWebConfig(const nlohmann::json& cfg);
+WebConfig parseWebConfig(const nlohmann::json& cfg);  // HEATBRAIN_WEB_PORT (Docker) wins over web.port
+std::optional<int> fixedWebPort();
 
 struct WebContext {
     std::filesystem::path dataDir;

@@ -122,6 +122,15 @@ the first Netatmo outdoor module) scales pre-heating: colder outside, more store
 stored in `data/away.json`): every room only keeps above the chosen temperature, price-only
 rooms stay off, and it starts and ends by itself.
 
+**Wi-Fi off period** (Settings → System, `"wifiOff": {"from": "23:30", "to": "06:30"}`): for a
+network that is switched off at night. Shortly before, heatbrain loads a schedule onto each live
+plug (Tasmota Rule2/Rule3, `Time#Minute` triggers on the plug's own clock) and stretches the
+fail-safe to match: auto-off just longer than the longest planned ON, watchdog until the end
+plus 30 min. Without Wi-Fi there are no temperatures either, so heat/keep periods heat the
+share of time the room actually heated in such periods over the last 7 days (25 % until there
+is enough history), in the cheapest quarters; price-only rooms get their cheapest hours.
+Expected plug/sensor outages are not reported during the period and 20 minutes after.
+
 **Plan preview:** each room card shows the next 24 h worked out from the program and the
 known prices (heat / pre-heat / coast / boost / keep / away / off).
 

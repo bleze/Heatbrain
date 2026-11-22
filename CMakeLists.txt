@@ -33,6 +33,7 @@ add_library(heatbrain_core STATIC
   src/core/cost.cpp
   src/core/version.cpp
   src/core/base64.cpp
+  src/core/offline.cpp
 )
 target_include_directories(heatbrain_core PUBLIC src)
 
@@ -97,6 +98,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_version.cpp
     tests/test_digest.cpp
     tests/test_transfer.cpp
+    tests/test_offline.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE

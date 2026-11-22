@@ -20,6 +20,8 @@ public:
     nlohmann::json backup() override;
     void provision(bool overwriteRules) override;
     void restore(const nlohmann::json& backup) override;
+    void armOffline(const std::vector<OnSpan>& spans, Instant now, Instant until) override;
+    void disarmOffline() override;
 
     // Sends one command and returns the parsed JSON reply. Throws on failure.
     nlohmann::json command(const std::string& cmnd);
@@ -45,6 +47,11 @@ private:
     std::string password_;
     FailsafeConfig failsafe_;
 };
+
+// The plug's local time minus UTC from a "Status 7" reply, provided its UTC clock is within
+// `tolerance` of `now`. Throws std::runtime_error with the reason otherwise.
+std::chrono::minutes tasmotaClockOffset(const nlohmann::json& status7, Instant now,
+                                        std::chrono::minutes tolerance = std::chrono::minutes{5});
 
 // Parses a reply to "Power" / "Power1": {"POWER":"ON"} or {"POWER1":"OFF"}.
 std::optional<bool> parseTasmotaPower(const nlohmann::json& reply);

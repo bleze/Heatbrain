@@ -79,6 +79,7 @@ std::string_view reasonCode(Reason r) {
         case Reason::KeepSatisfied: return "KEEP_SATISFIED";
         case Reason::AwayOff: return "AWAY_OFF";
         case Reason::NoPricesFallback: return "NO_PRICES_FALLBACK";
+        case Reason::OfflineSchedule: return "OFFLINE_SCHEDULE";
     }
     return "UNKNOWN";
 }

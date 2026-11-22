@@ -28,13 +28,24 @@ namespace fs = std::filesystem;
 using nlohmann::json;
 using namespace std::chrono;
 
+std::optional<int> fixedWebPort() {
+    // Set by the Docker image: inside a container the port is part of the port mapping, so the
+    // config's web.port must not move it (the address is chosen in docker-compose.yml).
+    const char* v = std::getenv("HEATBRAIN_WEB_PORT");
+    if (!v || !*v) return std::nullopt;
+    const int p = std::atoi(v);
+    return p >= 1 && p <= 65535 ? std::optional<int>(p) : std::nullopt;
+}
+
 WebConfig parseWebConfig(const json& cfg) {
     WebConfig w;
-    if (!cfg.contains("web")) return w;
-    const auto& j = cfg["web"];
-    w.enabled = j.value("enabled", w.enabled);
-    w.bind = j.value("bind", w.bind);
-    w.port = j.value("port", w.port);
+    if (cfg.contains("web")) {
+        const auto& j = cfg["web"];
+        w.enabled = j.value("enabled", w.enabled);
+        w.bind = j.value("bind", w.bind);
+        w.port = j.value("port", w.port);
+    }
+    if (const auto fixed = fixedWebPort()) w.port = *fixed;
     return w;
 }
 
@@ -263,7 +274,9 @@ void WebServer::routes() {
     s.Get("/api/config", [this](const httplib::Request&, httplib::Response& res) {
         // Rooms are always presented as daily programs (older configs are converted).
         const json cfg = withPrograms(readConfigFile(ctx_.configFile));
-        sendJson(res, json{{"config", maskSecrets(cfg)}, {"errors", validateConfig(cfg, ctx_.dataDir)}});
+        json out{{"config", maskSecrets(cfg)}, {"errors", validateConfig(cfg, ctx_.dataDir)}};
+        if (const auto fixed = fixedWebPort()) out["fixedWebPort"] = *fixed;
+        sendJson(res, out);
     });
 
     // Export / import for moving heatbrain (e.g. to the NAS). POST, so a link can't trigger it.

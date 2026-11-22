@@ -41,6 +41,8 @@ struct FakeTasmota {
     int powerOnState = 3;
     int ruleTimer1 = 0, ruleTimer2 = 0;
     std::vector<std::string> log;
+    std::map<std::string, std::string> extraRules;  // Rule2 / Rule3
+    std::string clockUtc = "2026-11-23T22:00:00", clockLocal = "2026-11-23T23:00:00";
     // Simulated time for PulseTime (seconds), advanced by the test's sleeper.
     double clock = 0, onAt = 0;
     bool brokenRefresh = false;  // a firmware where re-sending ON does not restart the countdown
@@ -79,6 +81,13 @@ struct FakeTasmota {
             else if (arg == "\"") rules.clear();
             else if (!arg.empty()) rules = arg;
             r = {{"Rule1", {{"State", ruleOn ? "ON" : "OFF"}, {"Rules", rules}}}};
+        } else if (name == "Rule2" || name == "Rule3") {
+            auto& text = extraRules[name];
+            if (arg == "\"") text.clear();
+            else if (!arg.empty() && arg != "1" && arg != "0") text = arg;
+            r = {{name, {{"State", "ON"}, {"Rules", text}}}};
+        } else if (name == "Status" && arg == "7") {
+            r = {{"StatusTIM", {{"UTC", clockUtc}, {"Local", clockLocal}}}};
         } else if (name == "Timers") {
             if (arg == "0") timers = false;
             if (arg == "1") timers = true;
@@ -261,4 +270,41 @@ TEST_CASE("Remove fail-safe restores the newest backup from before the fail-safe
     CHECK(hb::originalBackup(dir, plug).filename() == "backup-20261121T200000Z.json");
     CHECK(hb::backupHasFailsafe(nlohmann::json{{"rule1", {{"rules", ours}}}}));
     fs::remove_all(dir);
+}
+
+TEST_CASE("Wi-Fi off: the night schedule goes onto the plug with a stretched fail-safe") {
+    using namespace std::chrono;
+    Fixture f;
+    f.sw.provision(false);  // the normal fail-safe first
+    const Instant now = Instant{sys_days{2026y / 11 / 23}.time_since_epoch()} + hours{22};  // 23:00 local
+    const Instant until = now + hours{7};
+    // ON 00:00-02:00 local (23:00-01:00 UTC)
+    const std::vector<OnSpan> spans{{now + hours{1}, now + hours{3}}};
+    f.sw.armOffline(spans, now, until);
+    CHECK(f.device.extraRules["Rule2"] == "ON Time#Minute=0 DO Power1 1 ENDON ON Time#Minute=120 DO Power1 0 ENDON");
+    CHECK(f.device.pulseTime == 100 + 2 * 3600 + 600);       // longest ON + 10 min
+    CHECK(f.device.ruleTimer1 == 7 * 3600 + 30 * 60);        // until the end + the normal watchdog
+    CHECK_FALSE(f.device.power);                             // off now: the first ON is at midnight
+    CHECK(f.sw.checkFailsafe().installed());                 // the stretched auto-off is expected
+
+    f.sw.disarmOffline();
+    CHECK(f.device.extraRules["Rule2"].empty());
+    CHECK(f.device.pulseTime == 1300);
+    CHECK(f.device.ruleTimer1 == 30 * 60);
+}
+
+TEST_CASE("Wi-Fi off: refused when the plug's clock is wrong or its rule slots hold the user's rules") {
+    using namespace std::chrono;
+    const Instant now = Instant{sys_days{2026y / 11 / 23}.time_since_epoch()} + hours{22};
+    {
+        Fixture f;
+        f.device.clockUtc = "1970-01-01T00:10:00";  // never synced
+        CHECK_THROWS_WITH(f.sw.armOffline({}, now, now + hours{7}), Catch::Matchers::ContainsSubstring("clock"));
+    }
+    {
+        Fixture f;
+        f.device.extraRules["Rule2"] = "ON Button1#State DO Power1 2 ENDON";
+        CHECK_THROWS_WITH(f.sw.armOffline({}, now, now + hours{7}), Catch::Matchers::ContainsSubstring("your own rule"));
+        CHECK(f.device.extraRules["Rule2"] == "ON Button1#State DO Power1 2 ENDON");
+    }
 }

@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "core/failsafe.hpp"
+#include "core/offline.hpp"
 
 namespace hb {
 
@@ -48,6 +49,16 @@ public:
     virtual void provision(bool overwriteRules) = 0;
 
     virtual void restore(const nlohmann::json& backup) = 0;
+
+    // Wi-Fi off period: load `spans` onto the device so it switches on its own clock until
+    // `until`, with the fail-safe stretched to match (auto-off covers the longest planned ON,
+    // the watchdog runs until the period is over). Throws with a readable reason when the
+    // device can't do it (clock not synced, its rule slots in use, too many switch points).
+    virtual void armOffline(const std::vector<OnSpan>& spans, Instant now, Instant until) {
+        (void)spans, (void)now, (void)until;
+    }
+    // Back on the network: remove the schedule and restore the normal fail-safe timers.
+    virtual void disarmOffline() {}
 };
 
 }  // namespace hb

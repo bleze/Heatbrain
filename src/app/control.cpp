@@ -68,6 +68,9 @@ std::unique_ptr<ControlEnv> loadControlEnv(const Args& args) {
     e->controller->setDataDir(e->cfg.dataDir);
     e->controller->setAwayStore(e->away.get());
     e->controller->setOutdoorSensor(e->cfg.raw.value("outdoorSensor", std::string()));
+    // Load the night schedule two control steps before the Wi-Fi goes off (at least 10 minutes).
+    e->controller->setOfflineWindow(hb::parseWifiOff(e->cfg.raw),
+                                    std::max(minutes{10}, duration_cast<minutes>(e->tick * 2)));
     return e;
 }
 
@@ -209,10 +212,19 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
         away = {{"keepAbove", a->keepAbove}, {"from", a->from.time_since_epoch().count()},
                 {"until", a->until.time_since_epoch().count()}, {"active", a->activeAt(now)}};
     }
+    json wifiOff = nullptr;
+    if (const auto o = env.controller->offlineInfo(now)) {
+        wifiOff = {{"start", o->period.start.time_since_epoch().count()},
+                   {"end", o->period.end.time_since_epoch().count()},
+                   {"active", o->active},
+                   {"armedPlugs", o->armedPlugs},
+                   {"errors", o->errors}};
+    }
     json outdoor = nullptr;
     if (const auto& o = env.controller->outdoor()) outdoor = {{"key", o->key}, {"name", o->name}, {"temperature", o->temperature}};
     return json{{"now", now.time_since_epoch().count()},
                 {"away", away},
+                {"wifiOff", wifiOff},
                 {"outdoor", outdoor},
                 {"tickSeconds", env.tick.count()},
                 {"timezone", env.cfg.timezone},

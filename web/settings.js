@@ -58,6 +58,7 @@
 
   async function load() {
     const r = await api("/api/config");
+    S.fixedWebPort = r.fixedWebPort ?? null;  // set by Docker: not a setting there
     S.cfg = r.config;
     S.saved = JSON.stringify(r.config);
     S.errors = r.errors || [];
@@ -1074,8 +1075,25 @@
       b.classList.toggle("active", current === value);
     }
     el("div", { class: "hint" }, ap, "this browser only");
-    const web = (S.cfg.web ||= {});
-    field(g, "Web UI port", num(web, "port", { step: 1, min: 1, max: 65535, placeholder: "8080" }), { hint: "takes effect after a restart" });
+    // Wi-Fi off period: plugs get a night schedule, expected outages are not reported
+    const wifiOn = !!S.cfg.wifiOff;
+    const wf = el("div", { class: "field span2" }, g);
+    const wl = el("span", {}, wf, "Wi-Fi off period");
+    helpButton(wl, "wifiOff", wf);
+    const wrow = el("div", { class: "row" }, wf);
+    toggle(wrow, wifiOn, wifiOn ? "" : "Off", (v) => { if (v) S.cfg.wifiOff = { from: "23:30", to: "06:30" }; else delete S.cfg.wifiOff; changed(); render(); });
+    if (wifiOn) { wrow.appendChild(time(S.cfg.wifiOff, "from")); el("span", {}, wrow, "–"); wrow.appendChild(time(S.cfg.wifiOff, "to", true)); }
+    el("div", { class: "hint" }, wf, "daily; plugs switch by a schedule loaded beforehand");
+    if (S.fixedWebPort) {
+      // In Docker the address is chosen by the compose file's port mapping, not here.
+      const wp = el("div", { class: "field" }, g);
+      el("span", {}, wp, "Web UI port");
+      el("div", { class: "fixed-value" }, wp, `Set by Docker (${location.port || "80"})`);
+      el("div", { class: "hint" }, wp, "change the first number under ports: in docker-compose.yml");
+    } else {
+      const web = (S.cfg.web ||= {});
+      field(g, "Web UI port", num(web, "port", { step: 1, min: 1, max: 65535, placeholder: "8080" }), { hint: "takes effect after a restart" });
+    }
 
     renderTransfer(body);
 

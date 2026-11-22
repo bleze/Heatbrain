@@ -27,6 +27,7 @@ const REASONS = {
   SCHEDULED_OFF: ["Off by program", null],
   KEEP_ABOVE: ["Keeping above the floor", "comfort"],
   KEEP_SATISFIED: ["Above the floor", null],
+  OFFLINE_SCHEDULE: ["Wi-Fi off: night schedule", "price"],
 };
 const CATEGORIES = {
   comfort: "Heating: comfort",
@@ -283,6 +284,8 @@ const PLAN = {
   keep: (t) => `keep above ${temp(t)}`,
   away: (t) => `away - keep above ${temp(t)}`,
   off: () => "off",
+  night: () => "Wi-Fi off - heating by night schedule",
+  nightoff: () => "Wi-Fi off - off",
 };
 const planLabel = (s) => (PLAN[s.kind] || (() => s.kind))(s.target);
 
@@ -354,6 +357,23 @@ function makeStepper({ value, step = 1, min, max, unit, label }) {
 }
 
 let awayFormOpen = false;
+// Wi-Fi off period: a quiet note while it runs (or is about to), and any plug that missed its schedule.
+function renderWifiOff() {
+  const bar = $("wifi-bar");
+  const w = state.status?.wifiOff;
+  const now = state.status?.now || Date.now() / 1000;
+  const soon = w && w.start - now < 30 * 60;
+  bar.replaceChildren();
+  bar.hidden = !w || !(w.active || soon || w.errors.length);
+  if (bar.hidden) return;
+  bar.appendChild(badge("wifi", "gray"));
+  const t = el("div", { class: "grow" }, bar);
+  el("b", {}, t, w.active ? `Wi-Fi off until ${hm(w.end)}` : `Wi-Fi goes off at ${hm(w.start)}`);
+  const plugs = w.armedPlugs.length ? `${w.armedPlugs.join(", ")} follow${w.armedPlugs.length === 1 ? "s" : ""} the night schedule loaded onto the plug` : "Live plugs get their night schedule shortly before";
+  el("div", { class: "muted" }, t, `${plugs}. Expected connection problems are not reported until ${hm(w.end + 20 * 60)}.`);
+  for (const e of w.errors) el("div", { class: "wifi-error" }, t, `Not loaded: ${e} - this plug runs limp mode while the Wi-Fi is off.`);
+}
+
 function renderAway() {
   const bar = $("away-bar"), headerBtn = $("away-btn");
   const away = state.status?.away;
@@ -661,7 +681,7 @@ function renderDetail() {
   // Planned heating ahead (lighter): what the planner intends for the coming hours.
   const plan = (state.status?.rooms || []).find((x) => x.id === room.id)?.plan || [];
   for (const s of plan) {
-    const cat = { heat: "comfort", keep: "comfort", away: "safety", preheat: "price", boost: "price" }[s.kind];
+    const cat = { heat: "comfort", keep: "comfort", away: "safety", preheat: "price", boost: "price", night: "price" }[s.kind];
     if (!cat) continue;  // off / coast: nothing planned
     const a = Math.max(s.from, h.to), b = Math.min(s.to, t1);
     if (b <= a) continue;
@@ -766,6 +786,7 @@ async function refreshStatus() {
     state.tz = s.timezone || state.tz;
     $("updated").textContent = `updated ${hm(s.now)} · every ${Math.round(s.tickSeconds / 60)} min`;
     renderProblems();
+    renderWifiOff();
     renderAway();
     renderRooms();
     renderPriceChart();

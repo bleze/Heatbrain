@@ -1,5 +1,7 @@
 #include "plugs/tasmota.hpp"
 
+#include <regex>
+
 #include <chrono>
 #include <format>
 #include <stdexcept>
@@ -97,7 +99,11 @@ FailsafeStatus TasmotaSwitch::checkFailsafe() {
     const int pulse = command("PulseTime1").at("PulseTime1").value("Set", -1);
     const int expectedPulse = tasmotaPulseTime(duration_cast<seconds>(failsafe_.pulse));
     if (pulse != expectedPulse) {
-        st.problems.push_back(std::format("PulseTime1 is {} (expected {})", pulse, expectedPulse));
+        // During a Wi-Fi off period the auto-off is stretched on purpose, next to a schedule in Rule2.
+        const std::string rule2 = pulse > expectedPulse ? command("Rule2").at("Rule2").value("Rules", "") : "";
+        if (rule2.empty() || !isHeatbrainScheduleRule(rule2)) {
+            st.problems.push_back(std::format("PulseTime1 is {} (expected {})", pulse, expectedPulse));
+        }
     }
     const json rule = command("Rule1").at("Rule1");
     if (rule.value("Rules", "") != tasmotaFailsafeRule(failsafe_)) {
@@ -212,6 +218,72 @@ bool TasmotaSwitch::testPulse(const Log& log, const Sleeper& sleep) {
         ok = false;
     }
     return ok;
+}
+
+namespace {
+std::optional<Instant> parseTasmotaTime(std::string s) {
+    // "2026-11-22T00:28:18" (optionally with a trailing Z)
+    static const std::regex iso(R"((\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2}))");
+    std::smatch m;
+    if (!std::regex_search(s, m, iso)) return std::nullopt;
+    const auto ymd = std::chrono::year{std::stoi(m[1])} / std::stoi(m[2]) / std::stoi(m[3]);
+    if (!ymd.ok()) return std::nullopt;
+    return Instant{std::chrono::sys_days{ymd}.time_since_epoch()} + hours{std::stoi(m[4])} +
+           minutes{std::stoi(m[5])} + seconds{std::stoi(m[6])};
+}
+}  // namespace
+
+minutes tasmotaClockOffset(const json& status7, Instant now, minutes tolerance) {
+    if (!status7.contains("StatusTIM")) throw std::runtime_error("the plug did not report its clock");
+    const auto& t = status7["StatusTIM"];
+    const auto utc = parseTasmotaTime(t.value("UTC", ""));
+    const auto local = parseTasmotaTime(t.value("Local", ""));
+    if (!utc || !local) throw std::runtime_error("the plug's clock could not be read");
+    const auto drift = duration_cast<minutes>(*utc > now ? *utc - now : now - *utc);
+    if (drift > tolerance) {
+        throw std::runtime_error(std::format("the plug's clock is {} minutes off (no time sync?)", drift.count()));
+    }
+    return round<minutes>(*local - *utc);
+}
+
+void TasmotaSwitch::armOffline(const std::vector<OnSpan>& spans, Instant now, Instant until) {
+    const minutes offset = tasmotaClockOffset(command("Status 7"), now);
+    const auto rules = tasmotaScheduleRules(spans, offset);
+    if (!rules) throw std::runtime_error("too many switch points for the plug's rule slots");
+    // Rule1 is the fail-safe; Rule2/Rule3 carry the schedule - unless the user has rules there.
+    for (const char* slot : {"Rule2", "Rule3"}) {
+        const std::string existing = command(slot).at(slot).value("Rules", "");
+        if (!isHeatbrainScheduleRule(existing)) {
+            throw std::runtime_error(std::format("{} on the plug holds your own rule; heatbrain won't overwrite it", slot));
+        }
+    }
+    seconds longest{0};
+    for (const auto& s : spans) longest = std::max(longest, duration_cast<seconds>(s.to - s.from));
+    // Auto-off long enough for the longest planned ON (each still ends with its own OFF);
+    // the watchdog only starts limp mode if heatbrain is silent after the period.
+    const seconds pulse = std::max(duration_cast<seconds>(failsafe_.pulse), longest + minutes{10});
+    const seconds watchdog = duration_cast<seconds>(until - now) + duration_cast<seconds>(failsafe_.watchdog);
+    command(rules->size() > 0 ? "Rule2 " + (*rules)[0] : "Rule2 \"");
+    command(rules->size() > 0 ? "Rule2 1" : "Rule2 0");
+    command(rules->size() > 1 ? "Rule3 " + (*rules)[1] : "Rule3 \"");
+    command(rules->size() > 1 ? "Rule3 1" : "Rule3 0");
+    command(std::format("PulseTime1 {}", tasmotaPulseTime(pulse)));
+    command(std::format("RuleTimer1 {}", watchdog.count()));
+    command("RuleTimer2 0");
+    command(scheduleOnAt(spans, now) ? "Power1 On" : "Power1 Off");
+}
+
+void TasmotaSwitch::disarmOffline() {
+    for (const char* slot : {"Rule2", "Rule3"}) {
+        const std::string existing = command(slot).at(slot).value("Rules", "");
+        if (!existing.empty() && isHeatbrainScheduleRule(existing)) {
+            command(std::string(slot) + " \"");
+            command(std::string(slot) + " 0");
+        }
+    }
+    command(std::format("PulseTime1 {}", tasmotaPulseTime(duration_cast<seconds>(failsafe_.pulse))));
+    command(std::format("RuleTimer1 {}", duration_cast<seconds>(failsafe_.watchdog).count()));
+    command("RuleTimer2 0");
 }
 
 void TasmotaSwitch::restore(const json& b) {

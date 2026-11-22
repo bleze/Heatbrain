@@ -33,7 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app /app
 
-ENV HEATBRAIN_DATA_DIR=/data TZ=Europe/Copenhagen
+# The web UI always listens on 8080 inside the container; the NAS-side port is chosen in the
+# compose file's port mapping (Settings shows this instead of a port field).
+ENV HEATBRAIN_DATA_DIR=/data TZ=Europe/Copenhagen HEATBRAIN_WEB_PORT=8080
 VOLUME /data
 EXPOSE 8080
 WORKDIR /app

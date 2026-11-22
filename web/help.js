@@ -115,6 +115,15 @@ const HELP = {
       "Each room card shows what heatbrain intends for the coming day, worked out from the program and the known prices: heat, pre-heat before an expensive period, coast while it is expensive, a cheap boost, keep above, away or off. Whether it actually heats depends on the room's temperature at the time.",
     ],
   },
+  wifiOff: {
+    title: "Wi-Fi off period",
+    body: [
+      "If you switch the Wi-Fi off at night, set the period here. Shortly before it starts, heatbrain loads a schedule onto each live plug and the plug switches on its own clock - no network needed. Afterwards heatbrain takes over again.",
+      "There are no temperatures while the Wi-Fi is off (the Netatmo station uses Wi-Fi too), so the schedule is decided in advance: price-only rooms get their cheapest hours, 'off' periods stay off, and 'heat to' / 'keep above' periods heat as much as that room actually heated in such periods over the last week (15 min per hour until there is enough history), placed in the cheapest quarters.",
+      "The fail-safe stays in charge: each planned ON ends with its own OFF and an auto-off just longer than it, and limp mode only starts if heatbrain has not taken over 30 minutes after the period. Plug and sensor outages during the period (and 20 minutes after) are not reported.",
+      "A plug whose clock is not synchronised, or whose rule slots 2 and 3 hold your own rules, gets no schedule - you are told, and it runs limp mode for the night.",
+    ],
+  },
   transfer: {
     title: "Moving heatbrain (export and import)",
     body: [
@@ -216,7 +225,7 @@ function renderManual(host) {
     "heatbrain switches your radiators' plugs on and off from the price of electricity, the temperature in each room and the program you set. Everything here is also available as '?' next to the settings.");
   const toc = el("nav", { class: "toc" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "sensors", "prices", "away", "notifications", "costs", "transfer"];
+                 "sensors", "prices", "away", "wifiOff", "notifications", "costs", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, card);
     el("h3", {}, sec, HELP[key].title);

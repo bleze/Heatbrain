@@ -24,6 +24,14 @@ DayWindow parseWindow(const json& j) {
     return DayWindow{*from, *to};
 }
 
+std::optional<DayWindow> parseWifiOff(const json& cfg) {
+    if (!cfg.contains("wifiOff") || cfg["wifiOff"].is_null()) return std::nullopt;
+    const DayWindow w = parseWindow(cfg["wifiOff"]);
+    const int length = ((w.toMinute - w.fromMinute) % 1440 + 1440) % 1440;
+    if (length < 30 || length > 16 * 60) throw std::runtime_error("Wi-Fi off period must be 30 minutes to 16 hours");
+    return w;
+}
+
 namespace {
 
 Strategy parseStrategy(const json& j) {

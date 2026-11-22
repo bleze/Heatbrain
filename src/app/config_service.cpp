@@ -129,6 +129,7 @@ std::vector<std::string> validateConfig(const json& cfg, const fs::path& dataDir
     std::vector<Plug> plugs;
     check("Plugs", [&] { plugs = loadPlugs(cfg, offline); });
     check("Rooms", [&] { parseRooms(cfg, plugs); });
+    check("Wi-Fi off period", [&] { parseWifiOff(cfg); });
     check("Temperature sources", [&] { loadTemperatureSources(cfg, offline, dataDir, [] { return Instant{}; }); });
     check("Notifications", [&] { loadNotifications(cfg, offline); });
     check("Web", [&] {
