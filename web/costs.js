@@ -39,16 +39,16 @@
     tiles.replaceChildren();
     const priced = rooms.reduce((a, r) => a + r.days.reduce((b, x) => b + x.kWh - x.kWhWithoutPrice, 0), 0);
     const anyLive = rooms.some((r) => r.live || r.total.liveKWh > 0);
-    tile(tiles, "coin", anyLive ? "Spent" : "Would have cost", money(d.total.cost, cur), `last ${d.days} days`);
-    tile(tiles, "bolt", "Energy", kwh(d.total.kWh), `${rooms.reduce((a, r) => a + r.total.onHours, 0).toFixed(0)} heating hours`);
+    tile(tiles, "coin", anyLive ? "Spent" : "Would have cost", money(d.total.cost, cur), `last ${d.days} days`, "tone-amber");
+    tile(tiles, "bolt", "Energy", kwh(d.total.kWh), `${rooms.reduce((a, r) => a + r.total.onHours, 0).toFixed(0)} heating hours`, "tone-orange");
     if (priced > 0) {
       const paid = d.total.cost / priced;
       const market = (d.total.cost + d.total.saved) / priced;
-      tile(tiles, "gauge", "Average price paid", `${paid.toFixed(2)}`, `${cur}/kWh · day average ${market.toFixed(2)}`);
+      tile(tiles, "gauge", "Average price paid", `${paid.toFixed(2)}`, `${cur}/kWh · day average ${market.toFixed(2)}`, "tone-violet");
       const pct = market > 0 ? (d.total.saved / (d.total.cost + d.total.saved)) * 100 : 0;
       tile(tiles, "check", d.total.saved >= 0 ? "Saved by timing" : "Extra from timing",
         money(Math.abs(d.total.saved), cur), `${Math.abs(pct).toFixed(0)}% vs paying the day's average price`,
-        d.total.saved >= 0 ? "good" : "");
+        d.total.saved >= 0 ? "good" : "tone-orange");
     }
 
     renderChart(d, rooms);

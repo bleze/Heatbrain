@@ -31,8 +31,8 @@
     } catch { /* optional feature */ }
   }
 
-  function tile(host, iconName, label, value, sub) {
-    const t = el("div", { class: "tile" }, host);
+  function tile(host, iconName, label, value, sub, tone = "") {
+    const t = el("div", { class: `tile ${tone}` }, host);
     const k = el("div", { class: "k" }, t);
     k.appendChild(icon(iconName));
     k.appendChild(document.createTextNode(label));
@@ -89,10 +89,10 @@
     const span = allTime()
       ? `measured since ${new Intl.DateTimeFormat("en-GB", { timeZone: state.tz, month: "short", year: "numeric" }).format(d.from * 1000)}`
       : `measured, last ${U.days} days`;
-    tile(tiles, "home", "Household", kwh(total), span);
-    tile(tiles, "flame", "Radiators", kwh(Math.min(heat, total)), total > 0 ? `${Math.round((Math.min(heat, total) / total) * 100)} % of the household` : "");
-    tile(tiles, "bolt", "Everything else", kwh(Math.max(0, total - heat)), "");
-    tile(tiles, "clock", "Meter data until", dayHm(d.to), "Eloverblik is about a day behind");
+    tile(tiles, "home", "Household", kwh(total), span, "tone-violet");
+    tile(tiles, "flame", "Radiators", kwh(Math.min(heat, total)), total > 0 ? `${Math.round((Math.min(heat, total) / total) * 100)} % of the household` : "", "tone-orange");
+    tile(tiles, "bolt", "Everything else", kwh(Math.max(0, total - heat)), "", "tone-amber");
+    tile(tiles, "clock", "Meter data until", dayHm(d.to), "Eloverblik is about a day behind", "tone-blue");
     renderChart(d, buckets(d));
   }
 

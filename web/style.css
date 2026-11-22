@@ -451,6 +451,11 @@ a.chip { text-decoration: none; }
 .tile .s { color: var(--muted); font-size: 12.5px; }
 .tile.good .v { color: #006300; }
 .tile.good .k .icon { color: var(--good); }
+/* Each tile's icon has a colour of its own (the label stays in the text ink) */
+.tile.tone-amber .k .icon { color: var(--flame-2); }
+.tile.tone-orange .k .icon { color: var(--flame-1); }
+.tile.tone-violet .k .icon { color: var(--accent); }
+.tile.tone-blue .k .icon { color: var(--cat-comfort); }
 @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .tile.good .v { color: #0ca30c; } }
 :root[data-theme="dark"] .tile.good .v { color: #0ca30c; }
 .bar { fill: url(#cost-fill); }
