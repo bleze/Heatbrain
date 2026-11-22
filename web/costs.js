@@ -80,9 +80,8 @@
     for (const r of excluded) {
       const tr = el("tr", {}, body);
       el("td", {}, tr, r.name);
-      const td = el("td", { colspan: 6, class: "muted" }, tr, "Not counted (switched off for this room in ");
-      el("a", { href: "#settings" }, td, "Settings → Rooms");
-      td.appendChild(document.createTextNode(")"));
+      el("td", { colspan: 6, class: "muted" }, tr,
+        "Not counted until it has a temperature sensor - its radiator's own thermostat decides when it really heats");
     }
     $("cost-note").textContent =
       "Plugs: estimated as heating power × time the plug was on × the actual price in each 15-minute slot " +

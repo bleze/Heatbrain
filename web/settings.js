@@ -300,19 +300,6 @@
     rooms.forEach((room, idx) => renderRoom(list, room, idx));
   }
 
-  // Count the room in costs and usage? Off for a radiator whose own thermostat decides (frost
-  // setting): "plug on x power" would count energy it never used.
-  function costField(g, room) {
-    const f = el("div", { class: "field" }, g);
-    el("span", {}, f, "Costs and usage");
-    f.appendChild(toggle(null, room.countCosts !== false, "Count this room", (v) => {
-      if (v) delete room.countCosts; else room.countCosts = false;
-      changed(); render();
-    }));
-    el("div", { class: "hint" }, f, room.countCosts === false ? "left out of costs, usage and summaries"
-      : room.priceOnly ? "off if the radiator's own thermostat decides: plug-on time would overstate it" : "");
-  }
-
   function renderRoom(list, room, idx) {
     const c = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, list);
     if (S.scrollToRoom === room.id) {
@@ -413,7 +400,6 @@
       const g = el("div", { class: "form-grid" }, c);
       const ch = field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1, unit: "h" }), { hint: "heats only in those hours" });
       helpButton(ch.querySelector("span"), "priceOnly", g);
-      costField(g, room);
       el("h3", {}, c, "Never heat between");
       const avoid = arr(room.priceOnly, "avoid");
       avoid.forEach((w, i) => {
@@ -433,7 +419,6 @@
     field(g, "Never above", num(room, "maxTemp", { step: 0.5, unit: "°C" }), { hint: "hard stop, even when manual" });
     field(g, "Frost protection", num(room, "frostTemp", { step: 0.5, placeholder: "5", unit: "°C" }));
     field(g, "Warm-up for bookings", num(room, "warmupMinutes", { step: 15, min: 0, max: 720, placeholder: "180", unit: "min" }), { hint: "until heatbrain has learned how fast the room warms (concrete floors: 12+ h)" });
-    costField(g, room);
 
     const ph = el("h3", {}, c, "Daily program ");
     helpButton(ph, ["program", "modes"]);
