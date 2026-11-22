@@ -637,7 +637,7 @@ function bookingDialog(r) {
   const head = el("div", { class: "booking-head" }, dlg);
   head.appendChild(badge("calendar", "violet"));
   el("b", {}, head, `Book ${r.name}`);
-  if (typeof helpButton === "function") helpButton(head, "bookings", dlg);
+  if (typeof helpButton === "function") helpButton(head, "bookings", head);  // the text goes under the title, inside the dialog
   const f = el("div", { class: "booking-form" }, dlg);
   const field = (label, attrs, key) => {
     const l = el("label", {}, f);
