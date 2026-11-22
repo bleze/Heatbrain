@@ -893,9 +893,7 @@ function renderDetail() {
     showTooltip(evt, dayHm(t), rows);
   });
 
-  const eventsBlock = $("events").closest(".table-wrap");
-  eventsBlock.hidden = !!room.sensorOnly;
-  eventsBlock.previousElementSibling.hidden = !!room.sensorOnly;  // the "Switch events" heading
+  $("events-log").hidden = !!room.sensorOnly;
   if (!room.sensorOnly) renderEvents(h);
 }
 
@@ -903,6 +901,7 @@ function renderEvents(h) {
   const body = $("events");
   body.replaceChildren();
   const events = [...h.events].reverse();
+  $("events-count").textContent = events.length ? `${events.length} in this period` : "";
   if (!events.length) {
     const tr = el("tr", {}, body);
     el("td", { colspan: 7, class: "muted" }, tr, "No switch events in this period.");
@@ -994,3 +993,10 @@ window.addEventListener("hashchange", route);
 refreshStatus().then(route);
 setInterval(() => { if (!$("view-dashboard").hidden) refreshStatus(); }, 30_000);
 setInterval(() => { if (!$("view-dashboard").hidden) loadHistory(); }, 60_000);
+
+// The switch log is long: collapsed by default, and it stays the way the viewer left it.
+(() => {
+  const log = $("events-log");
+  try { log.open = localStorage.getItem("hb.eventsOpen") === "1"; } catch { /* private mode */ }
+  log.addEventListener("toggle", () => { try { localStorage.setItem("hb.eventsOpen", log.open ? "1" : "0"); } catch { /* private mode */ } });
+})();

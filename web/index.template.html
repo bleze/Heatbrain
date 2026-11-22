@@ -94,13 +94,15 @@
       </div>
       <div class="legend" id="legend"></div>
       <div class="chart" id="room-chart"></div>
-      <h3>Switch events</h3>
-      <div class="table-wrap">
-        <table class="events">
-          <thead><tr><th>When</th><th>State</th><th>Reason</th><th class="num">Temp</th><th class="num">Target</th><th class="num">Price</th><th>Why</th></tr></thead>
-          <tbody id="events"></tbody>
-        </table>
-      </div>
+      <details class="events-log" id="events-log">
+        <summary><h3>Switch events</h3> <span class="muted" id="events-count"></span></summary>
+        <div class="table-wrap">
+          <table class="events">
+            <thead><tr><th>When</th><th>State</th><th>Reason</th><th class="num">Temp</th><th class="num">Target</th><th class="num">Price</th><th>Why</th></tr></thead>
+            <tbody id="events"></tbody>
+          </table>
+        </div>
+      </details>
     </section>
 
     <section class="card">
