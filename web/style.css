@@ -528,7 +528,7 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 
 /* Next 24 h plan on room cards */
 .plan { margin-top: 12px; }
-.planbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--grid); gap: 1px; }
+.planbar { display: flex; height: 10px; border-radius: 3px; overflow: hidden; background: var(--grid); gap: 1px; }  /* like the chart's lanes */
 .planbar > div { min-width: 2px; }
 .planbar .pl-heat { background: var(--cat-comfort); opacity: 0.55; }
 .planbar .pl-booked { background: var(--cat-comfort); opacity: 0.9; }
