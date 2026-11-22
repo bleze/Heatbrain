@@ -6,7 +6,7 @@
   const MASK = "********";
   const TABS = [
     ["rooms", "Rooms", "home"],
-    ["plugs", "Plugs", "plug"],
+    ["plugs", "Devices", "plug"],
     ["sensors", "Sensors", "thermo"],
     ["prices", "Prices", "bolt"],
     ["notifications", "Notifications", "bell"],
@@ -324,7 +324,7 @@
     const plugsRow = el("div", { class: "row", style: "margin-top:12px" }, c);
     el("span", { class: "muted" }, plugsRow, room.thermostat ? "Thermostat:" : "Plugs:");
     const plugs = room.thermostat ? [] : S.cfg.plugs || [];
-    if (!room.thermostat && !plugs.length && !(S.cfg.thermostats || []).length) el("span", { class: "hint" }, plugsRow, "add plugs (or a thermostat) on the Plugs tab first");
+    if (!room.thermostat && !plugs.length && !(S.cfg.thermostats || []).length) el("span", { class: "hint" }, plugsRow, "add plugs (or a thermostat) on the Devices tab first");
     for (const t of S.cfg.thermostats || []) {
       const on = room.thermostat === t.id;
       if (!on && room.plugs?.length) continue;  // plugs chosen: no thermostat pills

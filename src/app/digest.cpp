@@ -87,7 +87,7 @@ DigestMessage weeklySummary(const json& report) {
     if (!missing.empty()) {
         text += "\nNo cost for: ";
         for (std::size_t i = 0; i < missing.size(); ++i) text += (i ? ", " : "") + missing[i];
-        text += " (set the radiator power under Settings → Plugs)";
+        text += " (set the radiator power under Settings → Devices)";
     }
     return {"heatbrain: last week", text};
 }
@@ -173,7 +173,7 @@ std::optional<DigestMessage> firmwareNotice(const std::string& latestTag, const 
     if (behind.empty()) return std::nullopt;
     const std::string latest = latestTag.starts_with('v') ? latestTag.substr(1) : latestTag;
     return DigestMessage{std::format("Tasmota {} is out", latest),
-                         std::format("{} run{} {}. Upgrade from Settings -> Plugs (one plug at a time; the fail-safe is "
+                         std::format("{} run{} {}. Upgrade from Settings -> Devices (one plug at a time; the fail-safe is "
                                      "tested afterwards).",
                                      behind, count == 1 ? "s" : "", current)};
 }
