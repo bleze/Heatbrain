@@ -435,7 +435,7 @@
     field(ag, "Cheap boost", num(st, "cheapBoost", { step: 0.1, placeholder: "0.5", unit: "+°C" }), { hint: "extra in the cheapest hours" });
     field(ag, "Hysteresis", num(st, "hysteresis", { step: 0.1, placeholder: "0.3", unit: "±°C" }), { hint: "avoids rapid on/off" });
     field(ag, "Stale after", num(st, "staleMinutes", { step: 5, placeholder: "30", unit: "min" }), { hint: "older readings are not trusted" });
-    field(ag, "Limp mode ON", num(st, "limpOnMinutes", { step: 5, placeholder: "10", unit: "min" }), { hint: "when the temperature is unknown" });
+    field(ag, "Limp mode ON", num(st, "limpOnMinutes", { step: 5, min: 0, placeholder: "10", unit: "min" }), { hint: "when the temperature is unknown" });
     field(ag, "Limp mode OFF", num(st, "limpOffMinutes", { step: 5, placeholder: "50", unit: "min" }), { hint: "then off for this long" });
   }
 
@@ -740,10 +740,10 @@
     helpButton(fsm, "failsafe");
     const fs = (p.failsafe ||= {});
     const ag = el("div", { class: "form-grid" }, adv);
-    field(ag, "Auto-off after", num(fs, "pulseMinutes", { step: 1, placeholder: "20", unit: "min" }), { hint: "if heatbrain stops refreshing it" });
-    field(ag, "Limp mode after", num(fs, "watchdogMinutes", { step: 1, placeholder: "30", unit: "min" }), { hint: "of silence from heatbrain" });
-    field(ag, "Limp mode ON", num(fs, "limpOnMinutes", { step: 1, placeholder: "10", unit: "min" }), { hint: "0 = stay off" });
-    field(ag, "Limp mode OFF", num(fs, "limpOffMinutes", { step: 1, placeholder: "50", unit: "min" }));
+    field(ag, "Auto-off after", num(fs, "pulseMinutes", { step: 1, min: 1, placeholder: "20", unit: "min" }), { hint: "if heatbrain stops refreshing it" });
+    field(ag, "Limp mode after", num(fs, "watchdogMinutes", { step: 1, min: 1, placeholder: "30", unit: "min" }), { hint: "of silence from heatbrain" });
+    field(ag, "Limp mode ON", num(fs, "limpOnMinutes", { step: 1, min: 0, placeholder: "10", unit: "min" }), { hint: "0 = stay off (silent if heatbrain is gone)" });
+    field(ag, "Limp mode OFF", num(fs, "limpOffMinutes", { step: 1, min: 5, placeholder: "50", unit: "min" }));
     field(ag, "Tasmota web password", secret(p, "password", "none"));
   }
 
