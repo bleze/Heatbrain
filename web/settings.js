@@ -1118,20 +1118,34 @@
     el("li", {}, ol2, "Install the free app Scriptable from the App Store.");
     el("li", {}, ol2, "Open this page on the phone, tap Copy widget script below, then in Scriptable tap + and paste. Name it heatbrain.");
     el("li", {}, ol2, "Home screen: long-press → Edit → + → Scriptable → pick a size → tap the widget → Script: heatbrain.");
-    // Optional second address for away from home (e.g. Tailscale); remembered in this browser.
-    let away = "";
-    try { away = localStorage.getItem("heatbrain-away-url") || ""; } catch {}
+    // Address for away from home (e.g. Tailscale): a real setting, saved with the config, so it
+    // is there on every device (browser storage was unreliable on the iPhone).
+    const phoneCfg = S.cfg.phone || {};
     const af = el("div", { class: "field", style: "margin-top:8px" }, wid);
     el("span", {}, af, "Address away from home (optional)");
-    const ai = el("input", { type: "url", value: away, placeholder: "e.g. http://100.101.102.103:8090 (Tailscale)" }, af);
-    ai.addEventListener("input", () => { try { localStorage.setItem("heatbrain-away-url", ai.value.trim()); } catch {} });
-    el("div", { class: "hint" }, af, "with Tailscale on the NAS and the phone; never forward a router port to heatbrain - it has no login");
+    const ai = el("input", { type: "url", value: phoneCfg.awayUrl || "", placeholder: "e.g. http://100.84.100.80:8090 (Tailscale)",
+                             autocapitalize: "off", autocorrect: "off", spellcheck: "false" }, af);
+    const cleanUrl = (v) => {
+      v = v.trim().replace(/\/+$/, "");
+      return v && !/^https?:\/\//.test(v) ? `http://${v}` : v;  // "100.84.100.80:8090" is fine too
+    };
+    const urlsNow = () => [location.origin, cleanUrl(ai.value)].filter((u, i, a) => u && a.indexOf(u) === i);
+    const tries = el("div", { class: "hint" }, af);
+    const showTries = () => { tries.textContent = `The widget tries: ${urlsNow().join(", then ")}`; };
+    showTries();
+    ai.addEventListener("input", () => {
+      const v = cleanUrl(ai.value);
+      if (v) S.cfg.phone = { ...(S.cfg.phone || {}), awayUrl: v }; else delete S.cfg.phone;
+      showTries();
+      changed();
+    });
+    el("div", { class: "hint" }, af, "Save, then copy the script. Needs Tailscale on the NAS and the phone; never forward a router port to heatbrain - it has no login.");
     const row = el("div", { class: "row", style: "margin-top:8px" }, wid);
     const ta = el("textarea", { class: "widget-script", rows: 4, readonly: true, spellcheck: "false" });
     btn(row, "Copy widget script", "check", async () => {
       try {
         const src = await (await fetch("widget-scriptable.js", { cache: "no-store" })).text();
-        const urls = [location.origin, ai.value.trim().replace(/\/+$/, "")].filter((u, i, a) => u && a.indexOf(u) === i);
+        const urls = urlsNow();
         const script = src.replace("__HEATBRAIN_URLS__", JSON.stringify(urls));
         ta.value = script;
         if (!ta.isConnected) wid.appendChild(ta);
