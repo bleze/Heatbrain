@@ -983,8 +983,12 @@ async function refreshStatus() {
     // the new status, so load the new ones rather than half-render the dashboard.
     if (s.version && state.loadedVersion && s.version !== state.loadedVersion) { location.reload(); return; }
     if (s.version) state.loadedVersion ??= s.version;
-    if (!s.rooms) { $("updated").textContent = "waiting for the first control step…"; return; }
+    if (!s.rooms) { $("updated").textContent = "waiting for the first control step…"; retrySoon(); return; }
+    const first = !state.status;
     state.status = s;
+    // Settings drawn before the first status (just after a restart) lacked the sensor lists: draw them
+    // again now, keeping any unsaved edits.
+    if (first && !$("view-settings").hidden) window.Settings?.open();
     const ce = $("config-error");
     ce.hidden = !s.configError;
     if (s.configError) {
@@ -1011,7 +1015,14 @@ async function refreshStatus() {
     }
   } catch (e) {
     $("updated").textContent = `offline: ${e.message}`;
+    if (!state.status) retrySoon();
   }
+}
+// Until the first status is in (heatbrain restarting), ask every 5 s, whatever view is open.
+let retryTimer = null;
+function retrySoon() {
+  if (retryTimer) return;
+  retryTimer = setTimeout(() => { retryTimer = null; refreshStatus(); }, 5000);
 }
 
 document.querySelectorAll(".range button").forEach((b) =>

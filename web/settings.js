@@ -931,6 +931,10 @@
       if (sns.kind === "outdoor") outdoorOptions.push([`${sns.key.split(":")[0]}:${sns.name}`, `${sns.name}${sns.temperature != null ? ` · ${sns.temperature.toFixed(1)}°` : ""}`]);
     }
     if (!S.cfg.outdoorSensor) S.cfg.outdoorSensor = undefined;
+    // No status yet (heatbrain just restarted): the chosen sensor is not "not found", just not read yet.
+    if (!state.status && S.cfg.outdoorSensor) {
+      outdoorOptions.push([S.cfg.outdoorSensor, `${S.cfg.outdoorSensor.split(":").slice(1).join(":")} (waiting for readings)`]);
+    }
     const og = el("div", { class: "form-grid" }, out);
     field(og, "Outdoor sensor", sel(S.cfg, "outdoorSensor", outdoorOptions), { span2: true, hint: "automatic = the first outdoor module" });
 
