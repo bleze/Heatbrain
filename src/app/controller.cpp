@@ -224,7 +224,7 @@ json Controller::applyToPlugs(const RoomConfig& room, bool on, Instant now, Tick
                 pj["error"] = "fail-safe not verified: not switched";
                 add(result, "plug:" + id + ":failsafe", Severity::Critical,
                     std::format("Plug '{}' is live, but {}, so heatbrain will not switch it. Fix it under "
-                                "Settings → Devices.",
+                                "Settings → Heating.",
                                 id, problem));
             } else {
                 try {

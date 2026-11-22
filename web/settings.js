@@ -6,7 +6,7 @@
   const MASK = "********";
   const TABS = [
     ["rooms", "Rooms", "home"],
-    ["plugs", "Devices", "plug"],
+    ["plugs", "Heating", "flame"],
     ["sensors", "Sensors", "thermo"],
     ["prices", "Prices", "bolt"],
     ["notifications", "Notifications", "bell"],
@@ -324,7 +324,7 @@
     const plugsRow = el("div", { class: "row", style: "margin-top:12px" }, c);
     el("span", { class: "muted" }, plugsRow, room.thermostat ? "Thermostat:" : "Plugs:");
     const plugs = room.thermostat ? [] : S.cfg.plugs || [];
-    if (!room.thermostat && !plugs.length && !(S.cfg.thermostats || []).length) el("span", { class: "hint" }, plugsRow, "add plugs (or a thermostat) on the Devices tab first");
+    if (!room.thermostat && !plugs.length && !(S.cfg.thermostats || []).length) el("span", { class: "hint" }, plugsRow, "add plugs (or a thermostat) on the Heating tab first");
     for (const t of S.cfg.thermostats || []) {
       const on = room.thermostat === t.id;
       if (!on && room.plugs?.length) continue;  // plugs chosen: no thermostat pills
@@ -888,7 +888,10 @@
       const left = el("div", { class: "row" }, r);
       left.appendChild(badge(s.kind === "outdoor" ? "snow" : "thermo", s.kind === "outdoor" ? "cool" : "warm"));
       el("b", {}, left, s.name);
-      el("span", { class: "muted" }, left, s.kind);
+      // Where the reading comes from: a Netatmo module, or a thermostat's own probe (set up under Heating).
+      const from = (s.key || "").startsWith("devi:") ? `thermostat · ${s.key.endsWith("-floor") ? "floor probe" : "room sensor"}`
+        : [s.station, s.kind].filter(Boolean).join(" · ");
+      el("span", { class: "muted" }, left, from);
       const chips = el("div", { class: "plugs" }, r);
       const chip = (cls, iconName, text) => { const ch = el("span", { class: `chip ${cls}` }, chips); ch.appendChild(icon(iconName)); ch.appendChild(document.createTextNode(text)); };
       if (s.temperature != null) chip("", "thermo", `${s.temperature.toFixed(1)}°C`);

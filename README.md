@@ -62,7 +62,7 @@ countdown:
    the last-resort cap.
 5. `PowerOnState 0`: after a power cut, plugs start OFF until heatbrain takes over.
 
-### Firmware and fail-safe test (Settings → Devices)
+### Firmware and fail-safe test (Settings → Heating)
 
 - **Test fail-safe**: switches the relay on with a 20 s auto-off, refreshes it once (the
   countdown must restart) and checks the relay turns itself off; then restores the plug's
@@ -169,7 +169,7 @@ straight from the source folder, so edits only need a browser refresh.
 ## Heating cost
 
 The dashboard estimates what each radiator costs: on-time from the decision log × the
-radiator's wattage (set per plug in Settings → Devices) × the actual price in each 15-minute
+radiator's wattage (set per plug in Settings → Heating) × the actual price in each 15-minute
 slot. It shows cost, energy, the average price paid against each day's average price, and
 what the timing saved. Dry-run plugs show what they *would* have cost. The Sonoff Basic
 has no power metering, so these are estimates; plugs with metering (POW R3, S31, ...)
@@ -216,7 +216,7 @@ Docker build) and publishes `ghcr.io/bleze/heatbrain:latest` (plus a `sha-…` t
    switch the plugs.
 6. Other commands run inside the container, e.g.
    `sudo docker exec heatbrain /app/bin/heatbrain plugs`.
-7. **Going live, one plug at a time:** Settings → Devices → *Install fail-safe*, *Test
+7. **Going live, one plug at a time:** Settings → Heating → *Install fail-safe*, *Test
    fail-safe*, then switch the plug to Live and save. *Remove fail-safe* undoes it.
 
 **Updating.** Container Manager does not check ghcr.io images for updates (and *Build* reuses

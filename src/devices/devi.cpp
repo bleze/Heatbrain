@@ -466,13 +466,34 @@ DeviIdentity finishPairing(const fs::path& dataDir, DeviIdentity id, const std::
     if (house.is_discarded()) throw std::runtime_error("The phone sent an unreadable house configuration.");
     id.houseName = house.value("houseName", id.houseName);
     for (const auto& room : house.value("rooms", json::array())) {
-        const std::string peer = room.value("peerId", "");
-        if (peer.size() != 64) continue;
+        const std::string peer = room.is_object() ? room.value("peerId", "") : "";
+        if (peer.size() != 64) {
+            log::warn("DEVI: skipped a room whose peerId is {} characters long (expected 64)", peer.size());
+            continue;
+        }
         bool known = false;
         for (auto& existing : id.rooms) {
             if (existing.peerId == peer) { existing.name = room.value("roomName", existing.name); known = true; }
         }
         if (!known) id.rooms.push_back({room.value("roomName", "DEVI"), peer});
+    }
+    if (id.rooms.empty()) {
+        // Paired, but nothing usable came: say what did come (field names only, no device ids).
+        std::string shape;
+        for (const auto& [k, v] : house.items()) {
+            shape += (shape.empty() ? "" : ", ") + k;
+            if (v.is_array()) {
+                shape += std::format("[{}]", v.size());
+                if (!v.empty() && v[0].is_object()) {
+                    std::string inner;
+                    for (const auto& [ik, iv] : v[0].items()) inner += (inner.empty() ? "" : " ") + ik;
+                    shape += "{" + inner + "}";
+                }
+            }
+        }
+        log::warn("DEVI: the phone sent a house configuration without thermostats ({} bytes): {}", data.size(), shape);
+        throw std::runtime_error("Paired, but the phone sent no thermostats (it sent: " + shape +
+                                 "). Check that the thermostat is in the house you shared.");
     }
     saveDeviIdentity(dataDir, id);
     log::info("DEVI: paired with house '{}', {} thermostat(s)", id.houseName, id.rooms.size());

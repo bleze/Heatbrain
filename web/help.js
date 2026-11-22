@@ -5,7 +5,7 @@ const HELP = {
   start: {
     title: "Getting started",
     list: [
-      "Settings → Devices: scan your network, add your Tasmota plugs and enter each radiator's power (W).",
+      "Settings → Heating: scan your network, add your Tasmota plugs and enter each radiator's power (W).",
       "Settings → Sensors: connect Netatmo so rooms get their temperature.",
       "Settings → Rooms: add a room, pick its plug(s) and sensor, and set its daily program.",
       "Leave plugs in dry-run for a day or two and watch what heatbrain would do on the dashboard.",
@@ -137,7 +137,7 @@ const HELP = {
     title: "Your meter (Eloverblik)",
     body: [
       "Eloverblik (Energinet's DataHub) has your electricity meter's readings, whatever your supplier. Log in on eloverblik.dk with MitID, go to Data sharing and create a token, then paste it here and save. heatbrain fetches the readings every 6 hours (or with 'Fetch now'); they arrive about a day late, so the dashboard shows the past, not today.",
-      "The dashboard's 'Electricity use' card shows the household's measured use per quarter or hour, with the part heatbrain's radiators drew in the same intervals (live plugs that were on × their power) at the bottom. If the radiators ever look bigger than the measured total, a radiator's power is probably set too high under Settings → Devices.",
+      "The dashboard's 'Electricity use' card shows the household's measured use per quarter or hour, with the part heatbrain's radiators drew in the same intervals (live plugs that were on × their power) at the bottom. If the radiators ever look bigger than the measured total, a radiator's power is probably set too high under Settings → Heating.",
     ],
   },
   phone: {

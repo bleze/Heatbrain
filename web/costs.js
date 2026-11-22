@@ -73,7 +73,7 @@
       const td = el("td", { colspan: 6, class: "muted" }, tr, "Set the radiator power for ");
       td.appendChild(document.createTextNode(r.missingWatts.join(", ") || "its plugs"));
       td.appendChild(document.createTextNode(" in "));
-      el("a", { href: "#settings" }, td, "Settings → Devices");
+      el("a", { href: "#settings" }, td, "Settings → Heating");
     }
     $("cost-note").textContent =
       "Estimated: radiator power × time the plug was on × the actual price in each 15-minute slot. " +
