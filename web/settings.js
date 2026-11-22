@@ -1497,7 +1497,7 @@
     el("div", { class: "hint" }, im, "Replaces this heatbrain's settings and state with an export. The current settings are backed up first.");
     const imRow = el("div", { class: "row" }, im);
     const file = el("input", { type: "file", accept: ".json,application/json", hidden: true }, imRow);
-    btn(imRow, S.importFile ? "Choose another file" : "Choose export file", "search", () => file.click());
+    btn(imRow, S.importFile ? "Choose another file" : "Choose export file", "search", () => file.click(), "tone-btn-amber");
     file.addEventListener("change", async () => {
       const f = file.files[0];
       if (!f) return;

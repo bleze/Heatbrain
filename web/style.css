@@ -325,6 +325,8 @@ button.ghost:hover { background: color-mix(in srgb, var(--ink) 9%, transparent);
 .transfer h3 .icon[data-icon="save"] { color: var(--cat-comfort); }
 .transfer h3 .icon[data-icon="undo"] { color: var(--flame-2); }
 .apply-btn .icon { color: var(--good); }
+/* The import box's button carries the box's colour (export's is a filled primary button) */
+.tone-btn-amber .icon { color: var(--flame-2); }
 .transfer .row { margin-top: 10px; gap: 10px; flex-wrap: wrap; }
 .transfer .file-summary { margin-top: 10px; font-size: 13px; }
 @media (max-width: 720px) { .transfer { grid-template-columns: 1fr; } }
