@@ -18,9 +18,9 @@ using namespace std::chrono;
 namespace {
 std::atomic<bool> g_meterNow{false};
 constexpr hours kSyncEvery{6};
-constexpr days kFirstFetch{14};
-constexpr days kBackfillTo{365};    // fill the history back this far...
-constexpr days kBackfillChunk{90};  // ...this much per fetch, gently
+constexpr days kFirstFetch{30};
+constexpr days kBackfillChunk{365};     // older history: a year per fetch...
+constexpr days kBackfillLimit{365 * 10};  // ...until the account has nothing older (safety stop)
 Instant nowSec() { return floor<seconds>(system_clock::now()); }
 }  // namespace
 
@@ -88,9 +88,9 @@ void MeterSync::syncOnce() {
 
         // Older history, a chunk per fetch, until a year is in.
         const bool complete = status.value("historyComplete", false);
-        if (const auto first = history.firstMeterReading(); !complete && first && first->start > nowSec() - kBackfillTo) {
+        if (const auto first = history.firstMeterReading(); !complete && first && first->start > nowSec() - kBackfillLimit) {
             const Instant olderTo = first->start;
-            const Instant olderFrom = std::max(olderTo - kBackfillChunk, nowSec() - kBackfillTo);
+            const Instant olderFrom = olderTo - kBackfillChunk;
             const auto older = client.readings(chosen->id, formatLocalDate(tz_.toLocal(olderFrom)),
                                                formatLocalDate(tz_.toLocal(olderTo)));
             history.recordMeter(older);
@@ -151,13 +151,17 @@ json usageReport(const json& cfg, const History& history, Instant from, Instant 
         }
     }
 
+    // Years of hourly readings: sort the on-intervals once (each is at most kCap long) and only
+    // look at those that can overlap each reading.
+    std::ranges::sort(on, {}, &On::a);
     json meter = json::array(), heating = json::array();
     for (const auto& r : history.meterReadings(from, to)) {
         const Instant s = r.start, e = r.start + r.length;
         double kWh = 0;
-        for (const auto& o : on) {
-            const Instant a = std::max(o.a, s), b = std::min(o.b, e);
-            if (b > a) kWh += o.w / 1000.0 * duration<double, std::ratio<3600>>(b - a).count();
+        auto it = std::ranges::lower_bound(on, s - kCap, {}, &On::a);
+        for (; it != on.end() && it->a < e; ++it) {
+            const Instant a = std::max(it->a, s), b = std::min(it->b, e);
+            if (b > a) kWh += it->w / 1000.0 * duration<double, std::ratio<3600>>(b - a).count();
         }
         const auto secs = duration_cast<seconds>(r.length).count();
         meter.push_back({s.time_since_epoch().count(), secs, r.kWh});

@@ -285,12 +285,8 @@ void History::prune(Instant olderThan) {
         s.bind(1, olderThan);
         s.step();
     }
-    {
-        // Meter readings are small (one row an hour) and worth comparing across seasons: 2 years.
-        Stmt m(db_, "DELETE FROM meter WHERE start<?");
-        m.bind(1, std::min(olderThan, Instant{floor<seconds>(system_clock::now()) - days{730}}));
-        m.step();
-    }
+    // Meter readings are never pruned: one row an hour (~9000 a year) is worth keeping for
+    // month-by-month and year-by-year comparisons.
     Stmt s(db_, "DELETE FROM prices WHERE slot<?");
     s.bind(1, olderThan);
     s.step();

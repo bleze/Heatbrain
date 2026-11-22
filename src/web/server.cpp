@@ -372,12 +372,14 @@ void WebServer::routes() {
         sendJson(res, json{{"requested", true}});
     });
     s.Get("/api/usage", [this](const httplib::Request& req, httplib::Response& res) {
-        const int dayCount = req.has_param("days") ? std::clamp(std::atoi(req.get_param_value("days").c_str()), 1, 366) : 7;
+        // days=0: everything stored.
+        const int dayCount = req.has_param("days") ? std::clamp(std::atoi(req.get_param_value("days").c_str()), 0, 3660) : 7;
         History history(ctx_.dataDir / "history.db");
         // Ending with the newest reading: the meter lags a day behind.
         const auto last = history.lastMeterReading();
         const Instant to = last ? last->start + last->length : floor<seconds>(system_clock::now());
-        const Instant from = to - days{dayCount};
+        const auto first = history.firstMeterReading();
+        const Instant from = dayCount == 0 ? (first ? first->start : to - days{30}) : to - days{dayCount};
         json out = usageReport(readConfigFile(ctx_.configFile), history, from, to);
         out["from"] = epoch(from);
         out["to"] = epoch(to);
