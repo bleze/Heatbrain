@@ -11,23 +11,36 @@
 # Copy this file to /volume1/docker/heatbrain/ (the project folder, next to the compose file).
 # Your settings and history live in that folder too, so an update never touches them.
 # heatbrain saves the night schedules it loaded, so updating during a Wi-Fi off period is fine.
+# To see this script's output: Task Scheduler -> Settings -> "Save output results" to a folder.
 
 set -u
-PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "$0")" && pwd)}"
-cd "$PROJECT_DIR" || { echo "heatbrain update: $PROJECT_DIR not found"; exit 1; }
+# Task Scheduler runs with a minimal PATH; Synology keeps docker in /usr/local/bin.
+PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:${PATH:-}"
+export PATH
 
+fail() { echo "heatbrain update FAILED: $*"; exit 1; }
+
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+cd "$PROJECT_DIR" || fail "folder $PROJECT_DIR not found"
+echo "heatbrain update in $PROJECT_DIR ($(date '+%Y-%m-%d %H:%M'))"
+
+command -v docker >/dev/null 2>&1 || fail "docker not found (is Container Manager installed?)"
 if docker compose version >/dev/null 2>&1; then
     DC="docker compose"
 elif command -v docker-compose >/dev/null 2>&1; then
     DC="docker-compose"
 else
-    echo "heatbrain update: docker compose not found (is Container Manager installed?)"
-    exit 1
+    fail "docker compose not found"
 fi
+ls docker-compose.yml docker-compose.yaml compose.yml compose.yaml >/dev/null 2>&1 ||
+    fail "no compose file in $PROJECT_DIR - copy this script into the Container Manager project folder"
+echo "using: $DC"
 
 before=$(docker inspect --format '{{.Image}}' heatbrain 2>/dev/null || echo none)
-$DC pull heatbrain || { echo "heatbrain update: pull failed"; exit 1; }
-$DC up -d heatbrain || { echo "heatbrain update: start failed"; exit 1; }
+echo "pulling the newest image..."
+$DC pull heatbrain || fail "pull failed (internet? ghcr.io reachable?)"
+echo "starting..."
+$DC up -d heatbrain || fail "start failed"
 after=$(docker inspect --format '{{.Image}}' heatbrain 2>/dev/null || echo none)
 
 if [ "$before" = "$after" ]; then
