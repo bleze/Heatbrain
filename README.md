@@ -219,8 +219,11 @@ Docker build) and publishes `ghcr.io/bleze/heatbrain:latest` (plus a `sha-…` t
 7. **Going live, one plug at a time:** Settings → Plugs → *Install fail-safe*, *Test
    fail-safe*, then switch the plug to Live and save. *Remove fail-safe* undoes it.
 
-Updating: Container Manager → Project → heatbrain → Action → Build (pulls `latest`), or
-`sudo docker compose pull && sudo docker compose up -d` in the project folder.
+**Updating.** Container Manager does not check ghcr.io images for updates (and *Build* reuses
+the local image). Copy `deploy/update.sh` into `/volume1/docker/heatbrain/` and add it in
+Control Panel → Task Scheduler → Create → Scheduled Task → User-defined script (user `root`,
+command `sh /volume1/docker/heatbrain/update.sh`), daily or run by hand. It pulls the newest
+image, restarts heatbrain only if it changed and removes the old image.
 
 ## Development (Windows, Visual Studio 2026)
 
