@@ -633,7 +633,11 @@ let renderRooms = function () {
     const reason = el("div", { class: "reason" }, card);
     if (cat) el("span", { class: "swatch", style: `background:${catColor(cat)}` }, reason);
     reason.appendChild(document.createTextNode(reasonLabel(r.reason)));
-    el("div", { class: "detail" }, card, r.detail);
+    // The detail often starts with the reason's own words ("Off by program 17:00-21:00"): show what it adds.
+    const label = reasonLabel(r.reason);
+    let detail = r.detail || "";
+    if (detail.toLowerCase().startsWith(label.toLowerCase())) detail = detail.slice(label.length).replace(/^[\s:·-]+/, "");
+    if (detail) el("div", { class: "detail" }, card, detail.charAt(0).toUpperCase() + detail.slice(1));
     // Only when something outranks the override (e.g. above max); otherwise the reason says it.
     if (r.override && !["MANUAL_ON", "MANUAL_OFF"].includes(r.reason)) {
       el("div", { class: "override-note" }, card, `Manual ${r.override.on ? "ON" : "OFF"} until ${hm(r.override.until)}`);
