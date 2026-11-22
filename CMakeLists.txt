@@ -21,8 +21,16 @@ find_package(httplib CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
-find_package(unofficial-sodium CONFIG REQUIRED)
-find_package(protobuf-c CONFIG REQUIRED)
+# libsodium: from vcpkg on Windows, from the system (libsodium-dev) on Linux - vcpkg's autotools
+# build of it is fragile in the Docker build.
+if(WIN32)
+  find_package(unofficial-sodium CONFIG REQUIRED)
+  set(HEATBRAIN_SODIUM unofficial-sodium::sodium)
+else()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)
+  set(HEATBRAIN_SODIUM PkgConfig::SODIUM)
+endif()
 
 # --- OpenSDG (vendored, GPL-3.0): SecureDeviceGrid client for Danfoss DEVIreg Smart thermostats ---
 set(OPENSDG_DIR ${CMAKE_SOURCE_DIR}/third_party/opensdg)
@@ -36,11 +44,13 @@ add_library(opensdg STATIC
   ${OPENSDG_DIR}/library/utils.c
   ${OPENSDG_DIR}/library/mainloop_events.c
   ${OPENSDG_DIR}/library/control_protocol.pb-c.c
+  ${CMAKE_SOURCE_DIR}/third_party/protobuf-c/protobuf-c/protobuf-c.c  # runtime only (BSD-2), vendored
   $<IF:$<BOOL:${WIN32}>,${OPENSDG_DIR}/library/mainloop_win32.c,${OPENSDG_DIR}/library/mainloop_poll.c>
 )
-target_include_directories(opensdg PUBLIC ${OPENSDG_DIR}/include PRIVATE ${OPENSDG_DIR}/library)
+target_include_directories(opensdg PUBLIC ${OPENSDG_DIR}/include
+                           PRIVATE ${OPENSDG_DIR}/library ${CMAKE_SOURCE_DIR}/third_party/protobuf-c)
 target_compile_definitions(opensdg PUBLIC OPENSDG_STATIC PRIVATE _CRT_SECURE_NO_WARNINGS)
-target_link_libraries(opensdg PRIVATE unofficial-sodium::sodium protobuf-c::protobuf-c
+target_link_libraries(opensdg PRIVATE ${HEATBRAIN_SODIUM}
                       PUBLIC $<IF:$<BOOL:${WIN32}>,Ws2_32,pthread>)
 if(MSVC)
   target_compile_options(opensdg PRIVATE /W1)  # third-party C: keep its warnings out of our build

@@ -6,7 +6,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # GCC 14: first libstdc++ with C++20 time zone support (std::chrono::locate_zone).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         g++-14 cmake ninja-build git curl zip unzip tar pkg-config ca-certificates \
-        perl make linux-libc-dev tzdata python3 autoconf automake libtool \
+        perl make linux-libc-dev tzdata python3 libsodium-dev \
     && rm -rf /var/lib/apt/lists/*
 ENV CC=gcc-14 CXX=g++-14 VCPKG_ROOT=/opt/vcpkg VCPKG_DISABLE_METRICS=1
 
@@ -30,7 +30,7 @@ RUN cmake --preset linux-release -DVCPKG_INSTALLED_DIR=/src/vcpkg_installed -DHE
 # ---- runtime ---------------------------------------------------------------------------
 FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata libsodium23 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app /app
 
