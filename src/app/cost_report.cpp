@@ -30,24 +30,43 @@ json costReport(const json& cfg, const History& history, Instant now, int dayCou
         const std::string id = r.value("id", "");
         double watts = 0;
         json missing = json::array();
+        const std::string thermostat = r.value("thermostat", "");
+        if (!thermostat.empty()) {
+            // A thermostat room: its power is set on the thermostat (Settings -> Heating).
+            for (const auto& t : cfg.value("thermostats", json::array())) {
+                if (t.value("id", "") == thermostat) watts = t.value("watts", 0.0);
+            }
+            if (watts <= 0) missing.push_back(thermostat);
+        }
         for (const auto& pid : r.value("plugs", json::array())) {
             const std::string plugId = pid.get<std::string>();
             if (auto it = wattsByPlug.find(plugId); it != wattsByPlug.end()) watts += it->second;
             else missing.push_back(plugId);
         }
         json room{{"id", id}, {"name", r.value("name", id)}, {"watts", watts}, {"missingWatts", missing}};
+        if (!thermostat.empty()) room["thermostat"] = true;
         if (!missing.empty() || watts <= 0) {
             rooms.push_back(room);
             continue;
         }
         std::vector<DecisionPoint> points;
+        std::vector<CounterSample> counter;  // thermostat rooms: its real heating time
         for (const auto& d : history.decisions(id, from, now + seconds{1}, false)) {
             const bool live = std::ranges::any_of(d.plugs, [](const json& p) { return p.value("mode", "") == "live"; });
             points.push_back({d.at, d.on, live});
+            for (const auto& p : d.plugs) {
+                if (p.contains("relayOnSeconds") && p["relayOnSeconds"].is_number()) {
+                    counter.push_back({d.at, p["relayOnSeconds"].get<double>(), live});
+                }
+            }
         }
+        const bool measured = counter.size() >= 2;
+        room["measured"] = measured;  // energy from the thermostat's own heating time
         json dj = json::array();
         double kWh = 0, cost = 0, saved = 0, onHours = 0, live = 0;
-        for (const auto& d : dailyCost(points, prices, watts, seconds{3 * tick}, from, now, tz)) {
+        const auto dayCosts = measured ? dailyCostFromCounter(counter, prices, watts, seconds{3 * tick}, from, now, tz)
+                                       : dailyCost(points, prices, watts, seconds{3 * tick}, from, now, tz);
+        for (const auto& d : dayCosts) {
             dj.push_back({{"date", d.date}, {"kWh", d.kWh}, {"cost", d.cost}, {"onHours", d.onHours},
                           {"liveKWh", d.liveKWh}, {"kWhWithoutPrice", d.kWhWithoutPrice}});
             kWh += d.kWh;

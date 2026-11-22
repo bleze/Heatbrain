@@ -262,6 +262,7 @@ json Controller::applyToThermostat(const RoomConfig& room, const Decision& d, Ti
         auto th = DeviRegistry::instance().get(t->peerId);
         const DeviState s = th->state();  // refreshed by the DEVI temperature source this step
         if (s.heating) tj["state"] = *s.heating;
+        if (s.relayOnSeconds) tj["relayOnSeconds"] = *s.relayOnSeconds;  // for exact energy (cost report)
         if (s.manualSetpoint) tj["deviSetpoint"] = *s.manualSetpoint;
         if (s.controlState) tj["deviMode"] = dominion::controlStateName(*s.controlState);
         if (s.floorTemp) tj["floor"] = *s.floorTemp;

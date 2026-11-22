@@ -233,7 +233,11 @@ void DeviThermostat::onData(const std::uint8_t* data, unsigned length) {
         else if (p.code == kHeatingOn) state_.heating = b();
         else if (p.code == kWindowOpen) state_.windowOpen = b();
         else if (p.code == kAlarms && !p.payload.empty()) state_.alarms = p.payload[0];
-        else if (p.code == kRelayCount || p.code == kRelayOnTime || p.code == kSystemRuntime || p.code == kWizardInfo ||
+        if (p.code == kRelayOnTime && p.payload.size() >= 4) {
+            state_.relayOnSeconds = p.payload[0] | (p.payload[1] << 8) | (p.payload[2] << 16) |
+                                    (static_cast<std::uint32_t>(p.payload[3]) << 24);
+        }
+        if (p.code == kRelayCount || p.code == kRelayOnTime || p.code == kSystemRuntime || p.code == kWizardInfo ||
                  p.code == kEnergyTotal || p.code == kEnergy30Days || p.code == kEnergy7Days) {
             state_.raw[p.code.code] = toHex(p.payload.data(), p.payload.size());
         }

@@ -166,7 +166,7 @@ const HELP = {
   costs: {
     title: "Heating cost",
     body: [
-      "Estimated: radiator power × the time the plug was on × the real price in each 15-minute slot. The Sonoff Basic cannot measure power, and a radiator's own thermostat may cut out now and then, so the real figure can be a little lower. 'Saved by timing' compares with paying each day's average price for the same energy.",
+      "Plugs: estimated as radiator power × the time the plug was on × the real price in each 15-minute slot. The Sonoff Basic cannot measure power, and a radiator's own thermostat may cut out now and then, so the real figure can be a little lower. Thermostats (DEVIreg Smart) report how long they actually heat, so their energy is that time × the power set for the thermostat under Settings -> Heating. 'Saved by timing' compares with paying each day's average price for the same energy.",
     ],
   },
 };

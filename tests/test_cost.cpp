@@ -74,3 +74,25 @@ TEST_CASE("Daily average market price") {
     const auto avg = dailyAveragePrice(flatPrices(21, 2.0, 3.4), tz());
     CHECK(avg.at("2026-11-21") == Approx((20 * 2.0 + 4 * 3.4) / 24));
 }
+
+TEST_CASE("Thermostat energy from its heating-time counter: exact, priced where it happened") {
+    // A 2975 W floor: 15 min of heating in the 16:45-17:00 interval (cheap), 30 min across the next
+    // hour (peak), nothing after; the counter is lifetime seconds.
+    const std::vector<CounterSample> s{{at(21, 16, 45), 1000, true}, {at(21, 17, 0), 1000 + 900, true},
+                                       {at(21, 18, 0), 1900 + 1800, true}, {at(21, 18, 5), 3700, true}};
+    const auto days = dailyCostFromCounter(s, flatPrices(21, 2.0, 3.4), 2975, hours{2}, at(21, 0), at(22, 0), tz());
+    REQUIRE(days.size() == 1);
+    CHECK(days[0].onHours == Approx(0.75));
+    CHECK(days[0].kWh == Approx(2.975 * 0.75));
+    CHECK(days[0].cost == Approx(2.975 * (0.25 * 2.0 + 0.5 * 3.4)));
+    CHECK(days[0].liveKWh == Approx(days[0].kWh));
+}
+
+TEST_CASE("Thermostat counter: gaps and resets are skipped, not invented") {
+    const std::vector<CounterSample> s{{at(21, 10), 5000, true}, {at(21, 14), 9000, true},   // 4 h gap: skipped
+                                       {at(21, 14, 5), 9100, false}, {at(21, 14, 10), 50, false}};  // reset
+    const auto days = dailyCostFromCounter(s, flatPrices(21, 2.0, 3.4), 1000, minutes{15}, at(21, 0), at(22, 0), tz());
+    REQUIRE(days.size() == 1);
+    CHECK(days[0].onHours == Approx(100.0 / 3600));
+    CHECK(days[0].liveKWh == Approx(0.0));  // dry-run interval
+}

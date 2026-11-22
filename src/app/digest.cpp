@@ -87,7 +87,7 @@ DigestMessage weeklySummary(const json& report) {
     if (!missing.empty()) {
         text += "\nNo cost for: ";
         for (std::size_t i = 0; i < missing.size(); ++i) text += (i ? ", " : "") + missing[i];
-        text += " (set the radiator power under Settings → Heating)";
+        text += " (set the heating power under Settings → Heating)";
     }
     return {"heatbrain: last week", text};
 }

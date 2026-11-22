@@ -65,19 +65,21 @@
       const p = r.days.reduce((b, x) => b + x.kWh - x.kWhWithoutPrice, 0);
       el("td", { class: "num" }, tr, p > 0 ? (r.total.cost / p).toFixed(2) : "–");
       el("td", { class: "num" }, tr, money(r.total.saved, cur));
-      el("td", { class: "muted" }, tr, r.total.liveKWh > 0 ? `${r.watts} W` : `${r.watts} W · dry-run (simulated)`);
+      el("td", { class: "muted", title: r.measured ? "the thermostat's own heating time × its power" : "" }, tr,
+        `${r.watts} W${r.measured ? " · measured time" : r.total.liveKWh > 0 ? "" : " · dry-run (simulated)"}`);
     }
     for (const r of missing) {
       const tr = el("tr", {}, body);
       el("td", {}, tr, r.name);
-      const td = el("td", { colspan: 6, class: "muted" }, tr, "Set the radiator power for ");
-      td.appendChild(document.createTextNode(r.missingWatts.join(", ") || "its plugs"));
+      const td = el("td", { colspan: 6, class: "muted" }, tr, "Set the heating power for ");
+      td.appendChild(document.createTextNode(r.missingWatts.join(", ") || (r.thermostat ? "its thermostat" : "its plugs")));
       td.appendChild(document.createTextNode(" in "));
       el("a", { href: "#settings" }, td, "Settings → Heating");
     }
     $("cost-note").textContent =
-      "Estimated: radiator power × time the plug was on × the actual price in each 15-minute slot. " +
-      "The Sonoff Basic can't measure power, and a radiator's own thermostat may switch it off now and then.";
+      "Plugs: estimated as radiator power × time the plug was on × the actual price in each 15-minute slot " +
+      "(the Sonoff Basic can't measure power, and a radiator's own thermostat may switch it off now and then). " +
+      "Thermostats: the time the thermostat itself reports heating × its power - measured time, not an estimate.";
   }
 
   function renderChart(d, rooms) {

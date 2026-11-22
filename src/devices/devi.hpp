@@ -47,6 +47,7 @@ struct DeviState {
     std::optional<bool> heating, windowOpen;
     std::uint8_t alarms = 0;
     std::optional<Instant> updated;  // last packet received
+    std::optional<std::uint32_t> relayOnSeconds;  // lifetime seconds the relay has been on (real heating time)
     std::map<int, std::string> raw;  // code -> payload as hex, for values whose format is still being worked out
 };
 
