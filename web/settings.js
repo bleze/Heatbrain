@@ -987,6 +987,12 @@
       const hint = el("div", { class: "hint" }, phone, "On your phone you can also just open ");
       el("a", { href: `${server}/${encodeURIComponent(ntfy.topic)}`, target: "_blank", rel: "noopener" }, hint, `${server.replace(/^https?:\/\//, "")}/${ntfy.topic}`);
       hint.appendChild(document.createTextNode(" - it opens the subscription in the app."));
+      // Faster still: scan it with the phone's camera.
+      const qr = el("div", { class: "qr-box" }, phone);
+      try {
+        qr.appendChild(QR.svg(`${server}/${ntfy.topic}`, 168));
+        el("div", { class: "hint" }, qr, "Scan with the phone camera to open the topic");
+      } catch { qr.remove(); }
       const ol2 = el("ol", { class: "steps", start: 3 }, phone);
       el("li", {}, ol2, "Save & apply, then send a test message.");
       testButton(el("div", { class: "actions" }, phone));

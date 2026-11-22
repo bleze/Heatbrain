@@ -8,8 +8,11 @@
 
   async function load(force = false) {
     if (!force && Date.now() - U.loadedAt < 300_000 && U.data) return render();
+    const want = U.days;
     try {
-      U.data = await api(`/api/usage?days=${U.days}`);
+      const data = await api(`/api/usage?days=${want}`);
+      if (want !== U.days) return;  // a newer range was chosen meanwhile: its answer wins
+      U.data = data;
       U.loadedAt = Date.now();
       render();
     } catch { /* optional feature */ }
@@ -75,6 +78,30 @@
     renderChart(d, buckets(d));
   }
 
+  // Local-calendar ticks: Mondays for a month, month starts beyond that; thinned to fit the width.
+  function calendarTicks(t0, t1, width) {
+    const fmt = new Intl.DateTimeFormat("en-GB", { timeZone: state.tz, year: "numeric", month: "numeric",
+      day: "numeric", weekday: "short", hour: "numeric", hourCycle: "h23" });
+    const parts = (t) => Object.fromEntries(fmt.formatToParts(t * 1000).map((p) => [p.type, p.value]));
+    const span = t1 - t0, weekly = span <= 45 * 86400;
+    const ticks = [];
+    // Walk the days (in steps of an hour around midnight, so DST shifts can't skip one).
+    for (let t = t0 - (t0 % 3600); t <= t1; t += 3600) {
+      const p = parts(t);
+      if (Number(p.hour) !== 0) continue;  // "00" or "0", depending on the browser
+      if (weekly ? p.weekday === "Mon" : Number(p.day) === 1) {
+        const label = weekly
+          ? `${Number(p.day)}/${Number(p.month)}`
+          : new Intl.DateTimeFormat("en-GB", { timeZone: state.tz, month: "short", ...(Number(p.month) === 1 ? { year: "numeric" } : {}) }).format(t * 1000);
+        ticks.push({ t, label, major: !weekly && Number(p.month) === 1 });
+        t += 20 * 3600;  // skip ahead within the day
+      }
+    }
+    const room = Math.max(1, Math.floor(width / 56));  // ~56 px per label
+    const every = Math.ceil(ticks.length / room);
+    return ticks.filter((_, i) => i % every === 0);
+  }
+
   function renderChart(d, bars) {
     const host = $("usage-chart");
     host.replaceChildren();
@@ -95,7 +122,8 @@
       el("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }, svg, v.toFixed(v < 10 ? 1 : 0));
     }
     el("text", { class: "panel-label", x: m.l, y: m.t - 1 }, svg, energy ? (allTime() ? "kWh per month" : "kWh per day") : "kW");
-    drawTimeAxis(svg, x, timeTicks(t0, t1, W - m.l - m.r), m.t, H - m.b, H - 6);
+    // Up to a week: the usual time axis. Longer: calendar ticks (weeks or months), never thousands.
+    drawTimeAxis(svg, x, U.days > 0 && U.days <= 7 ? timeTicks(t0, t1, W - m.l - m.r) : calendarTicks(t0, t1, W - m.l - m.r), m.t, H - m.b, H - 6);
     for (const b of bars) {
       const x0 = x(b.start), x1 = x(b.start + b.secs);
       const w = Math.max(1, x1 - x0 - (x1 - x0 > 4 ? 2 : 0));  // 2px gap when there's room
