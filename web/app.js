@@ -1169,9 +1169,10 @@ function retrySoon() {
   retryTimer = setTimeout(() => { retryTimer = null; refreshStatus(); }, 5000);
 }
 
-document.querySelectorAll(".range button").forEach((b) =>
+// The room chart's own range buttons only (cost and usage have theirs).
+document.querySelectorAll("#detail-range button").forEach((b) =>
   b.addEventListener("click", () => {
-    document.querySelectorAll(".range button").forEach((x) => x.classList.toggle("active", x === b));
+    document.querySelectorAll("#detail-range button").forEach((x) => x.classList.toggle("active", x === b));
     state.hours = Number(b.dataset.hours);
     loadHistory();
   }));
