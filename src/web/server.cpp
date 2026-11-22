@@ -11,6 +11,7 @@
 #include <iterator>
 #include <regex>
 
+#include "app/power_mix_sync.hpp"
 #include "app/config_service.hpp"
 #include "app/cost_report.hpp"
 #include "app/rooms.hpp"
@@ -423,6 +424,11 @@ void WebServer::routes() {
         out["from"] = epoch(from);
         out["to"] = epoch(to);
         sendJson(res, out);
+    });
+
+    // The price area's power mix per hour (fetched in the background, see PowerMixSync).
+    s.Get("/api/power-mix", [this](const httplib::Request&, httplib::Response& res) {
+        sendJson(res, loadPowerMix(ctx_.dataDir));
     });
 
     // DEVIreg Smart thermostats: what is paired and how they are doing, and pairing itself.

@@ -84,6 +84,7 @@ add_library(heatbrain_io STATIC
   src/providers/price_model.cpp
   src/providers/eloverblik.cpp
   src/providers/forecast.cpp
+  src/providers/power_mix.cpp
   src/plugs/tasmota.cpp
   src/plugs/plugs.cpp
   src/sensors/netatmo.cpp
@@ -99,6 +100,7 @@ add_library(heatbrain_io STATIC
   src/app/digest.cpp
   src/app/transfer.cpp
   src/app/meter_sync.cpp
+  src/app/power_mix_sync.cpp
   src/devices/dominion.cpp
   src/devices/devi.cpp
   src/devices/sdg_incoming.cpp
@@ -142,6 +144,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_thermal.cpp
     tests/test_window.cpp
     tests/test_forecast.cpp
+    tests/test_power_mix.cpp
     tests/test_sdg_incoming.cpp
     tests/test_controller.cpp
     tests/test_alerts.cpp

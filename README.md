@@ -260,7 +260,8 @@ heatbrain override bedroom clear
 home network): problems banner, a card per room (temperature, decision and reason, the next
 24 h, "Heat 1 h" / "Off 2 h" / "Book"), per room a chart of temperature + target, heating
 periods coloured by reason category (comfort / price-driven / safety-manual), Wi-Fi off
-periods and the price, with the planned hours ahead, plus the switch events, the price chart,
+periods, the price (every known price ahead) and the power mix of the price area (wind, solar,
+power plants, imports and CO2 per hour, from Energinet's open data), plus the switch events,
 heating cost and meter data. The outdoor card opens the same chart for the outdoor temperature. Overrides
 from the UI are applied immediately. **Settings** edits everything in the config (rooms and
 programs, plugs incl. fail-safe and firmware upgrades, sensors, prices, notifications,

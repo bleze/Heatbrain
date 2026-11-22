@@ -110,6 +110,7 @@ const HELP = {
     title: "What a kWh costs",
     body: [
       "The price per 15 minutes is the sum of its parts - spot price, grid tariff, Energinet's tariffs, electricity tax and your supplier's markup - with VAT on top. The defaults fit EWII on Radius in DK2; enter your supplier's markup from your contract.",
+      "The room chart shows every known price ahead (tomorrow's from about 13:00) and, under it, the power mix of your price area per hour: wind, solar, the power plants (gas, biomass, coal and waste together - the fuels are only split later) and imports, from Energinet's open data. Hover for the share of wind and solar and the CO2 per kWh. It is for information: heatbrain plans by price.",
     ],
   },
   notifications: {

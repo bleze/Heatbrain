@@ -183,62 +183,6 @@ function stepPath(points, x, y, tEnd, maxGap) {
   return d;
 }
 
-// ---------------------------------------------------------------------------------------
-// Price chart (single series: no legend, the title names it)
-// ---------------------------------------------------------------------------------------
-function renderPriceChart() {
-  const host = $("price-chart");
-  const s = state.status;
-  const pts = s.prices;
-  host.replaceChildren();
-  if (!pts.length) { $("price-summary").textContent = "no price data yet"; return; }
-
-  const now = s.now;
-  const t0 = pts[0][0], t1 = pts[pts.length - 1][0] + 900;
-  const W = host.clientWidth, H = 150, m = { l: 40, r: 8, t: 8, b: 22 };
-  const vals = pts.map((p) => p[1]);
-  const yTicks = niceTicks(Math.min(0, ...vals), Math.max(...vals), 3);
-  const yMin = yTicks[0], yMax = yTicks[yTicks.length - 1];
-  const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
-  const y = (v) => m.t + (1 - (v - yMin) / (yMax - yMin)) * (H - m.t - m.b);
-
-  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": "Electricity price per 15 minutes" }, host);
-  for (const v of yTicks) {
-    el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }, svg);
-    el("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }, svg, v.toFixed(1));
-  }
-  drawTimeAxis(svg, x, timeTicks(t0, t1, W - m.l - m.r), m.t, H - m.b, H - 6);
-  const defs = el("defs", {}, svg);
-  const grad = el("linearGradient", { id: "price-fill", x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
-  el("stop", { offset: "0", "stop-color": "#fab005", "stop-opacity": 0.35 }, grad);
-  el("stop", { offset: "1", "stop-color": "#fab005", "stop-opacity": 0.02 }, grad);
-  const line = stepPath(pts, x, y, t1, 900);
-  el("path", { class: "area", d: `${line}V${y(yMin)}H${x(pts[0][0])}Z` }, svg);
-  el("path", { class: "line", d: line }, svg);
-  if (now >= t0 && now <= t1) {
-    el("line", { class: "now", x1: x(now), x2: x(now), y1: m.t, y2: H - m.b }, svg);
-    el("text", { class: "now-label", x: x(now) + 4, y: m.t + 10 }, svg, "now");
-  }
-
-  // Summary line
-  const today = pts.filter((p) => dayShort(p[0]) === dayShort(now));
-  const cur = pts[lastAtOrBefore(pts, now)];
-  const pieces = [];
-  if (cur) pieces.push(`now ${price(cur[1])} ${s.currency}/kWh`);
-  if (today.length) {
-    const lo = today.reduce((a, b) => (b[1] < a[1] ? b : a));
-    const hi = today.reduce((a, b) => (b[1] > a[1] ? b : a));
-    pieces.push(`today low ${price(lo[1])} at ${hm(lo[0])}`, `high ${price(hi[1])} at ${hm(hi[0])}`);
-  }
-  $("price-summary").textContent = pieces.join(" · ");
-
-  addCrosshair(svg, x, t0, t1, m.t, H - m.b, W, (t, evt) => {
-    const i = lastAtOrBefore(pts, t);
-    if (i < 0) return hideTooltip();
-    showTooltip(evt, `${dayHm(pts[i][0])}–${hm(pts[i][0] + 900)}`, [{ label: `${s.currency}/kWh`, value: price(pts[i][1]) }]);
-  });
-}
-
 function addCrosshair(svg, x, t0, t1, top, bottom, W, onMove) {
   const cross = el("line", { class: "cross", y1: top, y2: bottom, visibility: "hidden" }, svg);
   const hit = el("rect", { x: 0, y: 0, width: W, height: bottom + 4, fill: "transparent" }, svg);
@@ -730,6 +674,9 @@ async function loadHistory() {
     } else {
       state.history = await api(`/api/rooms/${encodeURIComponent(state.selected)}/history?hours=${state.hours}`);
     }
+    if (!state.mixAt || Date.now() - state.mixAt > 5 * 60_000) {
+      try { state.mix = await api("/api/power-mix"); state.mixAt = Date.now(); } catch { /* optional */ }
+    }
     renderDetail();
   } catch (e) { alertInline(e); } finally { $("room-chart").classList.remove("loading"); }
 }
@@ -747,6 +694,30 @@ function heatingSegments(decisions, tick, tEnd) {
     else segs.push({ start: t, end, cat, reason });
   }
   return segs;
+}
+
+// The power mix lane: [epoch, offshore wind, onshore wind, solar, power plants, imports, co2] per hour.
+const MIX_PARTS = [["wind", "Wind"], ["solar", "Solar"], ["plants", "Power plants"], ["imports", "Imports"]];
+function mixParts(r) {
+  return [{ key: "wind", mw: (r[1] || 0) + (r[2] || 0) }, { key: "solar", mw: r[3] || 0 },
+          { key: "plants", mw: r[4] || 0 }, { key: "imports", mw: r[5] || 0 }];
+}
+
+// "now 3.26 DKK/kWh · today low 2.21 at 23:45 · high 3.41 at 20:00", from the status' prices.
+function priceSummary() {
+  const s = state.status;
+  const pts = s?.prices || [];
+  if (!pts.length) return "";
+  const today = pts.filter((p) => dayShort(p[0]) === dayShort(s.now));
+  const cur = pts[lastAtOrBefore(pts, s.now)];
+  const pieces = [];
+  if (cur) pieces.push(`now ${price(cur[1])}`);
+  if (today.length) {
+    const lo = today.reduce((a, b) => (b[1] < a[1] ? b : a));
+    const hi = today.reduce((a, b) => (b[1] > a[1] ? b : a));
+    pieces.push(`today low ${price(lo[1])} at ${hm(lo[0])}`, `high ${price(hi[1])} at ${hm(hi[0])}`);
+  }
+  return pieces.join(" · ");
 }
 
 function renderLegend(room, segs, wifi) {
@@ -780,10 +751,11 @@ function renderDetail() {
   const host = $("room-chart");
   host.replaceChildren();
 
-  // Show a third of the range ahead of now, as far as prices are known: you see what's coming.
+  // Ahead of now: every known price (tomorrow's from about 13:00), at most as far ahead as the
+  // chart looks back - the room chart is also where the coming prices are shown.
   const t0 = h.from;
   const lastPrice = h.prices.length ? h.prices[h.prices.length - 1][0] + 900 : h.to;
-  const t1 = Math.max(h.to, Math.min(h.to + (h.to - h.from) / 3, lastPrice));
+  const t1 = Math.max(h.to, Math.min(h.to + (h.to - h.from), lastPrice));
   const temps = h.temperatures, decisions = h.decisions;
   const prices = h.prices.filter((p) => p[0] >= t0 - 900 && p[0] <= t1);
   const targets = decisions.map((d) => [d[0], d[3]]);
@@ -808,7 +780,10 @@ function renderDetail() {
   const wifiTop = tempTop + tempH + (showTemp ? 34 : 0), wifiH = wifi ? 10 : 0;
   const stripTop = wifiTop + (wifi ? wifiH + 30 : 0), stripH = showStrip ? 12 : 0;
   const priceTop = stripTop + stripH + (showStrip ? 30 : 0), priceH = 90;
-  const H = priceTop + priceH + 24;
+  // Power mix per hour of the price area (wind, solar, power plants, imports), under the price.
+  const mix = (state.mix?.hours || []).filter((r) => r[0] + 3600 > t0 && r[0] < t1);
+  const mixTop = priceTop + priceH + (mix.length ? 26 : 0), mixH = mix.length ? 28 : 0;
+  const H = mixTop + mixH + 24;
   const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": `${room.name}: temperature, heating and price` }, host);
   const ticks = timeTicks(t0, t1, W - m.l - m.r);
@@ -904,6 +879,8 @@ function renderDetail() {
 
   // Price panel (its own y-scale: separate chart, shared x)
   el("text", { class: "panel-label", x: m.l, y: priceTop - 8 }, svg, `Price ${state.status?.currency || ""}/kWh`);
+  const summary = priceSummary();
+  if (summary) el("text", { class: "panel-note", x: W - m.r, y: priceTop - 8, "text-anchor": "end" }, svg, summary);
   if (prices.length) {
     const pv = prices.map((p) => p[1]);
     const pTicks = niceTicks(Math.min(0, ...pv), Math.max(...pv), 2);
@@ -914,18 +891,47 @@ function renderDetail() {
       el("text", { x: m.l - 6, y: yP(v) + 4, "text-anchor": "end" }, svg, v.toFixed(1));
     }
     drawTimeAxis(svg, x, ticks, priceTop, priceTop + priceH, H - 6);
-    el("path", { class: "line", d: stepPath(prices, x, yP, t1, 900), "stroke-width": 1.5 }, svg);
+    const grad = el("linearGradient", { id: "price-fill", x1: 0, y1: 0, x2: 0, y2: 1 }, el("defs", {}, svg));
+    el("stop", { offset: "0", "stop-color": "#fab005", "stop-opacity": 0.35 }, grad);
+    el("stop", { offset: "1", "stop-color": "#fab005", "stop-opacity": 0.02 }, grad);
+    const line = stepPath(prices, x, yP, t1, 900);
+    // The fill as an attribute: url(#id) in the stylesheet would resolve against style.css.
+    el("path", { d: `${line}V${yP(plo)}H${x(prices[0][0])}Z`, fill: "url(#price-fill)", stroke: "none" }, svg);
+    el("path", { class: "line", d: line, "stroke-width": 1.5 }, svg);
   } else {
     drawTimeAxis(svg, x, ticks, priceTop, priceTop + priceH, H - 6);
   }
+  if (mix.length) {
+    // A 100 % column per hour; the label row doubles as its legend (direct labels, no extra legend).
+    const lbl = el("text", { class: "panel-label", x: m.l, y: mixTop - 6 }, svg, `Power mix ${state.mix.area || ""}`);
+    let lx = m.l + lbl.getComputedTextLength() + 14;
+    for (const [key, name] of MIX_PARTS) {
+      el("rect", { x: lx, y: mixTop - 14, width: 9, height: 9, rx: 2, style: `fill: var(--mix-${key})` }, svg);
+      const t = el("text", { class: "panel-note", x: lx + 13, y: mixTop - 6 }, svg, name);
+      lx += 13 + t.getComputedTextLength() + 12;
+    }
+    el("rect", { x: m.l, y: mixTop, width: W - m.l - m.r, height: mixH, fill: "var(--grid)", rx: 3, opacity: 0.35 }, svg);
+    for (const r of mix) {
+      const parts = mixParts(r);
+      const total = parts.reduce((a, p) => a + p.mw, 0);
+      if (total <= 0) continue;
+      const x0 = x(Math.max(r[0], t0)), x1 = x(Math.min(r[0] + 3600, t1, h.to));  // the hour so far
+      let yy = mixTop;
+      for (const p of parts) {
+        const hgt = (p.mw / total) * mixH;
+        if (hgt > 0) el("rect", { x: x0, y: yy, width: Math.max(1, x1 - x0), height: hgt, style: `fill: var(--mix-${p.key})` }, svg);
+        yy += hgt;
+      }
+    }
+  }
   const nowT = state.status?.now;
   if (nowT && nowT >= t0 && nowT <= t1) {
-    el("line", { class: "now", x1: x(nowT), x2: x(nowT), y1: tempTop, y2: priceTop + priceH }, svg);
+    el("line", { class: "now", x1: x(nowT), x2: x(nowT), y1: tempTop, y2: (mix.length ? mixTop + mixH : priceTop + priceH) }, svg);
     el("text", { class: "now-label", x: x(nowT), y: tempTop - 5, "text-anchor": "middle" }, svg, "now");
   }
 
   // One crosshair, one tooltip listing every series at that time
-  addCrosshair(svg, x, t0, t1, tempTop, priceTop + priceH, W, (t, evt) => {
+  addCrosshair(svg, x, t0, t1, tempTop, mix.length ? mixTop + mixH : priceTop + priceH, W, (t, evt) => {
     const rows = [];
     if (showTemp) {
       const i = lastAtOrBefore(temps, t);
@@ -939,7 +945,7 @@ function renderDetail() {
         rows.push({ label: "Temperature", value: temp(near), color: "var(--ink)" });
       }
       const di = lastAtOrBefore(targets, t);
-      rows.push({ label: "Target", value: temp(di >= 0 ? targets[di][1] : null), color: "var(--muted)" });
+      rows.push({ label: "Target", value: temp(di >= 0 ? targets[di][1] : null), color: "var(--target)" });
     }
     const si = lastAtOrBefore(decisions, t);
     if (si >= 0 && t - decisions[si][0] <= 3 * tick) {
@@ -959,6 +965,16 @@ function renderDetail() {
     }
     const pi = lastAtOrBefore(prices, t);
     if (pi >= 0 && t - prices[pi][0] < 900) rows.push({ label: `${state.status?.currency || ""}/kWh`, value: price(prices[pi][1]) });
+    const mr = mix.find((r) => t >= r[0] && t < r[0] + 3600);
+    if (mr) {
+      const parts = mixParts(mr);
+      const total = parts.reduce((a, p) => a + p.mw, 0);
+      if (total > 0) {
+        const green = (parts[0].mw + parts[1].mw) / total;
+        rows.push({ label: "Wind + solar", value: `${Math.round(green * 100)} %${mr[6] != null ? ` · ${Math.round(mr[6])} g CO₂/kWh` : ""}`,
+                    color: "var(--mix-wind)", box: true });
+      }
+    }
     showTooltip(evt, dayHm(t), rows);
   });
 
@@ -1026,7 +1042,6 @@ async function refreshStatus() {
     renderWifiOff();
     renderAway();
     renderRooms();
-    renderPriceChart();
     window.Costs?.load();
     window.Usage?.load();
     if (state.selected) {
@@ -1056,7 +1071,7 @@ document.querySelectorAll(".range button").forEach((b) =>
 let resizeTimer;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { if (state.status) renderPriceChart(); window.Costs?.render(); window.Usage?.render(); if (state.history) renderDetail(); }, 150);
+  resizeTimer = setTimeout(() => { window.Costs?.render(); window.Usage?.render(); if (state.history) renderDetail(); }, 150);
 });
 
 // ---------------------------------------------------------------------------------------
@@ -1070,7 +1085,7 @@ function route() {
   if (view === "help" && typeof renderManual === "function" && !$("view-help").childElementCount) renderManual($("view-help"));
   document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === view));
   if (view === "settings" && window.Settings) window.Settings.open();
-  if (view === "dashboard" && state.status) { renderPriceChart(); window.Costs?.render(); window.Usage?.render(); if (state.history) renderDetail(); }
+  if (view === "dashboard" && state.status) { window.Costs?.render(); window.Usage?.render(); if (state.history) renderDetail(); }
   // The dashboard isn't refreshed while hidden: fetch now rather than show what it had (or
   // nothing, if the server was restarting when the page loaded) until the next 30 s tick.
   if (view === "dashboard" && routed) refreshStatus();

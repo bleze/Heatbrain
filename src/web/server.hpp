@@ -81,6 +81,7 @@ struct WebContext {
 //   POST   /api/plugs/<id>/restore          refused while the plug is live
 //   POST   /api/discover                    {"subnet": "192.168.1.0/24"}
 //   POST   /api/notify/test
+//   GET    /api/power-mix                   the price area's power mix per hour (wind, solar, ...)
 //   GET    /api/firmware/latest             newest Tasmota release (cached 12 h)
 //   POST   /api/plugs/<id>/upgrade          background job: OTA upgrade + fail-safe test
 //   POST   /api/plugs/<id>/test             background job: fail-safe function test

@@ -17,6 +17,7 @@
 #include "app/cost_report.hpp"
 #include "app/digest.hpp"
 #include "app/meter_sync.hpp"
+#include "app/power_mix_sync.hpp"
 #include "app/rooms.hpp"
 #include "core/log.hpp"
 #include "notify/notifier.hpp"
@@ -574,6 +575,11 @@ int runDaemon(const Args& args) {
             }
         } catch (const std::exception& e) {
             hb::log::warn("Meter: {}", e.what());
+        }
+        // Where the area's electricity comes from (wind, solar, ...), for the room charts.
+        std::unique_ptr<hb::PowerMixSync> mix;
+        if (const std::string area = hb::spotArea(env->cfg.raw); area == "DK1" || area == "DK2") {
+            mix = std::make_unique<hb::PowerMixSync>(area, env->cfg.dataDir);
         }
         controlLoop(*env, board, alerts, first);
         first = false;
