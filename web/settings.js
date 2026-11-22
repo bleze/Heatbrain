@@ -129,7 +129,11 @@
   function sel(obj, key, options, onChange) {
     const s = el("select");
     const current = obj[key] ?? "";
-    if (current && !options.some(([v]) => v === current)) options = [[current, `${current} (not found)`], ...options];
+    // A value that is not (or not yet) on the list goes right after the "choose" placeholder, not above it.
+    if (current && !options.some(([v]) => v === current)) {
+      const missing = [current, `${current} (not found)`];
+      options = options[0]?.[0] === "" ? [options[0], missing, ...options.slice(1)] : [missing, ...options];
+    }
     for (const [v, label] of options) {
       const o = el("option", { value: v }, s, label);
       if (v === current) o.selected = true;
@@ -255,13 +259,22 @@
   // --- Rooms --------------------------------------------------------------------------
   let renderTimeline = null;
 
+  // Netatmo modules first (by name, as configs always had it), then the thermostats' own probes (by
+  // id: devi:<id> and devi:<id>-floor) - also before the first reading, as soon as one is set up.
   function sensorOptions() {
     const out = [["", "— choose a sensor —"]];
-    for (const s of state.status?.sensors || []) {
-      if (s.kind !== "indoor") continue;
+    const readings = state.status?.sensors || [];
+    const temp = (r) => (r?.temperature != null ? ` · ${r.temperature.toFixed(1)}°` : "");
+    for (const s of readings) {
       const source = s.key.split(":")[0];
-      const t = s.temperature != null ? ` · ${s.temperature.toFixed(1)}°` : "";
-      out.push([`${source}:${s.name}`, `${s.name}${t}`]);
+      if (s.kind !== "indoor" || source === "devi") continue;
+      out.push([`${source}:${s.name}`, `${s.name}${temp(s)}`]);
+    }
+    for (const t of S.cfg.thermostats || []) {
+      const name = t.name || t.id;
+      for (const [key, what] of [[`devi:${t.id}`, "thermostat room sensor"], [`devi:${t.id}-floor`, "thermostat floor probe"]]) {
+        out.push([key, `${name} · ${what}${temp(readings.find((r) => r.key === key))}`]);
+      }
     }
     return out;
   }
@@ -277,6 +290,7 @@
       S.newIds.add(id);
       rooms.push({ id, name: "New room", plugs: [], sensor: "", minTemp: 16, maxTemp: 22,
         program: [{ at: "07:00", mode: "heat", target: 20 }, { at: "17:00", mode: "off" }, { at: "21:00", mode: "heat", target: 20 }, { at: "23:00", mode: "keep", target: 16 }] });
+      S.scrollToRoom = id;  // the new room is added at the bottom: bring it into view, name ready to type
       render();
     }, "primary");
 
@@ -288,6 +302,14 @@
 
   function renderRoom(list, room, idx) {
     const c = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, list);
+    if (S.scrollToRoom === room.id) {
+      S.scrollToRoom = null;
+      requestAnimationFrame(() => {
+        c.scrollIntoView({ behavior: "smooth", block: "start" });
+        const input = c.querySelector("input");
+        if (input) { input.focus({ preventScroll: true }); input.select(); }
+      });
+    }
     const head = el("div", { class: "item-head" }, c);
     const left = el("div", { class: "row" }, head);
     left.appendChild(badge(room.priceOnly ? "bolt" : "thermo", room.priceOnly ? "amber" : "warm"));
@@ -304,6 +326,17 @@
     name.style.fontSize = "15px";
     left.appendChild(name);
     const idLabel = el("span", { class: "muted" }, left, `id: ${room.id}`);
+    // A room still called "New room" takes the name of the first device picked for it.
+    const nameAfter = (deviceName) => {
+      if (!deviceName || (room.name && room.name !== "New room")) return;
+      room.name = deviceName;
+      if (S.newIds.has(room.id)) {
+        const taken = new Set(S.cfg.rooms.filter((r) => r !== room).map((r) => r.id));
+        S.newIds.delete(room.id);
+        room.id = slug(room.name, taken);
+        S.newIds.add(room.id);
+      }
+    };
 
     const right = el("div", { class: "row" }, head);
     const seg = el("div", { class: "segmented" }, right);
@@ -334,7 +367,7 @@
       pill.addEventListener("click", (e) => {
         e.preventDefault();
         if (on) delete room.thermostat;
-        else { room.thermostat = t.id; delete room.plugs; delete room.priceOnly; if (!room.sensor) room.sensor = `devi:${t.id}`; }
+        else { room.thermostat = t.id; delete room.plugs; delete room.priceOnly; if (!room.sensor) room.sensor = `devi:${t.id}`; nameAfter(t.name || t.id); }
         changed(); render();
       });
     }
@@ -347,7 +380,7 @@
       pill.addEventListener("click", (e) => {
         e.preventDefault();
         room.plugs = (room.plugs || []).filter((x) => x !== p.id);
-        if (!on) room.plugs.push(p.id);
+        if (!on) { room.plugs.push(p.id); nameAfter(p.name || p.id); }
         changed(); render();
       });
     }
