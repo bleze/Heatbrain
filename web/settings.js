@@ -851,7 +851,8 @@
     } else if (st.error) {
       line.textContent = `Problem: ${st.error}`;
     } else if (st.lastReading) {
-      line.textContent = `Connected to ${st.address || st.meteringPoint}${st.supplier ? ` (${st.supplier})` : ""} · data until ${dayHm(st.lastReading)} · ${st.resolutionMinutes}-minute values · checked ${dayHm(st.lastSync)}`;
+      const since = st.firstReading ? ` · history from ${new Intl.DateTimeFormat("en-GB", { timeZone: state.tz, day: "numeric", month: "short", year: "numeric" }).format(st.firstReading * 1000)}` : "";
+      line.textContent = `Connected to ${st.address || st.meteringPoint}${st.supplier ? ` (${st.supplier})` : ""} · data until ${dayHm(st.lastReading)}${since} · ${st.resolutionMinutes}-minute values · checked ${dayHm(st.lastSync)}`;
     } else {
       line.textContent = "Connected - fetching the first readings…";
     }

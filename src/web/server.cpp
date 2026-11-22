@@ -372,7 +372,7 @@ void WebServer::routes() {
         sendJson(res, json{{"requested", true}});
     });
     s.Get("/api/usage", [this](const httplib::Request& req, httplib::Response& res) {
-        const int dayCount = req.has_param("days") ? std::clamp(std::atoi(req.get_param_value("days").c_str()), 1, 31) : 7;
+        const int dayCount = req.has_param("days") ? std::clamp(std::atoi(req.get_param_value("days").c_str()), 1, 366) : 7;
         History history(ctx_.dataDir / "history.db");
         // Ending with the newest reading: the meter lags a day behind.
         const auto last = history.lastMeterReading();

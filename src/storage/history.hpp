@@ -62,6 +62,7 @@ public:
     void recordMeter(const std::vector<MeterReading>& readings);
     std::vector<MeterReading> meterReadings(Instant from, Instant to) const;
     std::optional<MeterReading> lastMeterReading() const;
+    std::optional<MeterReading> firstMeterReading() const;
     // Times of all stored readings (any sensor), sorted: shows when the sensors were online.
     std::vector<Instant> readingTimes(Instant from, Instant to) const;
 

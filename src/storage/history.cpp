@@ -216,6 +216,12 @@ std::vector<MeterReading> History::meterReadings(Instant from, Instant to) const
     return out;
 }
 
+std::optional<MeterReading> History::firstMeterReading() const {
+    Stmt s(db_, "SELECT start, seconds, kwh FROM meter ORDER BY start LIMIT 1");
+    if (!s.step()) return std::nullopt;
+    return MeterReading{s.instant(0), duration_cast<minutes>(seconds{s.i64(1)}), s.dbl(2)};
+}
+
 std::optional<MeterReading> History::lastMeterReading() const {
     Stmt s(db_, "SELECT start, seconds, kwh FROM meter ORDER BY start DESC LIMIT 1");
     if (!s.step()) return std::nullopt;
@@ -280,8 +286,9 @@ void History::prune(Instant olderThan) {
         s.step();
     }
     {
+        // Meter readings are small (one row an hour) and worth comparing across seasons: 2 years.
         Stmt m(db_, "DELETE FROM meter WHERE start<?");
-        m.bind(1, olderThan);
+        m.bind(1, std::min(olderThan, Instant{floor<seconds>(system_clock::now()) - days{730}}));
         m.step();
     }
     Stmt s(db_, "DELETE FROM prices WHERE slot<?");

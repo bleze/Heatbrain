@@ -19,6 +19,8 @@ namespace {
 std::atomic<bool> g_meterNow{false};
 constexpr hours kSyncEvery{6};
 constexpr days kFirstFetch{14};
+constexpr days kBackfillTo{365};    // fill the history back this far...
+constexpr days kBackfillChunk{90};  // ...this much per fetch, gently
 Instant nowSec() { return floor<seconds>(system_clock::now()); }
 }  // namespace
 
@@ -81,8 +83,22 @@ void MeterSync::syncOnce() {
         const Instant fromT = last ? last->start - days{1} : nowSec() - kFirstFetch;
         const std::string from = formatLocalDate(tz_.toLocal(fromT));
         const std::string to = formatLocalDate(tz_.toLocal(nowSec() + days{1}));
-        const auto readings = client.readings(chosen->id, from, to);
+        auto readings = client.readings(chosen->id, from, to);
         history.recordMeter(readings);
+
+        // Older history, a chunk per fetch, until a year is in.
+        const bool complete = status.value("historyComplete", false);
+        if (const auto first = history.firstMeterReading(); !complete && first && first->start > nowSec() - kBackfillTo) {
+            const Instant olderTo = first->start;
+            const Instant olderFrom = std::max(olderTo - kBackfillChunk, nowSec() - kBackfillTo);
+            const auto older = client.readings(chosen->id, formatLocalDate(tz_.toLocal(olderFrom)),
+                                               formatLocalDate(tz_.toLocal(olderTo)));
+            history.recordMeter(older);
+            log::info("Meter: {} older readings ({} - {})", older.size(), formatLocalDate(tz_.toLocal(olderFrom)),
+                      formatLocalDate(tz_.toLocal(olderTo)));
+            if (older.empty()) status["historyComplete"] = true;  // nothing further back on the account
+            readings.insert(readings.end(), older.begin(), older.end());
+        }
 
         json pts = json::array();
         for (const auto& p : points) pts.push_back({{"id", p.id}, {"type", p.type}, {"address", p.address}, {"supplier", p.supplier}});
@@ -92,6 +108,7 @@ void MeterSync::syncOnce() {
         status["supplier"] = chosen->supplier;
         status["lastSync"] = nowSec().time_since_epoch().count();
         status["fetched"] = readings.size();
+        if (const auto oldest = history.firstMeterReading()) status["firstReading"] = oldest->start.time_since_epoch().count();
         if (const auto newest = history.lastMeterReading()) {
             status["lastReading"] = (newest->start + newest->length).time_since_epoch().count();
             status["resolutionMinutes"] = newest->length.count();

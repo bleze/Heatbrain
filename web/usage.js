@@ -24,8 +24,20 @@
     if (sub) el("div", { class: "s" }, t, sub);
   }
 
-  // Hourly buckets beyond two days: 15-minute bars get too thin to read or hover.
+  // Hourly buckets beyond two days (15-minute bars get too thin), daily ones from 30 days.
+  // Days follow the local calendar: bucket by the local date of each reading.
+  const dayKey = (t) => new Intl.DateTimeFormat("en-CA", { timeZone: state.tz }).format(t * 1000);
   function buckets(d) {
+    if (U.days >= 30) {
+      const out = [];
+      d.meter.forEach(([start, secs, total], i) => {
+        const heat = d.heating[i]?.[2] || 0;
+        const k = dayKey(start), last = out[out.length - 1];
+        if (last && last.key === k) { last.total += total; last.heat += heat; last.secs += secs; }
+        else out.push({ key: k, start, secs, total, heat });
+      });
+      return out;
+    }
     const step = U.days > 2 ? 3600 : 0;
     const out = [];
     d.meter.forEach(([start, secs, total], i) => {
@@ -89,7 +101,10 @@
           { label: "Everything else", value: kwh(Math.max(0, b.total - b.heat)), color: "var(--ink-2)", box: true },
         ];
         if (b.heat > b.total * 1.05) rows.push({ label: "Note", value: "radiators > measured: is a radiator's power set too high?" });
-        showTooltip(evt, `${dayHm(b.start)}–${hm(b.start + b.secs)}`, rows);
+        const title = U.days >= 30
+          ? new Intl.DateTimeFormat("en-GB", { timeZone: state.tz, weekday: "short", day: "numeric", month: "short" }).format(b.start * 1000)
+          : `${dayHm(b.start)}–${hm(b.start + b.secs)}`;
+        showTooltip(evt, title, rows);
       });
       hit.addEventListener("pointerleave", hideTooltip);
     }
