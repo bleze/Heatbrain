@@ -414,7 +414,7 @@ TickResult Controller::tick(Instant now, bool apply) {
             if (const auto m = thermalModel(room, now); m.coolingStretches >= 3 && m.loss > 0) cooling = m.loss;
             rr.plan = planAhead(room, prices_, tz_, now, hours{24}, away, outdoor, bookings, current, cooling);
         }
-        if (offline && offline->start < now + hours{24}) {
+        if (offline && offline->start < now + hours{24} && room.thermostat.empty()) {  // thermostats keep their setpoint
             // Show the night as it will run: the loaded schedule, or what would be loaded now.
             const auto spans = following ? armed->second.spans
                                          : offlineSchedule(room, prices_, tz_, std::max(now, offline->start),

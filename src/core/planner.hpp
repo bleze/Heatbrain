@@ -124,7 +124,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 // real planner assuming the room sits at its target, which yields the intent per period:
 //   "heat" (to target, as needed), "preheat", "coast" (expensive: lets it cool a little),
 //   "boost" (cheapest hours), "keep" (keep above), "away", "booked" (incl. warm-up), "off", and
-//   "idle": a keep-above period in which the room is predicted to stay warm enough by itself
+//   "idle": a keep-above or heat period in which the room is predicted to stay warm enough by itself
 //   (from its current temperature, cooling towards outdoors at `coolingRate` per hour).
 struct PlanSegment {
     Instant from;

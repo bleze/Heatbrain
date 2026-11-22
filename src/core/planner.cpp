@@ -398,6 +398,15 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
                 const double floor = kind == "off" ? room.frostTemp : d.inputs.target.value_or(room.frostTemp);
                 if (kind == "keep" && *room_t > floor + room.strategy.hysteresis) kind = "idle";
                 *room_t = std::max(*room_t, floor);  // heating holds it at the floor
+            } else if (d.inputs.target && (kind == "heat" || kind == "preheat" || kind == "boost" || kind == "coast")) {
+                // A heat period whose target (with any boost) is below where the room still is: no heat
+                // either - a room "heated to 5 deg" at 16 deg just cools.
+                const double ceiling = *d.inputs.target + (kind == "preheat" ? room.strategy.preheatBoost
+                                                           : kind == "boost"  ? room.strategy.cheapBoost
+                                                           : kind == "coast"  ? -room.strategy.peakAllowedDrop : 0.0);
+                *room_t = outside + (*room_t - outside) * cool;
+                if (*room_t > ceiling + room.strategy.hysteresis) kind = "idle";
+                else *room_t = std::max(*room_t, ceiling);
             } else if (d.inputs.target) {
                 *room_t = std::max(*room_t, *d.inputs.target - (kind == "coast" ? room.strategy.peakAllowedDrop : 0.0));
             }

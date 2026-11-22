@@ -445,3 +445,11 @@ TEST_CASE("Plan: a warm room in a keep-above period shows as idle until it would
     const auto unknown = planAhead(room, makePrices(), tz(), at(12), hours{24}, std::nullopt, 5.0);
     CHECK(unknown.front().kind == "keep");
 }
+
+TEST_CASE("Plan: a heat period below the room's temperature is idle too") {
+    auto room = pizzeria();
+    room.program = {{0, ProgramMode::Heat, 5.0}};
+    room.minTemp = 5;
+    const auto plan = planAhead(room, makePrices(), tz(), at(12), hours{24}, std::nullopt, 5.0, {}, 16.0, 0.05);
+    CHECK(std::ranges::all_of(plan, [](const PlanSegment& s) { return s.kind == "idle"; }));
+}
