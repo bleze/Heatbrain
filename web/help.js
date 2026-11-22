@@ -241,7 +241,8 @@ function helpId(b) {
 function helpButton(parent, key, anchor) {
   const first = Array.isArray(key) ? key[0] : key;
   const b = el("button", { type: "button", class: "help-btn", title: `About: ${HELP[first]?.title || first}`, "aria-label": "Help",
-                           "data-help": [].concat(key).join(",") }, parent, "?");
+                           "data-help": [].concat(key).join(",") }, parent);
+  b.appendChild(icon("question"));
   let box = null;
   const show = () => {
     // A "?" in a collapsed section's header: open the section, or the text would be hidden inside it
