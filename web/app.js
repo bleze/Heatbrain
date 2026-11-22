@@ -978,6 +978,10 @@ function renderEvents(h) {
 async function refreshStatus() {
   try {
     const s = await api("/api/status");
+    // An update restarted the server under this open page: the old scripts may not understand
+    // the new status, so load the new ones rather than half-render the dashboard.
+    if (s.version && state.loadedVersion && s.version !== state.loadedVersion) { location.reload(); return; }
+    if (s.version) state.loadedVersion ??= s.version;
     if (!s.rooms) { $("updated").textContent = "waiting for the first control step…"; return; }
     state.status = s;
     const ce = $("config-error");
@@ -1034,7 +1038,12 @@ function route() {
   document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === view));
   if (view === "settings" && window.Settings) window.Settings.open();
   if (view === "dashboard" && state.status) { renderPriceChart(); window.Costs?.render(); window.Usage?.render(); if (state.history) renderDetail(); }
+  // The dashboard isn't refreshed while hidden: fetch now rather than show what it had (or
+  // nothing, if the server was restarting when the page loaded) until the next 30 s tick.
+  if (view === "dashboard" && routed) refreshStatus();
+  routed = true;
 }
+let routed = false;
 window.addEventListener("hashchange", route);
 
 refreshStatus().then(route);
