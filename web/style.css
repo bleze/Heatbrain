@@ -319,6 +319,12 @@ button.ghost:hover { background: color-mix(in srgb, var(--ink) 9%, transparent);
 .transfer { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
 .transfer > div { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface); }
 .transfer h3 { margin: 0 0 6px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+/* Each box's heading icon has a colour of its own */
+.transfer h3 .icon[data-icon="home"] { color: var(--accent); }
+.transfer h3 .icon[data-icon="gauge"] { color: var(--flame-1); }
+.transfer h3 .icon[data-icon="save"] { color: var(--cat-comfort); }
+.transfer h3 .icon[data-icon="undo"] { color: var(--flame-2); }
+.apply-btn .icon { color: var(--good); }
 .transfer .row { margin-top: 10px; gap: 10px; flex-wrap: wrap; }
 .transfer .file-summary { margin-top: 10px; font-size: 13px; }
 @media (max-width: 720px) { .transfer { grid-template-columns: 1fr; } }

@@ -1591,7 +1591,7 @@
     btn(row, "Apply JSON to the form", "check", () => {
       try { S.cfg = JSON.parse(ta.value); changed(); render(); toast("Applied - review and save"); }
       catch (e) { toast(`Invalid JSON: ${e.message}`, true); }
-    });
+    }, "apply-btn");
   }
 
   // --- save / discard -----------------------------------------------------------------
