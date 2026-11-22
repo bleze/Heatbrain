@@ -251,7 +251,11 @@ button.link-btn:hover { background: none; text-decoration: underline; }
 .room.heating .badge-warm .icon { animation: flicker 1.8s ease-in-out infinite; transform-origin: 50% 90%; }
 @keyframes flicker { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12) rotate(-3deg); } }
 @media (prefers-reduced-motion: reduce) { :root:not([data-motion="always"]) .room.heating .badge-warm .icon { animation: none; } }
-.hero { font-size: 40px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; margin: 10px 0 2px; }
+.hero { font-size: 40px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; margin: 10px 0 2px;
+  display: flex; align-items: baseline; white-space: nowrap; min-width: 0; }
+/* One line: the humidity keeps its place, the target text gives way ("...") on narrow cards */
+.hero small { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.hero small.hum { flex: none; overflow: visible; }
 .hero small { font-size: 15px; font-weight: 400; color: var(--ink-2); margin-left: 6px; }
 .state {
   display: inline-flex; align-items: center; gap: 6px;

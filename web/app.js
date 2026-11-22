@@ -274,7 +274,11 @@ function outdoorCard(host) {
   name.appendChild(document.createTextNode("Outside"));
   el("span", { class: "muted" }, top, o.name);
   const hero = el("div", { class: "hero" }, card, temp(o.temperature));
-  if (s.humidity != null) el("small", {}, hero, `${Math.round(s.humidity)} % humidity`);
+  if (s.humidity != null) {
+    const hum = el("small", { class: "hum", title: "Humidity" }, hero);  // like the room cards
+    hum.appendChild(icon("drop"));
+    hum.appendChild(document.createTextNode(`${Math.round(s.humidity)} %`));
+  }
   el("div", { class: "detail" }, card, "Colder outside means more pre-heating before expensive or off periods.");
   const chips = el("div", { class: "plugs" }, el("div", { class: "room-foot" }, card));
   const chip = (cls, iconName, text) => { const c = el("span", { class: `chip ${cls}` }, chips); c.appendChild(icon(iconName)); c.appendChild(document.createTextNode(text)); };
