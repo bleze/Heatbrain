@@ -19,6 +19,7 @@
   --critical: #d03b3b;
   /* UI accent (buttons, navigation, focus): violet, distinct from the chart colours. */
   --accent: #6250d6;
+  --target: #b87a00;        /* the target line: amber, unlike the temperature (ink) and the heating colours */
   --accent-fill: #6250d6;   /* button fills: white text on top in both modes */
   --accent-ink: #ffffff;
   --accent-soft: rgba(98, 80, 214, 0.10);
@@ -46,6 +47,7 @@
     --cat-price: #d95926;
     --cat-safety: #199e70;
     --accent: #9085e9;
+  --target: #e9a93a;
     --accent-ink: #ffffff;
     --accent-soft: rgba(144, 133, 233, 0.14);
     --warm-tint: rgba(232, 89, 12, 0.10);
@@ -70,6 +72,7 @@
   --cat-price: #d95926;
   --cat-safety: #199e70;
   --accent: #9085e9;
+  --target: #e9a93a;
   --accent-ink: #ffffff;
   --accent-soft: rgba(144, 133, 233, 0.14);
   --warm-tint: rgba(232, 89, 12, 0.10);
@@ -457,7 +460,7 @@ a.chip { text-decoration: none; }
 .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0 4px; color: var(--ink-2); font-size: 13px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend .key-line { width: 16px; height: 2px; background: var(--ink); display: inline-block; }
-.legend .key-dash { width: 16px; border-top: 2px dashed var(--muted); display: inline-block; }
+.legend .key-dash { width: 16px; border-top: 2px dashed var(--target); display: inline-block; }
 .legend .key-estimate { width: 16px; border-top: 2px dotted var(--ink-2); display: inline-block; }
 /* Wi-Fi off lane: planned = hatched outline band, seen = solid neutral bar (status-neutral, not a series colour) */
 .chart .wifi-planned { stroke: var(--axis); stroke-width: 1; }
@@ -475,7 +478,7 @@ a.chip { text-decoration: none; }
 /* Bridge across a gap in the readings: same ink, dotted - an estimate, not data */
 .chart .line-estimate { fill: none; stroke: var(--ink-2); stroke-width: 2; stroke-dasharray: 0 4; stroke-linecap: round; opacity: 0.8; }  /* dotted: the target is dashed */
 .chart .area { fill: url(#price-fill); stroke: none; }
-.chart .target { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.chart .target { fill: none; stroke: var(--target); stroke-width: 1.5; stroke-dasharray: 5 3; opacity: 0.9; }
 .chart .now { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 3; }
 .chart .now-label { fill: var(--accent); font-weight: 600; }
 .chart .future-label { fill: var(--muted); font-style: italic; }
