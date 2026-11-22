@@ -438,7 +438,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; user-select: none; }
 /* Same height as inputs and spinboxes, so hints under neighbouring fields line up */
-.segmented { display: inline-flex; border: 1px solid var(--axis); border-radius: 9px; overflow: hidden; height: 34px; box-sizing: border-box; }
+.segmented { display: inline-flex; border: 1px solid var(--axis); border-radius: 9px; overflow: hidden; height: 34px; box-sizing: border-box;
+  align-self: flex-start; width: max-content; }  /* as wide as its buttons, not the column */
 .segmented button { border: 0; border-radius: 0; padding: 5px 12px; }
 .segmented button.active { background: var(--accent-fill); color: var(--accent-ink); font-weight: 600; }
 /* Plug mode: Live in the "good" colour when chosen, so it reads as "this plug is switched". */
