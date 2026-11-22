@@ -144,7 +144,9 @@ SensorReading readingFrom(const json& m, const std::string& station, const std::
 std::vector<SensorReading> parseStationsData(const json& j) {
     std::vector<SensorReading> out;
     for (const auto& dev : j.at("body").at("devices")) {
-        const std::string station = dev.value("station_name", dev.value("home_name", ""));
+        // home_name ("Granvænget"); station_name adds the base module in brackets ("Granvænget (Living room)"),
+        // which reads as if every module were in that room.
+        const std::string station = dev.value("home_name", dev.value("station_name", ""));
         out.push_back(readingFrom(dev, station, "indoor"));  // the base station is indoors
         if (!dev.contains("modules")) continue;
         for (const auto& m : dev["modules"]) {
