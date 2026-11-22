@@ -61,7 +61,10 @@ json costReport(const json& cfg, const History& history, Instant now, int dayCou
             }
         }
         const bool measured = counter.size() >= 2;
-        room["measured"] = measured;  // energy from the thermostat's own heating time
+        // For the label: was heatbrain in control (live) at all in the period, and does the energy come
+        // from the thermostat's heating time (from its first reading on)?
+        room["live"] = std::ranges::any_of(points, [](const DecisionPoint& p) { return p.live; });
+        room["measured"] = !counter.empty();
         json dj = json::array();
         double kWh = 0, cost = 0, saved = 0, onHours = 0, live = 0;
         const auto dayCosts = measured ? dailyCostFromCounter(counter, prices, watts, seconds{3 * tick}, from, now, tz)

@@ -38,7 +38,7 @@
     const tiles = $("cost-tiles");
     tiles.replaceChildren();
     const priced = rooms.reduce((a, r) => a + r.days.reduce((b, x) => b + x.kWh - x.kWhWithoutPrice, 0), 0);
-    const anyLive = rooms.some((r) => r.total.liveKWh > 0);
+    const anyLive = rooms.some((r) => r.live || r.total.liveKWh > 0);
     tile(tiles, "coin", anyLive ? "Spent" : "Would have cost", money(d.total.cost, cur), `last ${d.days} days`);
     tile(tiles, "bolt", "Energy", kwh(d.total.kWh), `${rooms.reduce((a, r) => a + r.total.onHours, 0).toFixed(0)} heating hours`);
     if (priced > 0) {
@@ -66,7 +66,7 @@
       el("td", { class: "num" }, tr, p > 0 ? (r.total.cost / p).toFixed(2) : "–");
       el("td", { class: "num" }, tr, money(r.total.saved, cur));
       el("td", { class: "muted", title: r.measured ? "the thermostat's own heating time × its power" : "" }, tr,
-        `${r.watts} W${r.measured ? " · measured time" : r.total.liveKWh > 0 ? "" : " · dry-run (simulated)"}`);
+        `${r.watts} W${r.measured ? " · measured time" : r.live || r.total.liveKWh > 0 ? "" : " · dry-run (simulated)"}`);
     }
     for (const r of missing) {
       const tr = el("tr", {}, body);
