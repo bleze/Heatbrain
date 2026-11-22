@@ -1,6 +1,7 @@
 #include "app/thermostats.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <set>
 #include <thread>

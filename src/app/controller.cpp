@@ -3,6 +3,7 @@
 #include <fstream>
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 
 #include "core/log.hpp"
