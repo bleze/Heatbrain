@@ -414,6 +414,7 @@ a.chip { text-decoration: none; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend .key-line { width: 16px; height: 2px; background: var(--ink); display: inline-block; }
 .legend .key-dash { width: 16px; border-top: 2px dashed var(--muted); display: inline-block; }
+.legend .key-estimate { width: 16px; border-top: 1.5px dashed var(--ink-2); display: inline-block; }
 /* Wi-Fi off lane: planned = hatched outline band, seen = solid neutral bar (status-neutral, not a series colour) */
 .chart .wifi-planned { stroke: var(--axis); stroke-width: 1; }
 .chart .wifi-seen { fill: var(--ink-2); opacity: 0.55; }
@@ -427,6 +428,8 @@ a.chip { text-decoration: none; }
 .chart .grid { stroke: var(--grid); stroke-width: 1; }
 .chart .axis { stroke: var(--axis); stroke-width: 1; }
 .chart .line { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
+/* Bridge across a gap in the readings: same ink, thinner and dashed - an estimate, not data */
+.chart .line-estimate { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 4 4; opacity: 0.8; }
 .chart .area { fill: url(#price-fill); stroke: none; }
 .chart .target { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .chart .now { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 3; }

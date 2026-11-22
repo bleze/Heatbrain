@@ -608,6 +608,9 @@ function renderLegend(room, segs, wifi) {
   }
   if (!room.priceOnly) {
     const a = el("span", {}, host); el("i", { class: "key-line" }, a); a.appendChild(document.createTextNode("Temperature"));
+    if (state.history?.temperatures?.some((p, i, arr) => i > 0 && p[0] - arr[i - 1][0] > 1800)) {
+      const e = el("span", {}, host); el("i", { class: "key-estimate" }, e); e.appendChild(document.createTextNode("Estimate (no readings)"));
+    }
     if (room.sensorOnly) return;  // a sensor: no target, no heating
     const b = el("span", {}, host); el("i", { class: "key-dash" }, b); b.appendChild(document.createTextNode("Target"));
   }
@@ -675,12 +678,19 @@ function renderDetail() {
     }
     drawTimeAxis(svg, x, ticks, tempTop, tempTop + tempH, null);
     el("path", { class: "target", d: stepPath(targets, x, yT, t1, 3 * tick) }, svg);
-    // Temperature line, broken where readings are missing for > 30 min
-    let d = "";
+    // Temperature line, broken where readings are missing for > 30 min. Each gap is bridged by a
+    // dashed straight line from the last reading before to the first after: an estimate, not data
+    // (e.g. a Wi-Fi off night, when the station can't upload).
+    let d = "", est = "";
     temps.forEach(([t, v], i) => {
       const gap = i === 0 || t - temps[i - 1][0] > 1800;
+      if (gap && i > 0) {
+        const [pt, pv] = temps[i - 1];
+        est += `M${x(pt).toFixed(1)},${yT(pv).toFixed(1)}L${x(t).toFixed(1)},${yT(v).toFixed(1)}`;
+      }
       d += `${gap ? "M" : "L"}${x(t).toFixed(1)},${yT(v).toFixed(1)}`;
     });
+    if (est) el("path", { class: "line-estimate", d: est }, svg);
     el("path", { class: "line", d }, svg);
     if (!temps.length) el("text", { class: "empty", x: W / 2, y: tempTop + tempH / 2, "text-anchor": "middle" }, svg, "No temperatures recorded yet");
   }
@@ -749,7 +759,14 @@ function renderDetail() {
     if (showTemp) {
       const i = lastAtOrBefore(temps, t);
       const near = i >= 0 && t - temps[i][0] < 1800 ? temps[i][1] : null;
-      rows.push({ label: "Temperature", value: temp(near), color: "var(--ink)" });
+      if (near == null && i >= 0 && i + 1 < temps.length && temps[i + 1][0] - temps[i][0] > 1800) {
+        // Inside a gap: the straight line between the readings around it, clearly marked.
+        const [a, av] = temps[i], [b, bv] = temps[i + 1];
+        const v = av + ((bv - av) * (t - a)) / (b - a);
+        rows.push({ label: "Temperature", value: `≈ ${temp(v)} (estimate, no readings)`, color: "var(--ink-2)" });
+      } else {
+        rows.push({ label: "Temperature", value: temp(near), color: "var(--ink)" });
+      }
       const di = lastAtOrBefore(targets, t);
       rows.push({ label: "Target", value: temp(di >= 0 ? targets[di][1] : null), color: "var(--muted)" });
     }
