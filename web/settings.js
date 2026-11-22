@@ -1123,7 +1123,7 @@
     const phoneCfg = S.cfg.phone || {};
     const af = el("div", { class: "field", style: "margin-top:8px" }, wid);
     el("span", {}, af, "Address away from home (optional)");
-    const ai = el("input", { type: "url", value: phoneCfg.awayUrl || "", placeholder: "e.g. http://100.84.100.80:8090 (Tailscale)",
+    const ai = el("input", { type: "url", value: phoneCfg.awayUrl || "", placeholder: "e.g. http://100.x.y.z:8090 (the NAS in Tailscale)",
                              autocapitalize: "off", autocorrect: "off", spellcheck: "false" }, af);
     const cleanUrl = (v) => {
       v = v.trim().replace(/\/+$/, "");
