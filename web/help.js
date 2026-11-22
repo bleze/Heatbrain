@@ -81,7 +81,7 @@ const HELP = {
   priceOnly: {
     title: "Price-only rooms",
     body: [
-      "For rooms without a temperature sensor (like a shed): heatbrain heats in the N cheapest whole hours of each day and never in the no-heat windows. Whole hours, so the relay switches at most once an hour.",
+      "For rooms without a temperature sensor (like a shed): choose 'No sensor (cheapest hours)' as the room's sensor. heatbrain then heats in the N cheapest whole hours of each day and never in the no-heat windows. Whole hours, so the relay switches at most once an hour. Choose a sensor later and the room gets a daily program instead.",
     ],
   },
   sensors: {

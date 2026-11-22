@@ -282,7 +282,7 @@
   function renderRooms(body) {
     const card = el("section", { class: "card" }, body);
     const head = sectionHead(card, "Rooms", "home", "violet",
-      "Each room has plugs, a temperature sensor and target temperatures through the day. Rooms without a sensor can run on price alone.",
+      "Each room has plugs, a temperature sensor and target temperatures through the day. A room without a sensor runs the cheapest hours of each day.",
       "start");
     btn(head, "Add room", "plus", () => {
       const rooms = arr(S.cfg, "rooms");
@@ -298,6 +298,34 @@
     if (!rooms.length) el("div", { class: "empty-state" }, card, "No rooms yet. Add plugs first, then a room.");
     const list = el("div", { class: "list" }, card);
     rooms.forEach((room, idx) => renderRoom(list, room, idx));
+  }
+
+  // The room's sensor decides what kind of room it is: with one it follows its daily program (heat
+  // to / keep above / off); with "no sensor" it runs the cheapest hours of each day.
+  const NO_SENSOR = "__none__";
+  function sensorField(g, room) {
+    const s = el("select");
+    const opts = sensorOptions().filter(([v]) => v !== "");
+    const current = room.priceOnly ? NO_SENSOR : room.sensor || "";
+    const list = [...(current === "" ? [["", "— choose a sensor —"]] : []), [NO_SENSOR, "No sensor (cheapest hours)"], ...opts];
+    if (current && current !== NO_SENSOR && !opts.some(([v]) => v === current)) list.splice(1, 0, [current, `${current} (not found)`]);
+    for (const [v, label] of list) {
+      const o = el("option", { value: v }, s, label);
+      if (v === current) o.selected = true;
+    }
+    s.addEventListener("change", () => {
+      if (s.value === NO_SENSOR) {
+        room.priceOnly ||= { hoursPerDay: 12, avoid: [{ from: "17:00", to: "21:00" }] };
+        room.sensor = "";
+      } else {
+        delete room.priceOnly;
+        room.program ||= [{ at: "00:00", mode: "heat", target: 20 }];
+        room.sensor = s.value;
+      }
+      changed(); render();
+    });
+    field(g, "Temperature sensor", s, { hint: room.priceOnly ? "without one, the room runs the cheapest hours of each day"
+      : (state.status?.sensors || []).length ? "" : "No sensors yet: set up Netatmo on the Sensors tab" });
   }
 
   function renderRoom(list, room, idx) {
@@ -339,18 +367,6 @@
     };
 
     const right = el("div", { class: "row" }, head);
-    const seg = el("div", { class: "segmented" }, right);
-    const setMode = (priceOnly) => {
-      if (priceOnly && !room.priceOnly) room.priceOnly = { hoursPerDay: 12, avoid: [{ from: "17:00", to: "21:00" }] };
-      if (!priceOnly) {
-        delete room.priceOnly;
-        room.program ||= [{ at: "00:00", mode: "heat", target: 20 }];
-        room.sensor ??= "";
-      }
-      changed(); render();
-    };
-    btn(seg, "Temperature", "thermo", () => setMode(false)).classList.toggle("active", !room.priceOnly);
-    btn(seg, "Price only", "bolt", () => setMode(true)).classList.toggle("active", !!room.priceOnly);
     // Order: the dashboard shows the rooms in this order.
     const move = (dir) => {
       const to = idx + dir;
@@ -398,6 +414,7 @@
 
     if (room.priceOnly) {
       const g = el("div", { class: "form-grid" }, c);
+      sensorField(g, room);
       const ch = field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1, unit: "h" }), { hint: "heats only in those hours" });
       helpButton(ch.querySelector("span"), "priceOnly", g);
       el("h3", {}, c, "Never heat between");
@@ -412,8 +429,7 @@
     }
 
     const g = el("div", { class: "form-grid" }, c);
-    field(g, "Temperature sensor", sel(room, "sensor", sensorOptions()),
-      { hint: (state.status?.sensors || []).length ? "" : "No sensors yet: set up Netatmo on the Sensors tab" });
+    sensorField(g, room);
     const nb = field(g, "Never below", num(room, "minTemp", { step: 0.5, unit: "°C" }), { hint: "heats whatever the price" });
     helpButton(nb.querySelector("span"), "limits", g);
     field(g, "Never above", num(room, "maxTemp", { step: 0.5, unit: "°C" }), { hint: "hard stop, even when manual" });
