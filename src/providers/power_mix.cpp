@@ -95,6 +95,18 @@ std::vector<MixHour> parsePowerMix(const json& prodex, const json& co2) {
         if (s.nCo2) h.co2 = s.co2 / s.nCo2;
         out.push_back(h);
     }
+    // The real-time solar figure has a constant floor (24.7 MW in DK2, all night): not production but
+    // an offset of the estimate. Take off the lowest value of the surrounding 24 hours - at night the
+    // sun gives nothing, so that is the offset - and keep what is above it.
+    std::vector<double> floorOf(out.size());
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        double lo = out[i].solar;
+        for (const auto& o : out) {
+            if (o.hour + hours{12} >= out[i].hour && o.hour <= out[i].hour + hours{12}) lo = std::min(lo, o.solar);
+        }
+        floorOf[i] = lo;
+    }
+    for (std::size_t i = 0; i < out.size(); ++i) out[i].solar = std::max(0.0, out[i].solar - floorOf[i]);
     return out;
 }
 
