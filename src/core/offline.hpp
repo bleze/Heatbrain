@@ -23,8 +23,28 @@ struct OfflinePeriod {
     bool contains(Instant t) const { return t >= start && t < end; }
 };
 
-// The occurrence of the daily window that is running at `now`, or else the next one.
-OfflinePeriod currentOrNextOfflinePeriod(const DayWindow& window, const TimeZone& tz, Instant now);
+// The configured Wi-Fi off times: every night, optionally different at the weekend - the nights
+// that END on a Saturday or Sunday morning (sleeping in is about the end).
+struct WifiOffPlan {
+    DayWindow normal;
+    std::optional<DayWindow> weekend;
+};
+
+// The occurrence that is running at `now`, or else the next one.
+OfflinePeriod currentOrNextOfflinePeriod(const WifiOffPlan& plan, const TimeZone& tz, Instant now);
+inline OfflinePeriod currentOrNextOfflinePeriod(const DayWindow& window, const TimeZone& tz, Instant now) {
+    return currentOrNextOfflinePeriod(WifiOffPlan{window, std::nullopt}, tz, now);
+}
+
+// Gaps of at least minGap between consecutive reading times (sorted): when the network was off,
+// as seen by the sensors. A gap still running at `now` is included, ending at `now`.
+struct ObservedGap {
+    Instant lastBefore;  // last reading before the gap
+    Instant firstAfter;  // first reading after it (or now, if still running)
+    bool ongoing = false;
+};
+std::vector<ObservedGap> findReadingGaps(const std::vector<Instant>& times, Instant now,
+                                         std::chrono::minutes minGap = std::chrono::minutes{30});
 
 struct OnSpan {
     Instant from;

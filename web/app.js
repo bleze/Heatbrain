@@ -368,8 +368,11 @@ function renderWifiOff() {
   if (bar.hidden) return;
   bar.appendChild(badge("wifi", "gray"));
   const t = el("div", { class: "grow" }, bar);
-  el("b", {}, t, w.active ? `Wi-Fi off until ${hm(w.end)}` : `Wi-Fi goes off at ${hm(w.start)}`);
-  const plugs = w.armedPlugs.length ? `${w.armedPlugs.join(", ")} follow${w.armedPlugs.length === 1 ? "s" : ""} the night schedule loaded onto the plug` : "Live plugs get their night schedule shortly before";
+  el("b", {}, t, w.late ? `Wi-Fi is off longer than planned (until ${hm(w.end)})`
+    : w.active ? `Wi-Fi off until ${hm(w.end)}` : `Wi-Fi goes off at ${hm(w.start)}`);
+  const plugs = w.armedPlugs.length
+    ? `${w.armedPlugs.join(", ")} follow${w.armedPlugs.length === 1 ? "s" : ""} the night schedule loaded onto the plug${w.scheduleUntil ? ` (it reaches until ${hm(w.scheduleUntil)}; heatbrain takes over as soon as the Wi-Fi is back)` : ""}`
+    : "Live plugs get their night schedule shortly before";
   el("div", { class: "muted" }, t, `${plugs}. Expected connection problems are not reported until ${hm(w.end + 20 * 60)}.`);
   for (const e of w.errors) el("div", { class: "wifi-error" }, t, `Not loaded: ${e} - this plug runs limp mode while the Wi-Fi is off.`);
 }

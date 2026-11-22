@@ -977,6 +977,72 @@
     fw.appendChild(chk(n, "firmwareUpdates", "Tell me when a new Tasmota release is out for my plugs", true));
   }
 
+  // --- Wi-Fi off times as the sensors saw them -------------------------------------------
+  // Netatmo uses the same Wi-Fi: gaps in its readings show when the network was really off.
+  const hmOf = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const minOf = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
+  function localParts(ts) {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: state.tz, weekday: "short", day: "numeric", month: "short",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(ts * 1000).map((x) => [x.type, x.value]));
+    return { minute: Number(p.hour) * 60 + Number(p.minute), weekday: p.weekday, label: `${p.weekday} ${p.day} ${p.month}` };
+  }
+  async function loadWifiSeen() {
+    if (S.wifiSeen && Date.now() - S.wifiSeen.at < 300_000) return;
+    try { S.wifiSeen = { at: Date.now(), ...(await api("/api/wifi-gaps")) }; render(); } catch { /* optional */ }
+  }
+  function renderWifiSeen(card) {
+    loadWifiSeen();
+    const seen = S.wifiSeen;
+    // Ignore short hiccups; one still running counts from 30 minutes (the server's minimum).
+    const nights = (seen?.gaps || []).filter((g) => g.ongoing || g.to - g.from >= 3600);
+    if (!nights.length) return;
+    const box = el("div", { class: "wifi-seen" }, card);
+    el("h3", {}, box, "Wi-Fi off, as the sensors saw it (last 7 days)");
+    const w = S.cfg.wifiOff;
+    const groups = { weekday: [], weekend: [] };
+    const tbl = el("table", { class: "events" }, box);
+    for (const g of nights) {
+      const a = localParts(g.from), b = localParts(g.to);
+      const weekend = b.weekday === "Sat" || b.weekday === "Sun";
+      if (!g.ongoing) (weekend ? groups.weekend : groups.weekday).push([a.minute, b.minute]);
+      // Covered: the readings stopped at or after the planned start and came back by the planned end (±10 min).
+      let verdict = "", cls = "";
+      if (w && !g.ongoing) {
+        const win = weekend && w.weekend ? w.weekend : w;
+        const rel = (m) => (m - 720 + 1440) % 1440;  // minutes after noon: nights don't wrap
+        const okStart = rel(a.minute) >= rel(minOf(win.from)) - 10;
+        const okEnd = rel(b.minute) <= rel(minOf(win.to)) + 10;
+        verdict = okStart && okEnd ? "covered" : !okStart ? `off before ${win.from}` : `back after ${win.to}`;
+        cls = okStart && okEnd ? "ok" : "warn";
+      }
+      const tr = el("tr", {}, tbl);
+      el("td", {}, tr, b.label);
+      el("td", {}, tr, `${hmOf(a.minute)} – ${g.ongoing ? "now" : hmOf(b.minute)}`);
+      el("td", { class: `seen-${cls}` }, tr, g.ongoing ? "still off" : verdict);
+    }
+    // Suggest: earliest stop and latest return per group, rounded outwards to 15 minutes.
+    const suggest = (list) => {
+      if (list.length < 2) return null;
+      const rel = (m) => (m - 720 + 1440) % 1440, back = (r) => (r + 720) % 1440;
+      const from = back(Math.floor(Math.min(...list.map(([s]) => rel(s))) / 15) * 15);
+      const to = back(Math.ceil(Math.max(...list.map(([, e]) => rel(e))) / 15) * 15);
+      return { from: hmOf(from), to: hmOf(to) };
+    };
+    const sw = suggest(groups.weekday), se = suggest(groups.weekend);
+    if (sw || se) {
+      const row = el("div", { class: "row", style: "margin-top:8px" }, box);
+      const text = [sw && `other nights ${sw.from}–${sw.to}`, se && `weekend ${se.from}–${se.to}`].filter(Boolean).join(", ");
+      el("span", { class: "muted" }, row, `Suggested: ${text}`);
+      btn(row, "Use these times", "check", () => {
+        const base = sw || se;
+        S.cfg.wifiOff = { from: base.from, to: base.to };
+        if (se && sw && (se.from !== sw.from || se.to !== sw.to)) S.cfg.wifiOff.weekend = se;
+        changed(); render(); toast("Times filled in - review and save");
+      }, "ghost");
+    }
+    el("div", { class: "hint" }, box, "From gaps in the Netatmo readings (they come every ~10 minutes, so times are approximate). The period should cover the whole time the Wi-Fi is off.");
+  }
+
   // --- Export / import (moving heatbrain, e.g. to the NAS) ------------------------------
   function renderTransfer(body) {
     const card = el("section", { class: "card" }, body);
@@ -1084,6 +1150,19 @@
     toggle(wrow, wifiOn, wifiOn ? "" : "Off", (v) => { if (v) S.cfg.wifiOff = { from: "23:30", to: "06:30" }; else delete S.cfg.wifiOff; changed(); render(); });
     if (wifiOn) { wrow.appendChild(time(S.cfg.wifiOff, "from")); el("span", {}, wrow, "–"); wrow.appendChild(time(S.cfg.wifiOff, "to", true)); }
     el("div", { class: "hint" }, wf, "daily; plugs switch by a schedule loaded beforehand");
+    if (wifiOn) {
+      const wk = el("div", { class: "field span2" }, g);
+      el("span", {}, wk, "At the weekend");
+      const krow = el("div", { class: "row" }, wk);
+      const weekendOn = !!S.cfg.wifiOff.weekend;
+      toggle(krow, weekendOn, weekendOn ? "" : "Same as other nights", (v) => {
+        if (v) S.cfg.wifiOff.weekend = { from: S.cfg.wifiOff.from, to: "09:00" }; else delete S.cfg.wifiOff.weekend;
+        changed(); render();
+      });
+      if (weekendOn) { krow.appendChild(time(S.cfg.wifiOff.weekend, "from")); el("span", {}, krow, "–"); krow.appendChild(time(S.cfg.wifiOff.weekend, "to", true)); }
+      el("div", { class: "hint" }, wk, "the nights ending Saturday and Sunday morning");
+    }
+    renderWifiSeen(card);
     if (S.fixedWebPort) {
       // In Docker the address is chosen by the compose file's port mapping, not here.
       const wp = el("div", { class: "field" }, g);

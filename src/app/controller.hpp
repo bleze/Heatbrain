@@ -63,12 +63,17 @@ public:
     // Daily Wi-Fi off period (nullopt = none). The night schedule goes onto the plugs `lead`
     // before it starts - at least one control interval, so a tick is sure to fall in between.
     // Call after setDataDir (the loaded schedules survive a restart in <dataDir>/offline.json).
-    void setOfflineWindow(std::optional<DayWindow> window, std::chrono::minutes lead);
+    void setOfflineWindow(std::optional<WifiOffPlan> plan, std::chrono::minutes lead);
+    void setOfflineWindow(DayWindow window, std::chrono::minutes lead) {
+        setOfflineWindow(WifiOffPlan{window, std::nullopt}, lead);
+    }
     struct OfflineInfo {
         OfflinePeriod period;
         bool active = false;                  // inside the period now
         std::vector<std::string> armedPlugs;  // plugs following a loaded schedule
         std::vector<std::string> errors;      // plugs whose schedule could not be loaded
+        bool late = false;                    // past the planned end and the network isn't back
+        std::optional<Instant> scheduleUntil; // how far the loaded schedule reaches
     };
     std::optional<OfflineInfo> offlineInfo(Instant now) const;
     // Share of time a room heated in heat / keep periods on recent days (decision log).
@@ -82,7 +87,8 @@ private:
     // Empty when the plug may be switched live; otherwise why not.
     std::string failsafeProblem(Plug& plug, Instant now);
     void armOffline(const OfflinePeriod& period, Instant now, std::optional<AwayMode> away);
-    void disarmOffline(Instant now);
+    void disarmOffline(Instant now, bool networkBack);
+    bool networkBackSince(Instant t) const;  // a sensor reading newer than t arrived
     void loadOfflineState();
     void saveOfflineState() const;
 
@@ -104,7 +110,7 @@ private:
     std::filesystem::path dataDir_;  // firmware test records; empty = not checked
     std::optional<Instant> lastPrune_;
 
-    std::optional<DayWindow> offlineWindow_;
+    std::optional<WifiOffPlan> offlineWindow_;
     std::chrono::minutes offlineLead_{10};
     struct ArmedRoom {
         Instant start;  // when the Wi-Fi goes off
@@ -114,6 +120,9 @@ private:
     };
     std::map<std::string, ArmedRoom> armedRooms_;          // room id -> schedule followed until
     std::map<std::string, Instant> armedPlugs_;            // plug id -> schedule on the device until
+    std::optional<OfflinePeriod> armedPeriod_;             // the planned period the schedules are for
+    std::optional<Instant> lastDisarmTry_;
+    std::optional<Instant> handledPeriodEnd_;  // schedules were loaded for the period ending then
     std::map<std::string, std::pair<std::string, Instant>> offlineArmErrors_;  // plug id -> (why, period end)
 };
 

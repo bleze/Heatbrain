@@ -285,3 +285,36 @@ TEST_CASE("Wi-Fi off period: a restart during the night keeps following the load
     const auto r = again.tick(f.now + minutes{30}, true);
     CHECK(reasonCode(r.rooms[0].decision.reason) == "OFFLINE_SCHEDULE");
 }
+
+TEST_CASE("Wi-Fi off period: back early - heatbrain takes over as soon as readings arrive") {
+    Fixture f;
+    f.plug("bedroom").sw->provision(false);
+    auto* sim = dynamic_cast<SimulatedSwitch*>(f.plug("bedroom").sw.get());
+    f.controller->setOfflineWindow(DayWindow{12 * 60 + 5, 14 * 60}, minutes{10});
+    f.controller->tick(f.now, true);
+    REQUIRE(sim->schedule());
+    // 12:40: the Wi-Fi is already back and the sensors report again.
+    f.now += minutes{40};
+    f.setTemps(18.0, 14.0);
+    const auto r = f.controller->tick(f.now, true);
+    CHECK_FALSE(sim->schedule());
+    CHECK(reasonCode(r.rooms[0].decision.reason) != "OFFLINE_SCHEDULE");
+}
+
+TEST_CASE("Wi-Fi off period: back late - plugs keep their schedule, one quiet note") {
+    Fixture f;
+    f.plug("bedroom").sw->provision(false);
+    auto* sim = dynamic_cast<SimulatedSwitch*>(f.plug("bedroom").sw.get());
+    f.controller->setOfflineWindow(DayWindow{12 * 60 + 5, 14 * 60}, minutes{10});
+    f.controller->tick(f.now, true);
+    sim->setReachable(false);
+    f.sensors->fail = true;
+    // 14:40 local: 40 minutes past the planned end, still nothing reachable.
+    f.now += hours{2} + minutes{40};
+    const auto r = f.controller->tick(f.now, true);
+    CHECK(sim->schedule());  // still loaded on the device (it could not be removed)
+    CHECK(reasonCode(r.rooms[0].decision.reason) == "OFFLINE_SCHEDULE");
+    CHECK(std::ranges::any_of(r.problems, [](const Problem& p) { return p.key == "wifi:late"; }));
+    for (const auto& p : r.problems) CHECK_FALSE(p.key.starts_with("plug:bedroom:unreachable"));
+    CHECK(f.controller->offlineInfo(f.now)->late);
+}

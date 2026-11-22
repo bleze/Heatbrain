@@ -19,9 +19,10 @@ std::vector<RoomConfig> parseRooms(const nlohmann::json& cfg, const std::vector<
 
 DayWindow parseWindow(const nlohmann::json& j);
 
-// The daily Wi-Fi off period ("wifiOff": {"from": "23:30", "to": "06:30"}), if configured.
-// 30 minutes to 16 hours.
-std::optional<DayWindow> parseWifiOff(const nlohmann::json& cfg);
+// The Wi-Fi off period, if configured:
+// "wifiOff": {"from": "23:30", "to": "06:30", "weekend": {"from": "00:30", "to": "09:00"}}.
+// Each window 30 minutes to 16 hours; "weekend" (optional) is for nights ending Sat/Sun.
+std::optional<WifiOffPlan> parseWifiOff(const nlohmann::json& cfg);
 
 // Rooms written before daily programs existed have "schedule" bands (+ "noHeat" windows).
 // Returns the room with an equivalent "program" of switch points instead; rooms that

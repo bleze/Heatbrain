@@ -217,6 +217,8 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
         wifiOff = {{"start", o->period.start.time_since_epoch().count()},
                    {"end", o->period.end.time_since_epoch().count()},
                    {"active", o->active},
+                   {"late", o->late},
+                   {"scheduleUntil", o->scheduleUntil ? json(o->scheduleUntil->time_since_epoch().count()) : json(nullptr)},
                    {"armedPlugs", o->armedPlugs},
                    {"errors", o->errors}};
     }

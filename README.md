@@ -126,7 +126,10 @@ rooms stay off, and it starts and ends by itself.
 network that is switched off at night. Shortly before, heatbrain loads a schedule onto each live
 plug (Tasmota Rule2/Rule3, `Time#Minute` triggers on the plug's own clock) and stretches the
 fail-safe to match: auto-off just longer than the longest planned ON, watchdog until the end
-plus 30 min. Without Wi-Fi there are no temperatures either, so heat/keep periods heat the
+of the schedule plus 30 min. The schedule reaches 3 h past the planned end (a late Wi-Fi is not
+limp mode); fresh sensor readings mean the network is back and heatbrain takes over at once.
+Optional `"weekend": {"from", "to"}` for the nights ending Saturday/Sunday. Settings shows the
+real off times of the last week from gaps in the Netatmo readings, and suggests a period. Without Wi-Fi there are no temperatures either, so heat/keep periods heat the
 share of time the room actually heated in such periods over the last 7 days (25 % until there
 is enough history), in the cheapest quarters; price-only rooms get their cheapest hours.
 Expected plug/sensor outages are not reported during the period and 20 minutes after.

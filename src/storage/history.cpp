@@ -191,6 +191,14 @@ std::vector<TemperatureRecord> History::sensorTemperatures(const std::string& se
     return out;
 }
 
+std::vector<Instant> History::readingTimes(Instant from, Instant to) const {
+    Stmt s(db_, "SELECT DISTINCT ts FROM temperatures WHERE ts>=? AND ts<? ORDER BY ts");
+    s.bind(1, from).bind(2, to);
+    std::vector<Instant> out;
+    while (s.step()) out.push_back(s.instant(0));
+    return out;
+}
+
 std::vector<PricePoint> History::prices(Instant from, Instant to) const {
     Stmt s(db_, "SELECT slot, total FROM prices WHERE slot>=? AND slot<? ORDER BY slot");
     s.bind(1, from).bind(2, to);

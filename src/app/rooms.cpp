@@ -24,12 +24,21 @@ DayWindow parseWindow(const json& j) {
     return DayWindow{*from, *to};
 }
 
-std::optional<DayWindow> parseWifiOff(const json& cfg) {
+std::optional<WifiOffPlan> parseWifiOff(const json& cfg) {
     if (!cfg.contains("wifiOff") || cfg["wifiOff"].is_null()) return std::nullopt;
-    const DayWindow w = parseWindow(cfg["wifiOff"]);
-    const int length = ((w.toMinute - w.fromMinute) % 1440 + 1440) % 1440;
-    if (length < 30 || length > 16 * 60) throw std::runtime_error("Wi-Fi off period must be 30 minutes to 16 hours");
-    return w;
+    const auto window = [](const json& j, const char* what) {
+        const DayWindow w = parseWindow(j);
+        const int length = ((w.toMinute - w.fromMinute) % 1440 + 1440) % 1440;
+        if (length < 30 || length > 16 * 60) {
+            throw std::runtime_error(std::string(what) + " must be 30 minutes to 16 hours");
+        }
+        return w;
+    };
+    WifiOffPlan plan{window(cfg["wifiOff"], "Wi-Fi off period"), std::nullopt};
+    if (cfg["wifiOff"].contains("weekend") && !cfg["wifiOff"]["weekend"].is_null()) {
+        plan.weekend = window(cfg["wifiOff"]["weekend"], "Weekend Wi-Fi off period");
+    }
+    return plan;
 }
 
 namespace {

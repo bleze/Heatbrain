@@ -57,6 +57,8 @@ public:
     std::vector<TemperatureRecord> temperatures(const std::string& roomId, Instant from, Instant to) const;
     std::vector<TemperatureRecord> sensorTemperatures(const std::string& sensorKey, Instant from, Instant to) const;
     std::vector<PricePoint> prices(Instant from, Instant to) const;
+    // Times of all stored readings (any sensor), sorted: shows when the sensors were online.
+    std::vector<Instant> readingTimes(Instant from, Instant to) const;
 
     void prune(Instant olderThan);
 

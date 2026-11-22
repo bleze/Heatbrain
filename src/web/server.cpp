@@ -21,6 +21,7 @@
 #include "plugs/tasmota.hpp"
 #include "storage/history.hpp"
 #include "app/transfer.hpp"
+#include "core/offline.hpp"
 
 namespace hb {
 
@@ -311,6 +312,19 @@ void WebServer::routes() {
             log::warn("Web: import failed: {}", e.what());
             sendError(res, 500, std::string("Import failed: ") + e.what());
         }
+    });
+
+    // When the sensors were offline at night over the last week (the Wi-Fi off times, as seen).
+    s.Get("/api/wifi-gaps", [this](const httplib::Request&, httplib::Response& res) {
+        const Instant now = floor<seconds>(system_clock::now());
+        History history(ctx_.dataDir / "history.db");
+        json gaps = json::array();
+        for (const auto& g : findReadingGaps(history.readingTimes(now - days{8}, now + minutes{1}), now)) {
+            gaps.push_back({{"from", g.lastBefore.time_since_epoch().count()},
+                            {"to", g.firstAfter.time_since_epoch().count()},
+                            {"ongoing", g.ongoing}});
+        }
+        sendJson(res, json{{"gaps", gaps}, {"now", now.time_since_epoch().count()}});
     });
 
     s.Post("/api/config/validate", [this](const httplib::Request& req, httplib::Response& res) {

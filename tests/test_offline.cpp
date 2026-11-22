@@ -110,3 +110,36 @@ TEST_CASE("Night schedule as Tasmota rules on the plug's local clock") {
     for (int i = 12; i < 40; ++i) many.push_back({at(1, 0, 0) + minutes{30 * i}, at(1, 0, 15) + minutes{30 * i}});
     CHECK_FALSE(tasmotaScheduleRules(many, minutes{60}));
 }
+
+TEST_CASE("Weekend Wi-Fi off times apply to the nights ending Saturday and Sunday") {
+    // 2026-11-23 is a Monday; kDay + 4 = Friday 27th, + 5 = Saturday, + 6 = Sunday.
+    const WifiOffPlan plan{DayWindow{30, 6 * 60 + 30}, DayWindow{30, 9 * 60}};
+    // Thursday evening: the night to Friday is a weekday night.
+    auto p = currentOrNextOfflinePeriod(plan, tz(), at(3, 22));
+    CHECK(p.start == at(4, 0, 30));
+    CHECK(p.end == at(4, 6, 30));
+    // Friday evening: the night to Saturday is a weekend night (sleep in until 09:00).
+    p = currentOrNextOfflinePeriod(plan, tz(), at(4, 22));
+    CHECK(p.start == at(5, 0, 30));
+    CHECK(p.end == at(5, 9));
+    // Saturday 08:00: still in it.
+    CHECK(currentOrNextOfflinePeriod(plan, tz(), at(5, 8)).contains(at(5, 8)));
+    // Sunday evening: the night to Monday is a weekday night again.
+    p = currentOrNextOfflinePeriod(plan, tz(), at(6, 22));
+    CHECK(p.end == at(7, 6, 30));
+}
+
+TEST_CASE("Gaps in the sensor readings show when the Wi-Fi was off") {
+    std::vector<Instant> t;
+    for (int m = 0; m <= 60; m += 10) t.push_back(at(0, 23) + minutes{m});        // 23:00-00:00
+    for (int m = 0; m <= 60; m += 10) t.push_back(at(1, 6, 35) + minutes{m});     // 06:35-07:35
+    auto gaps = findReadingGaps(t, at(1, 8));
+    REQUIRE(gaps.size() == 1);
+    CHECK(gaps[0].lastBefore == at(1, 0));
+    CHECK(gaps[0].firstAfter == at(1, 6, 35));
+    CHECK_FALSE(gaps[0].ongoing);
+    // Still off now: an ongoing gap.
+    gaps = findReadingGaps(t, at(1, 9));
+    REQUIRE(gaps.size() == 2);
+    CHECK(gaps[1].ongoing);
+}

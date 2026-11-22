@@ -10,17 +10,31 @@ namespace hb {
 
 using namespace std::chrono;
 
-OfflinePeriod currentOrNextOfflinePeriod(const DayWindow& window, const TimeZone& tz, Instant now) {
-    const int length = ((window.toMinute - window.fromMinute) % 1440 + 1440) % 1440;
+OfflinePeriod currentOrNextOfflinePeriod(const WifiOffPlan& plan, const TimeZone& tz, Instant now) {
     const auto today = floor<days>(tz.toLocal(now));
-    // Yesterday's occurrence may still be running (windows usually cross midnight).
-    for (int d = -1; d <= 1; ++d) {
-        const Instant start = tz.toInstant(today + days{d} + minutes{window.fromMinute});
-        const Instant end = start + minutes{length == 0 ? 1440 : length};
-        if (end > now) return {start, end};
+    // One occurrence per END date; the window for that date depends on its weekday.
+    std::optional<OfflinePeriod> best;
+    for (int d = -1; d <= 3; ++d) {
+        const local_days endDay = today + days{d};
+        const weekday wd{endDay};
+        const bool weekend = wd == Saturday || wd == Sunday;
+        const DayWindow& w = weekend && plan.weekend ? *plan.weekend : plan.normal;
+        const int length = ((w.toMinute - w.fromMinute) % 1440 + 1440) % 1440;
+        const Instant end = tz.toInstant(endDay + minutes{w.toMinute});
+        const Instant start = end - minutes{length == 0 ? 1440 : length};
+        if (end <= now) continue;
+        if (!best || start < best->start) best = OfflinePeriod{start, end};
     }
-    const Instant start = tz.toInstant(today + days{2} + minutes{window.fromMinute});
-    return {start, start + minutes{length == 0 ? 1440 : length}};
+    return *best;
+}
+
+std::vector<ObservedGap> findReadingGaps(const std::vector<Instant>& times, Instant now, minutes minGap) {
+    std::vector<ObservedGap> gaps;
+    for (std::size_t i = 1; i < times.size(); ++i) {
+        if (times[i] - times[i - 1] >= minGap) gaps.push_back({times[i - 1], times[i], false});
+    }
+    if (!times.empty() && now - times.back() >= minGap) gaps.push_back({times.back(), now, true});
+    return gaps;
 }
 
 bool scheduleOnAt(const std::vector<OnSpan>& spans, Instant t) {

@@ -34,6 +34,9 @@ bool expectedWhileOffline(const std::string& key) {
            (key.starts_with("room:") && (endsWith(":limp") || endsWith(":not-warming")));
 }
 constexpr minutes kOfflineGrace{20};
+// Schedules reach this far past the planned end: if the Wi-Fi comes back late, the plugs keep
+// following a plan instead of falling into limp mode. Back early: heatbrain takes over at once.
+constexpr hours kOfflineBuffer{3};
 
 std::string spansText(const std::vector<OnSpan>& spans, const TimeZone& tz) {
     if (spans.empty()) return "off all period";
@@ -264,10 +267,21 @@ TickResult Controller::tick(Instant now, bool apply) {
     // Wi-Fi off period: hand back after it, load the night schedule just before it.
     std::optional<OfflinePeriod> offline;
     if (offlineWindow_) offline = currentOrNextOfflinePeriod(*offlineWindow_, tz_, now);
-    if (apply) disarmOffline(now);
+    // Fresh readings after the period started: the network is back (Netatmo uses the same Wi-Fi).
+    const bool networkBack = armedPeriod_ && now >= armedPeriod_->start && networkBackSince(armedPeriod_->start);
+    if (apply) disarmOffline(now, networkBack);
     if (apply && offline && now >= offline->start - offlineLead_ && now < offline->end) {
-        const bool loaded = std::ranges::any_of(armedRooms_, [&](const auto& kv) { return kv.second.until == offline->end; });
+        // Once per period: after an early takeover the schedules are not loaded again.
+        const bool loaded = handledPeriodEnd_ == offline->end;
         if (!loaded) armOffline(*offline, now, away);
+    }
+    if (armedPeriod_ && !armedPlugs_.empty() && now >= armedPeriod_->end + kOfflineGrace) {
+        std::string ids;
+        for (const auto& [id, until] : armedPlugs_) ids += (ids.empty() ? "" : ", ") + id;
+        add(result, "wifi:late", Severity::Info,
+            std::format("The Wi-Fi seems to be off longer than planned (the period ended {:%H:%M}). {} keep "
+                        "following their night schedule until {:%H:%M}.",
+                        tz_.toLocal(armedPeriod_->end), ids, tz_.toLocal(armedPlugs_.begin()->second)));
     }
     for (const auto& [plugId, err] : offlineArmErrors_) {
         const std::string& why = err.first;
@@ -298,7 +312,7 @@ TickResult Controller::tick(Instant now, bool apply) {
         rr.room = &room;
         rr.decision = decideRoom(room, in, prices_, tz_);
         const auto armed = armedRooms_.find(room.id);
-        const bool following = armed != armedRooms_.end() && now < armed->second.until;
+        const bool following = armed != armedRooms_.end() && now < armed->second.until && !networkBack;
         if (following) {
             rr.decision.on = scheduleOnAt(armed->second.spans, now);
             rr.decision.reason = Reason::OfflineSchedule;
@@ -344,10 +358,12 @@ TickResult Controller::tick(Instant now, bool apply) {
         result.rooms.push_back(std::move(rr));
     }
 
-    if (offline && now >= offline->start - offlineLead_ && now < offline->end + kOfflineGrace) {
+    const bool inWindow = offline && now >= offline->start - offlineLead_ && now < offline->end + kOfflineGrace;
+    const bool onSchedule = armedPeriod_ && !networkBack && !armedPlugs_.empty();  // late Wi-Fi: one note is enough
+    if (inWindow || onSchedule) {
         std::erase_if(result.problems, [&](const Problem& p) {
             // Before the period only plugs following a schedule are exempt; inside it, everything expected.
-            return expectedWhileOffline(p.key) && (now >= offline->start || p.key.starts_with("plug:"));
+            return expectedWhileOffline(p.key) && (onSchedule || now >= offline->start || p.key.starts_with("plug:"));
         });
     }
 
@@ -375,8 +391,8 @@ TickResult Controller::tick(Instant now, bool apply) {
     return result;
 }
 
-void Controller::setOfflineWindow(std::optional<DayWindow> window, minutes lead) {
-    offlineWindow_ = window;
+void Controller::setOfflineWindow(std::optional<WifiOffPlan> plan, minutes lead) {
+    offlineWindow_ = plan;
     offlineLead_ = lead;
     loadOfflineState();
 }
@@ -410,8 +426,9 @@ OfflineDuty Controller::learnedDuty(const std::string& roomId, Instant now) cons
 void Controller::armOffline(const OfflinePeriod& period, Instant now, std::optional<AwayMode> away) {
     for (const auto& room : rooms_) {
         const auto duty = learnedDuty(room.id, now);
-        const auto spans = offlineSchedule(room, prices_, tz_, now, period.end, duty, away);
-        armedRooms_[room.id] = {period.start, period.end, spans, now};
+        const Instant horizon = period.end + kOfflineBuffer;
+        const auto spans = offlineSchedule(room, prices_, tz_, now, horizon, duty, away);
+        armedRooms_[room.id] = {period.start, horizon, spans, now};
         log::info("Wi-Fi off period {:%H:%M}-{:%H:%M}: {} {} (duty heat {:.0f}%, keep {:.0f}%)",
                   tz_.toLocal(period.start), tz_.toLocal(period.end), room.id, spansText(spans, tz_),
                   duty.heat * 100, duty.keep * 100);
@@ -420,8 +437,8 @@ void Controller::armOffline(const OfflinePeriod& period, Instant now, std::optio
             if (it == plugs_.end() || it->mode != PlugMode::Live) continue;  // dry-run: nothing to load
             if (!failsafeProblem(*it, now).empty()) continue;               // not switched by heatbrain anyway
             try {
-                it->sw->armOffline(spans, now, period.end);
-                armedPlugs_[id] = period.end;
+                it->sw->armOffline(spans, now, period.end + kOfflineBuffer);
+                armedPlugs_[id] = period.end + kOfflineBuffer;
                 log::info("Plug {}: night schedule loaded", id);
             } catch (const std::exception& e) {
                 offlineArmErrors_[id] = {e.what(), period.end};
@@ -429,17 +446,30 @@ void Controller::armOffline(const OfflinePeriod& period, Instant now, std::optio
             }
         }
     }
+    armedPeriod_ = period;
+    handledPeriodEnd_ = period.end;
     saveOfflineState();
 }
 
-void Controller::disarmOffline(Instant now) {
+bool Controller::networkBackSince(Instant t) const {
+    return std::ranges::any_of(readings_, [&](const auto& kv) {
+        return kv.second.measuredAt && *kv.second.measuredAt > t + minutes{2};
+    });
+}
+
+void Controller::disarmOffline(Instant now, bool networkBack) {
     bool changed = false;
     for (auto it = armedRooms_.begin(); it != armedRooms_.end();) {
-        if (now >= it->second.until) { it = armedRooms_.erase(it); changed = true; }
+        if (now >= it->second.until || networkBack) { it = armedRooms_.erase(it); changed = true; }
         else ++it;
     }
+    // Reaching an offline plug costs seconds of timeouts, so only try when there is reason to:
+    // the network is back, the schedule ran out, or every 15 minutes once the planned end passed.
+    const bool pastEnd = armedPeriod_ && now >= armedPeriod_->end;
+    const bool periodic = pastEnd && (!lastDisarmTry_ || now - *lastDisarmTry_ >= minutes{15});
+    if (periodic) lastDisarmTry_ = now;
     for (auto it = armedPlugs_.begin(); it != armedPlugs_.end();) {
-        if (now < it->second) { ++it; continue; }
+        if (now < it->second && !networkBack && !periodic) { ++it; continue; }
         auto plug = std::ranges::find_if(plugs_, [&](const Plug& p) { return p.id == it->first; });
         if (plug == plugs_.end()) { it = armedPlugs_.erase(it); changed = true; continue; }
         try {
@@ -453,14 +483,21 @@ void Controller::disarmOffline(Instant now) {
         }
     }
     std::erase_if(offlineArmErrors_, [&](const auto& kv) { return now >= kv.second.second + kOfflineGrace; });
+    if (armedPeriod_ && armedRooms_.empty() && armedPlugs_.empty()) {
+        armedPeriod_.reset();
+        lastDisarmTry_.reset();
+        changed = true;
+    }
     if (changed) saveOfflineState();
 }
 
 std::optional<Controller::OfflineInfo> Controller::offlineInfo(Instant now) const {
     if (!offlineWindow_) return std::nullopt;
     OfflineInfo info;
-    info.period = currentOrNextOfflinePeriod(*offlineWindow_, tz_, now);
-    info.active = info.period.contains(now);
+    info.period = armedPeriod_ ? *armedPeriod_ : currentOrNextOfflinePeriod(*offlineWindow_, tz_, now);
+    info.late = armedPeriod_ && now >= armedPeriod_->end && !armedPlugs_.empty();
+    info.active = info.period.contains(now) || info.late;
+    if (!armedPlugs_.empty()) info.scheduleUntil = armedPlugs_.begin()->second;
     for (const auto& [id, until] : armedPlugs_) info.armedPlugs.push_back(id);
     for (const auto& [id, err] : offlineArmErrors_) info.errors.push_back(id + ": " + err.first);
     return info;
@@ -469,6 +506,8 @@ std::optional<Controller::OfflineInfo> Controller::offlineInfo(Instant now) cons
 void Controller::loadOfflineState() {
     armedRooms_.clear();
     armedPlugs_.clear();
+    armedPeriod_.reset();
+    handledPeriodEnd_.reset();
     if (dataDir_.empty()) return;
     const auto file = dataDir_ / "offline.json";
     if (!std::filesystem::exists(file)) return;
@@ -485,6 +524,13 @@ void Controller::loadOfflineState() {
             armedRooms_[id] = std::move(a);
         }
         for (const auto& [id, until] : plugs.items()) armedPlugs_[id] = at(until);
+        if (j.contains("handledEnd")) handledPeriodEnd_ = at(j["handledEnd"]);
+        if (j.contains("period")) armedPeriod_ = OfflinePeriod{at(j["period"].at(0)), at(j["period"].at(1))};
+        else if (!armedRooms_.empty()) {
+            const auto& a = armedRooms_.begin()->second;
+            armedPeriod_ = OfflinePeriod{a.start, a.until};
+        }
+        if (!handledPeriodEnd_ && armedPeriod_) handledPeriodEnd_ = armedPeriod_->end;
     } catch (const std::exception& e) {
         log::warn("Ignoring unreadable {}: {}", file.string(), e.what());
     }
@@ -500,7 +546,10 @@ void Controller::saveOfflineState() const {
         rooms[id] = {{"start", epoch(a.start)}, {"until", epoch(a.until)}, {"loadedAt", epoch(a.loadedAt)}, {"spans", spans}};
     }
     for (const auto& [id, until] : armedPlugs_) plugs[id] = epoch(until);
-    std::ofstream(dataDir_ / "offline.json") << json{{"rooms", rooms}, {"plugs", plugs}}.dump(2);
+    json out{{"rooms", rooms}, {"plugs", plugs}};
+    if (armedPeriod_) out["period"] = {epoch(armedPeriod_->start), epoch(armedPeriod_->end)};
+    if (handledPeriodEnd_) out["handledEnd"] = epoch(*handledPeriodEnd_);
+    std::ofstream(dataDir_ / "offline.json") << out.dump(2);
 }
 
 }  // namespace hb

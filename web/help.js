@@ -118,9 +118,10 @@ const HELP = {
   wifiOff: {
     title: "Wi-Fi off period",
     body: [
-      "If you switch the Wi-Fi off at night, set the period here. Shortly before it starts, heatbrain loads a schedule onto each live plug and the plug switches on its own clock - no network needed. Afterwards heatbrain takes over again.",
+      "If you switch the Wi-Fi off at night, set the period here - with other times for the weekend if you sleep in (the nights ending Saturday and Sunday morning). Shortly before it starts, heatbrain loads a schedule onto each live plug and the plug switches on its own clock - no network needed. The schedule reaches 3 hours past the planned end, so a late Wi-Fi does not mean limp mode; as soon as readings arrive again, heatbrain takes over.",
+      "Below the setting you see when the Wi-Fi was really off on recent nights, from the gaps in the Netatmo readings, and whether the period covered it. 'Use these times' fills in a period that covers them.",
       "There are no temperatures while the Wi-Fi is off (the Netatmo station uses Wi-Fi too), so the schedule is decided in advance: price-only rooms get their cheapest hours, 'off' periods stay off, and 'heat to' / 'keep above' periods heat as much as that room actually heated in such periods over the last week (15 min per hour until there is enough history), placed in the cheapest quarters.",
-      "The fail-safe stays in charge: each planned ON ends with its own OFF and an auto-off just longer than it, and limp mode only starts if heatbrain has not taken over 30 minutes after the period. Plug and sensor outages during the period (and 20 minutes after) are not reported.",
+      "The fail-safe stays in charge: each planned ON ends with its own OFF and an auto-off just longer than it, and limp mode only starts if heatbrain has not taken over 30 minutes after the schedule ends. Plug and sensor outages during the period (and 20 minutes after) are not reported.",
       "A plug whose clock is not synchronised, or whose rule slots 2 and 3 hold your own rules, gets no schedule - you are told, and it runs limp mode for the night.",
     ],
   },
