@@ -869,7 +869,11 @@ function renderDetail() {
     };
     // The pattern fill as an attribute: url(#id) in the stylesheet would resolve against style.css.
     for (const [a, b] of wifi.planned) band(a, b, { class: "wifi-planned", fill: "url(#wifi-hatch)" });
-    for (const [a, b] of wifi.seen) band(a, b, { class: "wifi-seen" });
+    // Seen: a solid, slimmer bar inside the lane, so it reads the same over a planned band or without one.
+    for (const [a, b] of wifi.seen) {
+      const x0 = x(Math.max(a, t0)), x1 = x(Math.min(b, t1));
+      if (x1 > x0) el("rect", { class: "wifi-seen", x: x0, y: wifiTop + 2, width: Math.max(2, x1 - x0), height: wifiH - 4, rx: 2 }, svg);
+    }
   }
 
   // Heating strip: the exact on/off periods, coloured by why
