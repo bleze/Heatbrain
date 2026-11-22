@@ -305,8 +305,9 @@ function planStrip(parent, plan) {
   el("span", {}, axis, hm(t0 + (t1 - t0) / 2));
   el("span", {}, axis, hm(t1));
   // The next two changes, in words
-  const next = plan.slice(1, 3).map((s) => `${planLabel(s)} ${hm(s.from)}`);
-  const text = `Now: ${planLabel(plan[0])}${next.length ? ` · then ${next.join(" · ")}` : ""}`;
+  // time first ("17:00 off · 21:00 heat to 20.0°"); "as needed" only for now
+  const next = plan.slice(1, 3).map((s) => `${hm(s.from)} ${planLabel(s).replace(" as needed", "")}`);
+  const text = `Now: ${planLabel(plan[0])}${next.length ? ` · ${next.join(" · ")}` : ""}`;
   el("div", { class: "plan-next", title: text }, wrap, text);
 }
 
@@ -522,9 +523,9 @@ let renderRooms = function () {
       else if (p.schedule) { text = `${p.id} · night schedule`; ic = "wifi"; }
       else if (p.mode !== "live") { text = `${p.id} · dry-run`; cls = "dryrun"; }
       if (!text) continue;
-      const chipEl = el("span", { class: `chip ${cls}`, title: p.error || "" }, plugs);
+      const chipEl = el("span", { class: `chip ${cls}`, title: p.error || text }, plugs);
       chipEl.appendChild(icon(ic));
-      chipEl.appendChild(document.createTextNode(text));
+      el("span", { class: "chip-text" }, chipEl, text);
     }
 
     const actions = el("div", { class: "actions" }, foot);
@@ -548,36 +549,71 @@ let bookingDraft = null;
 const pad2 = (n) => String(n).padStart(2, "0");
 const isoDate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
-function renderBookings(card, r) {
-  for (const b of r.bookings || []) {
-    const row = el("div", { class: `booking${b.active ? " active" : ""}` }, card);
-    row.appendChild(icon("calendar"));
-    const now = Date.now() / 1000;
-    const text = b.active && now >= b.from ? `Booked until ${hm(b.until)} · ${temp(b.target)}`
-      : b.active ? `Warming up for ${hm(b.from)}–${hm(b.until)} · ${temp(b.target)}`
-      : `Booked ${dayHm(b.from)}–${hm(b.until)} · ${temp(b.target)}`;
-    const span = el("span", {}, row, text);
-    if (!(b.active && now >= b.from)) {
-      const h = b.warmupMinutes / 60;
-      const dur = h >= 10 ? `${Math.round(h)} h` : `${Math.round(h * 2) / 2} h`;
-      const how = b.basis === "learned" ? `about ${dur}, from how fast the room has warmed before`
-        : `${dur} as set for the room, until heatbrain has learned how fast it warms`;
-      el("small", { class: "muted", style: "display:block;font-weight:400" }, span,
-        b.active ? `Warming since ${dayHm(b.warmupFrom)} (${how})` : `Starts warming ${dayHm(b.warmupFrom)} (${how})`);
-      if (b.reachable === false) el("small", { style: "display:block;color:var(--critical)" }, span, `May not reach ${temp(b.target)} in time`);
-    }
-    const x = el("button", { type: "button", class: "ghost", title: b.active ? "End the booking now" : "Cancel the booking", "aria-label": "Cancel booking" }, row);
-    x.appendChild(icon(b.active ? "undo" : "trash"));
-    x.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      x.disabled = true;
-      try {
-        await api(`/api/bookings/${encodeURIComponent(b.id)}`, { method: "DELETE" });
-        toastMaybe(b.active ? "Booking ended - back to the program" : "Booking cancelled");
-        setTimeout(refreshStatus, 1500);
-      } catch (err) { alertInline(err); x.disabled = false; }
-    });
+// One booking row: what, when it starts warming (and on what basis), and a cancel/end button.
+function bookingRow(host, b, compact) {
+  const row = el("div", { class: `booking${b.active ? " active" : ""}` }, host);
+  row.appendChild(icon("calendar"));
+  const now = Date.now() / 1000;
+  const text = b.active && now >= b.from ? `Booked until ${hm(b.until)} · ${temp(b.target)}`
+    : b.active ? `Warming up for ${hm(b.from)}–${hm(b.until)} · ${temp(b.target)}`
+    : `Booked ${dayHm(b.from)}–${hm(b.until)} · ${temp(b.target)}`;
+  const span = el("span", {}, row, text);
+  if (!(b.active && now >= b.from)) {
+    const h = b.warmupMinutes / 60;
+    const dur = h >= 10 ? `${Math.round(h)} h` : `${Math.round(h * 2) / 2} h`;
+    const how = b.basis === "learned" ? `about ${dur}, from how fast the room has warmed before`
+      : `${dur} as set for the room, until heatbrain has learned how fast it warms`;
+    const when = b.active ? `Warming since ${dayHm(b.warmupFrom)}` : `Starts warming ${dayHm(b.warmupFrom)}`;
+    // On the card one short line (the full reason on hover); in the list the whole explanation.
+    el("small", { class: "muted", style: "display:block;font-weight:400", title: `${when} (${how})` }, span, compact ? when : `${when} (${how})`);
+    if (b.reachable === false) el("small", { style: "display:block;color:var(--critical)" }, span, `May not reach ${temp(b.target)} in time`);
   }
+  const x = el("button", { type: "button", class: "ghost", title: b.active ? "End the booking now" : "Cancel the booking", "aria-label": "Cancel booking" }, row);
+  x.appendChild(icon(b.active ? "undo" : "trash"));
+  x.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    x.disabled = true;
+    try {
+      await api(`/api/bookings/${encodeURIComponent(b.id)}`, { method: "DELETE" });
+      toastMaybe(b.active ? "Booking ended - back to the program" : "Booking cancelled");
+      $("bookings-dialog")?.close();
+      setTimeout(refreshStatus, 1500);
+    } catch (err) { alertInline(err); x.disabled = false; }
+  });
+}
+
+// The card shows the next booking only (cards stay the same size); more open a list.
+function renderBookings(card, r) {
+  const all = r.bookings || [];
+  if (!all.length) return;
+  bookingRow(card, all[0], true);
+  if (all.length > 1) {
+    const more = el("button", { type: "button", class: "link-btn" }, card, `+${all.length - 1} more booking${all.length > 2 ? "s" : ""}`);
+    more.addEventListener("click", (e) => { e.stopPropagation(); bookingList(r); });
+  }
+}
+
+function bookingList(r) {
+  let dlg = $("bookings-dialog");
+  if (!dlg) {
+    dlg = el("dialog", { id: "bookings-dialog", class: "booking-dialog" }, document.body);
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+  }
+  dlg.replaceChildren();
+  const head = el("div", { class: "booking-head" }, dlg);
+  head.appendChild(badge("calendar", "violet"));
+  el("b", {}, head, `Bookings · ${r.name}`);
+  const list = el("div", { class: "booking-list" }, dlg);
+  for (const b of r.bookings || []) bookingRow(list, b, false);
+  const row = el("div", { class: "actions" }, dlg);
+  const add = el("button", { type: "button", class: "primary" }, row);
+  add.appendChild(icon("plus"));
+  add.appendChild(document.createTextNode("New booking"));
+  add.addEventListener("click", () => { dlg.close(); openBooking(r); });
+  const close = el("button", { type: "button" }, row);
+  close.appendChild(document.createTextNode("Close"));
+  close.addEventListener("click", () => dlg.close());
+  dlg.showModal();
 }
 
 function openBooking(r) {

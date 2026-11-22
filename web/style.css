@@ -159,7 +159,14 @@ a { color: var(--accent); }
 .room { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; position: relative; overflow: hidden;
         display: flex; flex-direction: column; }
 .room-foot { margin-top: auto; padding-top: 2px; }
-.room-foot .plugs { min-height: 22px; }  /* empty when all plugs are live and fine: keep cards aligned */
+/* The card bottom has the same height in every card, so "Next 24 h" lines up: the chip row is one
+   line (long chips end in "...", full text on hover). Differences are taken up above it. */
+.room-foot .plugs { height: 22px; flex-wrap: nowrap; overflow: hidden; }
+.room-foot .chip { flex: 0 1 auto; min-width: 0; }
+.chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+button.link-btn { border: none; background: none; padding: 2px 0; margin-top: 4px; color: var(--accent); font-size: 12.5px; }
+button.link-btn:hover { background: none; text-decoration: underline; }
+.booking-list { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
 .room:hover { border-color: var(--axis); }
 .room.selected { box-shadow: 0 0 0 2px var(--accent) inset; }
 .room.heating { background: linear-gradient(180deg, var(--warm-tint), transparent 70%), var(--surface); border-color: var(--warm-edge); }
