@@ -1,6 +1,7 @@
 #include "devices/devi.hpp"
 
 #include <chrono>
+#include <cctype>
 #include <condition_variable>
 #include <cstring>
 #include <format>
@@ -10,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "core/log.hpp"
+#include "devices/sdg_incoming.hpp"
 
 extern "C" {
 #include "opensdg.h"
@@ -302,11 +304,8 @@ struct ConfigReceiver {
     bool done = false;
     bool failed = false;
 };
-osdg_result_t configData(osdg_connection_t c, const void* d, unsigned len) {
-    auto* r = static_cast<ConfigReceiver*>(osdg_get_user_data(c));
-    if (!r) return osdg_no_error;
+void feedConfig(ConfigReceiver* r, const std::uint8_t* p, unsigned len) {
     std::lock_guard lock(r->m);
-    const auto* p = static_cast<const std::uint8_t*>(d);
     if (r->data.empty() && !r->total && len >= 8 && p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 0) {
         // chunked: int32 0, then the total size (little-endian), then data
         r->total = p[4] | (p[5] << 8) | (p[6] << 16) | (static_cast<std::uint32_t>(p[7]) << 24);
@@ -316,7 +315,57 @@ osdg_result_t configData(osdg_connection_t c, const void* d, unsigned len) {
     }
     if (!r->total || r->data.size() >= *r->total) r->done = true;
     r->cv.notify_all();
+}
+osdg_result_t configData(osdg_connection_t c, const void* d, unsigned len) {
+    auto* r = static_cast<ConfigReceiver*>(osdg_get_user_data(c));
+    if (r) feedConfig(r, static_cast<const std::uint8_t*>(d), len);
     return osdg_no_error;
+}
+
+// The iOS app calls us right after pairing (the Android app waits to be called). While a pairing
+// runs, the first configuration call is accepted and parked here for the pairing thread.
+struct IncomingCall {
+    std::string peerHex, host;
+    unsigned port = 0;
+    std::vector<std::uint8_t> tunnelId;
+};
+std::mutex gCallMutex;
+std::condition_variable gCallCv;
+bool gAcceptCalls = false;
+std::optional<IncomingCall> gCall;
+
+int onIncomingCall(osdg_connection_t, const char* peerIdHex, const char* protocol, const char* host, unsigned port,
+                   const unsigned char* tunnelId, unsigned tunnelIdSize) {
+    std::lock_guard lock(gCallMutex);
+    const bool take = gAcceptCalls && !gCall && protocol && std::string(protocol) == "dominion-configuration-1.0";
+    log::info("DEVI: incoming call ({}) - {}", protocol ? protocol : "?", take ? "accepted" : "refused");
+    if (!take) return 0;
+    gCall = IncomingCall{peerIdHex ? peerIdHex : "", host ? host : "", port,
+                         std::vector<std::uint8_t>(tunnelId, tunnelId + tunnelIdSize)};
+    gCallCv.notify_all();
+    return 1;
+}
+
+// Accepting calls only for the duration of one pairing.
+struct AcceptCallsWhilePairing {
+    AcceptCallsWhilePairing() {
+        std::lock_guard lock(gCallMutex);
+        gAcceptCalls = true;
+        gCall.reset();
+        osdg_set_incoming_call_callback(onIncomingCall);
+    }
+    ~AcceptCallsWhilePairing() {
+        osdg_set_incoming_call_callback(nullptr);
+        std::lock_guard lock(gCallMutex);
+        gAcceptCalls = false;
+        gCall.reset();
+    }
+};
+
+bool sameHex(std::string a, std::string b) {
+    for (auto& ch : a) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    for (auto& ch : b) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return a == b;
 }
 void configState(osdg_connection_t c, enum osdg_connection_state s) {
     auto* r = static_cast<ConfigReceiver*>(osdg_get_user_data(c));
@@ -329,6 +378,8 @@ void configState(osdg_connection_t c, enum osdg_connection_state s) {
 }
 }  // namespace
 
+DeviIdentity finishPairing(const fs::path& dataDir, DeviIdentity id, const std::vector<std::uint8_t>& data);
+
 DeviIdentity deviPair(const fs::path& dataDir, const std::string& otpIn, const std::string& phoneName) {
     std::string otp;
     for (char ch : otpIn) if (ch >= '0' && ch <= '9') otp += ch;
@@ -337,7 +388,9 @@ DeviIdentity deviPair(const fs::path& dataDir, const std::string& otpIn, const s
     DeviGrid::instance().ensureConnected(id.privateKey);
     auto* grid = static_cast<osdg_connection_t>(DeviGrid::instance().handle());
 
-    // 1. Pair with the phone that shared the house.
+    // 1. Pair with the phone that shared the house. OpenSDG registers the phone with the grid while
+    //    pairing, so the grid passes on the call the iOS app makes right afterwards.
+    AcceptCallsWhilePairing acceptCalls;
     auto* pairing = osdg_connection_create();
     osdg_set_blocking_mode(pairing, 1);
     osdg_result_t r = osdg_pair_remote(grid, pairing, otp.c_str());
@@ -350,7 +403,39 @@ DeviIdentity deviPair(const fs::path& dataDir, const std::string& otpIn, const s
     osdg_connection_close(pairing);
     osdg_connection_destroy(pairing);
 
-    // 2. Ask the phone for the house configuration.
+    const unsigned char* me = osdg_get_my_peer_id(grid);
+    const std::string request =
+        json{{"phoneName", phoneName}, {"phonePublicKey", toHex(me, 32)}, {"chunkedMessage", true}}.dump();
+    const std::string phoneHex = toHex(phone, 32);
+
+    // 2a. iOS: the phone calls us (within milliseconds of the pairing result).
+    std::optional<IncomingCall> call;
+    {
+        std::unique_lock lock(gCallMutex);
+        gCallCv.wait_for(lock, seconds{3}, [] { return gCall.has_value(); });
+        call = gCall;
+    }
+    if (call && sameHex(call->peerHex, phoneHex)) {
+        log::info("DEVI: the phone called back - receiving the house over its call");
+        ConfigReceiver rx;
+        SdgIncomingTunnel tunnel(id.privateKey, seconds{15});
+        const auto caller = tunnel.accept(call->host, call->port, call->tunnelId);
+        if (!sameHex(toHex(caller.data(), 32), phoneHex)) {
+            throw std::runtime_error("The call came from another device than the paired phone.");
+        }
+        tunnel.send(std::vector<std::uint8_t>(request.begin(), request.end()));
+        const auto deadline = steady_clock::now() + seconds{30};
+        while (!rx.done && steady_clock::now() < deadline) {
+            const auto packet = tunnel.receive();
+            if (!packet) break;
+            feedConfig(&rx, packet->data(), static_cast<unsigned>(packet->size()));
+        }
+        if (!rx.done) throw std::runtime_error("The phone did not send the whole house configuration.");
+        return finishPairing(dataDir, std::move(id), rx.data);
+    }
+    if (call) log::warn("DEVI: an unexpected device called during pairing - ignored");
+
+    // 2b. Android: we call the phone and ask for the house configuration.
     ConfigReceiver rx;
     auto* cfg = osdg_connection_create();
     osdg_set_user_data(cfg, &rx);
@@ -364,9 +449,6 @@ DeviIdentity deviPair(const fs::path& dataDir, const std::string& otpIn, const s
         throw std::runtime_error("Paired, but the phone did not send the house (" + resultText(r) +
                                  "). Keep the DEVI app open and try again; the Android app is known to work better.");
     }
-    const unsigned char* me = osdg_get_my_peer_id(grid);
-    const std::string request =
-        json{{"phoneName", phoneName}, {"phonePublicKey", toHex(me, 32)}, {"chunkedMessage", true}}.dump();
     osdg_send_data(cfg, request.data(), static_cast<int>(request.size()));
     {
         std::unique_lock lock(rx.m);
@@ -376,8 +458,11 @@ DeviIdentity deviPair(const fs::path& dataDir, const std::string& otpIn, const s
     osdg_connection_close(cfg);
     osdg_connection_destroy(cfg);
     if (!rx.done) throw std::runtime_error("The phone did not send the house configuration in time.");
+    return finishPairing(dataDir, std::move(id), rx.data);
+}
 
-    const json house = json::parse(std::string(rx.data.begin(), rx.data.end()), nullptr, false);
+DeviIdentity finishPairing(const fs::path& dataDir, DeviIdentity id, const std::vector<std::uint8_t>& data) {
+    const json house = json::parse(std::string(data.begin(), data.end()), nullptr, false);
     if (house.is_discarded()) throw std::runtime_error("The phone sent an unreadable house configuration.");
     id.houseName = house.value("houseName", id.houseName);
     for (const auto& room : house.value("rooms", json::array())) {

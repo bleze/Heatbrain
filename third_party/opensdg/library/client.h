@@ -113,5 +113,6 @@ static inline struct _osdg_connection *get_connection(struct list_element *forwa
 }
 
 osdg_result_t connection_ping(struct _osdg_connection *grid);
+osdg_result_t grid_register_pairing(struct _osdg_connection *grid, const unsigned char *peerId); /* heatbrain */
 
 #endif

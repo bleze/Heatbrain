@@ -98,6 +98,7 @@ add_library(heatbrain_io STATIC
   src/app/meter_sync.cpp
   src/devices/dominion.cpp
   src/devices/devi.cpp
+  src/devices/sdg_incoming.cpp
   src/app/thermostats.cpp
 )
 target_link_libraries(heatbrain_io PUBLIC
@@ -106,6 +107,7 @@ target_link_libraries(heatbrain_io PUBLIC
   nlohmann_json::nlohmann_json
   OpenSSL::SSL OpenSSL::Crypto
   opensdg
+  ${HEATBRAIN_SODIUM}
   unofficial::sqlite3::sqlite3
 )
 target_compile_definitions(heatbrain_io PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
@@ -135,6 +137,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_netatmo.cpp
     tests/test_planner.cpp
     tests/test_thermal.cpp
+    tests/test_sdg_incoming.cpp
     tests/test_controller.cpp
     tests/test_alerts.cpp
     tests/test_config_service.cpp

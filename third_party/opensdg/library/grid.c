@@ -1,7 +1,58 @@
+#include <string.h>
 #include "client.h"
 #include "control_protocol.h"
 #include "mainloop.h"
 #include "socket.h"
+#include "logging.h"
+#include "tunnel_protocol.h"
+
+/* heatbrain addition, see osdg_set_incoming_call_callback() */
+static osdg_incoming_call_cb_t incoming_call_cb;
+
+void osdg_set_incoming_call_callback(osdg_incoming_call_cb_t cb)
+{
+    incoming_call_cb = cb;
+}
+
+/*
+ * heatbrain addition: tell the grid which peer we are paired with (message 22: uint32 sequence = 1,
+ * bytes peerId = 2). The grid routes an incoming call to us only from peers on this list; the
+ * official library sends it after every pairing change and the grid confirms with message 21.
+ * Runs on the main loop thread.
+ */
+#define MSG_PAIRINGS 22
+osdg_result_t grid_register_pairing(struct _osdg_connection *grid, const unsigned char *peerId)
+{
+    static unsigned int sequence;
+    unsigned char body[1 + 1 + 5 + 2 + sizeof(osdg_key_t)];
+    unsigned int seq = sequence++;
+    size_t n = 0;
+    struct packetMESG *mesg;
+    struct mesg_payload *payload;
+
+    if (!grid || grid->state != osdg_connected)
+        return osdg_wrong_state;
+
+    body[n++] = MSG_PAIRINGS;
+    body[n++] = 0x08; /* field 1, varint */
+    do {
+        unsigned char b = seq & 0x7F;
+        seq >>= 7;
+        body[n++] = seq ? (b | 0x80) : b;
+    } while (seq);
+    body[n++] = 0x12; /* field 2, length-delimited */
+    body[n++] = sizeof(osdg_key_t);
+    memcpy(&body[n], peerId, sizeof(osdg_key_t));
+    n += sizeof(osdg_key_t);
+
+    mesg = get_MESG_packet(grid, n);
+    if (!mesg)
+        return osdg_buffer_exceeded;
+    payload = (struct mesg_payload *)(mesg->mesg_payload - crypto_box_BOXZEROBYTES);
+    memcpy(payload->data.data, body, n);
+    LOG(PROTOCOL, "Grid[%p] registering pairing", grid);
+    return send_MESG_packet(grid, mesg);
+}
 
 static osdg_result_t grid_handle_incoming_packet(struct _osdg_connection *conn,
                                                  const void *p, unsigned int length)
@@ -123,9 +174,13 @@ static osdg_result_t grid_handle_incoming_packet(struct _osdg_connection *conn,
 
         LOG(PROTOCOL, "Incoming call from %s protocol %s", call->peer->peerid, call->protocol);
 
-        /* We are client only; reject */
+        /* Refuse, unless the application accepts (heatbrain addition) */
         reply.id = call->id;
         reply.result = 0;
+        if (incoming_call_cb && call->peer && call->peer->server && call->protocol)
+            reply.result = incoming_call_cb(conn, call->peer->peerid, call->protocol,
+                                            call->peer->server->host, call->peer->server->port,
+                                            call->peer->tunnelid.data, (unsigned int)call->peer->tunnelid.len) ? 1 : 0;
 
         incoming_call__free_unpacked(call, NULL);
         ret = sendMESG(conn, MSG_INCOMING_CALL_REPLY, &reply);

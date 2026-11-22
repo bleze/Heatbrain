@@ -98,6 +98,17 @@ OSDG_API const unsigned char *osdg_get_peer_id(osdg_connection_t conn);
 
 OSDG_API osdg_result_t osdg_set_ping_interval(osdg_connection_t conn, unsigned int seconds);
 
+/*
+ * heatbrain addition: incoming calls. Called on the main loop thread when a peer calls us through
+ * the grid; return 1 to accept (then connect to host:port and join the tunnel yourself), 0 to
+ * refuse. Without a callback every call is refused, as before. Needed for sharing a house from the
+ * DEVI/Icon iOS app, which calls the receiver right after pairing instead of waiting to be called.
+ */
+typedef int (*osdg_incoming_call_cb_t)(osdg_connection_t grid, const char *peerIdHex, const char *protocol,
+                                       const char *host, unsigned int port,
+                                       const unsigned char *tunnelId, unsigned int tunnelIdSize);
+OSDG_API void osdg_set_incoming_call_callback(osdg_incoming_call_cb_t cb);
+
 OSDG_API osdg_result_t osdg_init(void);
 OSDG_API void osdg_shutdown(void);
 

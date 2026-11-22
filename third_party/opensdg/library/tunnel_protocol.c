@@ -368,6 +368,10 @@ int receive_packet(struct _osdg_connection *client)
             /* If talking to a peer, we're done */
             if (client->mode == mode_peer)
                 connection_set_status(client, osdg_connected);
+            /* heatbrain addition: register the pairing peer with the grid now, before the pairing
+               completes - the iOS app calls back right after the pairing result */
+            if (client->mode == mode_pairing)
+                grid_register_pairing(client->grid, client->serverPubkey);
             return 0;
         }
 
