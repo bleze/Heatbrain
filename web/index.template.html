@@ -124,6 +124,11 @@
     <section class="card" id="usage" hidden>
       <div class="card-head">
         <h2><span class="badge badge-amber"><svg class="icon"><use href="#i-bolt"/></svg></span>Electricity use <span class="muted" style="font-weight:400;font-size:13px">from your meter</span><span id="usage-help"></span></h2>
+        <div class="range" role="group" aria-label="Bar size" id="usage-grain" hidden>
+          <button data-grain="day">Days</button>
+          <button data-grain="week">Weeks</button>
+          <button data-grain="month">Months</button>
+        </div>
         <div class="range" role="group" aria-label="Usage period" id="usage-range">
           <button data-days="2">2 days</button>
           <button data-days="7" class="active">7 days</button>

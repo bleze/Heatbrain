@@ -230,6 +230,8 @@ button.ghost:hover { background: color-mix(in srgb, var(--ink) 9%, transparent);
 /* Electricity use: radiators (warm) under the rest of the household (neutral) */
 .chart .use-heat { fill: var(--flame-1); }
 .chart .use-rest { fill: var(--ink-2); opacity: 0.45; }
+#usage .card-head { flex-wrap: wrap; gap: 8px; }
+#usage-grain { margin-left: auto; }
 .meter-status { margin-top: 10px; font-size: 13px; }
 .token-field { margin-top: 12px; }
 .token-input { width: 100%; box-sizing: border-box; resize: vertical; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
