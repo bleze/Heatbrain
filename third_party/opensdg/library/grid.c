@@ -21,12 +21,17 @@ void osdg_set_incoming_call_callback(osdg_incoming_call_cb_t cb)
  * Runs on the main loop thread.
  */
 #define MSG_PAIRINGS 22
-osdg_result_t grid_register_pairing(struct _osdg_connection *grid, const unsigned char *peerId)
+#define MAX_REGISTERED_PEERS 32
+static osdg_key_t registered[MAX_REGISTERED_PEERS]; /* the whole list is sent each time, like mdglib */
+static int registeredCount;
+
+static osdg_result_t grid_send_pairings(struct _osdg_connection *grid)
 {
     static unsigned int sequence;
-    unsigned char body[1 + 1 + 5 + 2 + sizeof(osdg_key_t)];
+    unsigned char body[1 + 1 + 5 + MAX_REGISTERED_PEERS * (2 + sizeof(osdg_key_t))];
     unsigned int seq = sequence++;
     size_t n = 0;
+    int i;
     struct packetMESG *mesg;
     struct mesg_payload *payload;
 
@@ -40,18 +45,47 @@ osdg_result_t grid_register_pairing(struct _osdg_connection *grid, const unsigne
         seq >>= 7;
         body[n++] = seq ? (b | 0x80) : b;
     } while (seq);
-    body[n++] = 0x12; /* field 2, length-delimited */
-    body[n++] = sizeof(osdg_key_t);
-    memcpy(&body[n], peerId, sizeof(osdg_key_t));
-    n += sizeof(osdg_key_t);
+    for (i = 0; i < registeredCount; i++)
+    {
+        body[n++] = 0x12; /* field 2, length-delimited */
+        body[n++] = sizeof(osdg_key_t);
+        memcpy(&body[n], registered[i], sizeof(osdg_key_t));
+        n += sizeof(osdg_key_t);
+    }
 
     mesg = get_MESG_packet(grid, n);
     if (!mesg)
         return osdg_buffer_exceeded;
     payload = (struct mesg_payload *)(mesg->mesg_payload - crypto_box_BOXZEROBYTES);
     memcpy(payload->data.data, body, n);
-    LOG(PROTOCOL, "Grid[%p] registering pairing", grid);
+    LOG(PROTOCOL, "Grid[%p] registering %d pairing(s)", grid, registeredCount);
     return send_MESG_packet(grid, mesg);
+}
+
+static void add_registered(const unsigned char *peerId)
+{
+    int i;
+    for (i = 0; i < registeredCount; i++)
+        if (!memcmp(registered[i], peerId, sizeof(osdg_key_t)))
+            return;
+    if (registeredCount < MAX_REGISTERED_PEERS)
+        memcpy(registered[registeredCount++], peerId, sizeof(osdg_key_t));
+}
+
+/* Main loop thread: the peer of a pairing that is in progress is added to the list. */
+osdg_result_t grid_register_pairing(struct _osdg_connection *grid, const unsigned char *peerId)
+{
+    add_registered(peerId);
+    return grid_send_pairings(grid);
+}
+
+osdg_result_t osdg_register_pairings(osdg_connection_t grid, const osdg_key_t *peers, int count)
+{
+    int i;
+    registeredCount = 0;
+    for (i = 0; i < count; i++)
+        add_registered(peers[i]);
+    return grid_send_pairings(grid);
 }
 
 static osdg_result_t grid_handle_incoming_packet(struct _osdg_connection *conn,

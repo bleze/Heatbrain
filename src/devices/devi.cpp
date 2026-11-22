@@ -1,6 +1,7 @@
 #include "devices/devi.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <cctype>
 #include <condition_variable>
 #include <cstring>
@@ -149,9 +150,37 @@ void DeviGrid::ensureConnected(const DeviKey& key) {
     const osdg_result_t r = osdg_connect_to_danfoss(g);
     grid_ = g;
     if (r != osdg_no_error) throw std::runtime_error("DEVI: " + resultText(r));
-    std::lock_guard s(gGridStateMutex);
-    connected_ = true;
+    {
+        std::lock_guard s(gGridStateMutex);
+        connected_ = true;
+    }
+    peersSent_ = false;
+    sendPairings();
     log::info("DEVI: connected to the Danfoss grid");
+}
+
+void DeviGrid::sendPairings() {
+    if (!grid_ || peersSent_ || peers_.empty()) return;
+    std::vector<osdg_key_t> keys(peers_.size());
+    for (std::size_t i = 0; i < peers_.size(); ++i) std::memcpy(keys[i], peers_[i].data(), 32);
+    if (osdg_register_pairings(static_cast<osdg_connection_t>(grid_), keys.data(), static_cast<int>(keys.size())) == osdg_no_error) {
+        peersSent_ = true;
+    }
+}
+
+void DeviGrid::registerPeer(const DeviKey& peer) {
+    std::lock_guard lock(mutex_);
+    if (std::ranges::find(peers_, peer) == peers_.end()) {
+        peers_.push_back(peer);
+        peersSent_ = false;
+    }
+    if (connected()) sendPairings();
+}
+
+void DeviGrid::reset() {
+    std::lock_guard lock(mutex_);
+    std::lock_guard s(gGridStateMutex);
+    connected_ = false;  // the next ensureConnected() replaces the connection
 }
 
 // ---------------------------------------------------------------- thermostat
@@ -163,7 +192,12 @@ DeviThermostat::~DeviThermostat() {
     if (conn_) {
         auto* c = static_cast<osdg_connection_t>(conn_);
         osdg_set_user_data(c, nullptr);
-        osdg_connection_close(c);
+        const auto st = osdg_get_connection_state(c);
+        if (st == osdg_connecting) return;  // still pending at the grid: abandoned (see ensureConnected)
+        if (st == osdg_connected) {
+            osdg_set_blocking_mode(c, 1);  // wait until the main loop has really closed it
+            osdg_connection_close(c);
+        }
         osdg_connection_destroy(c);
     }
 }
@@ -171,7 +205,16 @@ DeviThermostat::~DeviThermostat() {
 void DeviThermostat::onState(int s) {
     std::lock_guard lock(mutex_);
     state_.connected = s == osdg_connected;
-    if (s == osdg_closed || s == osdg_error) state_.error = s == osdg_error ? "connection lost" : "closed";
+    if (s == osdg_connected) {
+        connectingSince_.reset();
+        state_.error.clear();
+        partial_.clear();
+        log::info("DEVI: connected to thermostat {}...", peerId_.substr(0, 8));
+    }
+    if (s == osdg_closed || s == osdg_error) {
+        connectingSince_.reset();
+        state_.error = s == osdg_error ? "connection lost" : "closed";
+    }
 }
 
 void DeviThermostat::onData(const std::uint8_t* data, unsigned length) {
@@ -195,37 +238,52 @@ void DeviThermostat::onData(const std::uint8_t* data, unsigned length) {
     state_.error.clear();
 }
 
-void DeviThermostat::ensureConnected() {
-    DeviGrid::instance().ensureConnected(key_);
-    std::lock_guard lock(mutex_);
-    if (conn_ && state_.connected) return;
-    if (conn_) {
-        // A failed send leaves the connection live in OpenSDG's network thread: close it before
-        // destroying it. Detach first, so its state callback does not wait for our mutex.
-        auto* old = static_cast<osdg_connection_t>(conn_);
-        osdg_set_user_data(old, nullptr);
-        const auto st = osdg_get_connection_state(old);
-        if (st == osdg_connected || st == osdg_connecting) osdg_connection_close(old);
-        osdg_connection_destroy(old);
-        conn_ = nullptr;
-    }
+bool DeviThermostat::ensureConnected() {
     std::uint8_t peer[32];
     if (!fromHex(peerId_, peer, 32)) throw std::runtime_error("DEVI: invalid thermostat id");
+    DeviKey peerKey{};
+    std::memcpy(peerKey.data(), peer, 32);
+    DeviGrid::instance().ensureConnected(key_);
+    DeviGrid::instance().registerPeer(peerKey);
+
+    std::lock_guard lock(mutex_);
+    if (conn_ && state_.connected) return true;
+    const auto now = floor<seconds>(system_clock::now());
+    if (conn_ && connectingSince_ && now - *connectingSince_ < seconds{30}) return false;  // still connecting
+    if (conn_) {
+        auto* old = static_cast<osdg_connection_t>(conn_);
+        osdg_set_user_data(old, nullptr);  // its callbacks no longer reach us
+        const auto st = osdg_get_connection_state(old);
+        if (st == osdg_connecting) {
+            // Never answered: it may still sit in the grid's list of pending calls, so destroying it
+            // could crash later. Abandon it (a few hundred bytes).
+            log::warn("DEVI: thermostat {}... did not answer within 30 s - trying again", peerId_.substr(0, 8));
+        } else {
+            if (st == osdg_connected) {
+                osdg_set_blocking_mode(old, 1);
+                osdg_connection_close(old);
+            }
+            osdg_connection_destroy(old);  // closed or failed: OpenSDG is done with it
+        }
+        conn_ = nullptr;
+    }
     auto* c = osdg_connection_create();
     osdg_set_user_data(c, this);
-    osdg_set_blocking_mode(c, 1);
+    osdg_set_blocking_mode(c, 0);  // answers come through the callbacks; we keep our own timeout
     osdg_set_state_change_callback(c, thermostatState);
     osdg_set_receive_data_callback(c, thermostatData);
     const osdg_result_t r =
         osdg_connect_to_remote(static_cast<osdg_connection_t>(DeviGrid::instance().handle()), c, peer, "dominion-1.0");
     conn_ = c;
+    state_.connected = false;
     if (r != osdg_no_error) {
-        state_.connected = false;
+        connectingSince_.reset();
         state_.error = resultText(r);
         throw std::runtime_error("DEVI thermostat: " + resultText(r));
     }
-    state_.connected = true;
-    partial_.clear();
+    connectingSince_ = now;
+    state_.error = "connecting...";
+    return false;
 }
 
 void DeviThermostat::send(const std::vector<std::uint8_t>& bytes) {
@@ -256,7 +314,7 @@ void DeviThermostat::refresh() {
         }
         askedAt_ = now;
     }
-    ensureConnected();
+    if (!ensureConnected()) return;  // connecting in the background; asked on the next round
     using namespace dominion;
     std::vector<std::uint8_t> all;
     for (const Code& c : {kFloorTemperature, kRoomTemperature, kSetpointManual, kSetpointComfort, kSetpointFrost,
@@ -268,7 +326,7 @@ void DeviThermostat::refresh() {
 }
 
 void DeviThermostat::setManualSetpoint(double celsius) {
-    ensureConnected();
+    if (!ensureConnected()) throw std::runtime_error("DEVI thermostat: still connecting");
     using namespace dominion;
     std::optional<ControlState> cs;
     {
@@ -497,6 +555,9 @@ DeviIdentity finishPairing(const fs::path& dataDir, DeviIdentity id, const std::
     }
     saveDeviIdentity(dataDir, id);
     log::info("DEVI: paired with house '{}', {} thermostat(s)", id.houseName, id.rooms.size());
+    // During pairing the grid was told about the phone only; start afresh so the thermostats get
+    // registered (see DeviThermostat::ensureConnected).
+    DeviGrid::instance().reset();
     return id;
 }
 

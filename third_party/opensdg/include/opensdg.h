@@ -109,6 +109,12 @@ typedef int (*osdg_incoming_call_cb_t)(osdg_connection_t grid, const char *peerI
                                        const unsigned char *tunnelId, unsigned int tunnelIdSize);
 OSDG_API void osdg_set_incoming_call_callback(osdg_incoming_call_cb_t cb);
 
+/*
+ * heatbrain addition: tell the grid which peers we are paired with (grid message 22), as the
+ * official library does after connecting and after every pairing change. Replaces the list.
+ */
+OSDG_API osdg_result_t osdg_register_pairings(osdg_connection_t grid, const osdg_key_t *peers, int count);
+
 OSDG_API osdg_result_t osdg_init(void);
 OSDG_API void osdg_shutdown(void);
 

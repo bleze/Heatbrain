@@ -56,13 +56,21 @@ public:
     void ensureConnected(const DeviKey& privateKey);
     bool connected() const;
     void* handle() const { return grid_; }  // osdg_connection_t
+    // Tells the grid which peers we are paired with (the official app does this after connecting);
+    // sent again whenever the list grows or the grid reconnects.
+    void registerPeer(const DeviKey& peer);
+    // Drops the grid connection, so the next use connects afresh (after pairing).
+    void reset();
 
 private:
     DeviGrid();
     ~DeviGrid();
+    void sendPairings();  // with mutex_ held
     mutable std::mutex mutex_;
     void* grid_ = nullptr;
     bool connected_ = false;
+    std::vector<DeviKey> peers_;
+    bool peersSent_ = false;
 };
 
 // One thermostat. Thread-safe: OpenSDG delivers data on its own thread.
@@ -87,8 +95,11 @@ public:
 
 private:
     std::optional<Instant> askedAt_;  // the previous refresh
-    void ensureConnected();
+    // Starts connecting in the background if needed; true once connected. A connection that has
+    // not come up in 30 s is given up and tried again (OpenSDG itself would wait forever).
+    bool ensureConnected();
     void send(const std::vector<std::uint8_t>& bytes);
+    std::optional<Instant> connectingSince_;
 
     std::string peerId_;
     DeviKey key_;
