@@ -28,6 +28,12 @@ json costReport(const json& cfg, const History& history, Instant now, int dayCou
     json totals{{"kWh", 0.0}, {"cost", 0.0}, {"saved", 0.0}};
     for (const auto& r : cfg.value("rooms", json::array())) {
         const std::string id = r.value("id", "");
+        // Left out by choice (Settings -> Rooms): e.g. a radiator whose own thermostat decides, so
+        // "plug on x power" says nothing about what it used.
+        if (!r.value("countCosts", true)) {
+            rooms.push_back({{"id", id}, {"name", r.value("name", id)}, {"excluded", true}});
+            continue;
+        }
         double watts = 0;
         json missing = json::array();
         const std::string thermostat = r.value("thermostat", "");

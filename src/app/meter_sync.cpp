@@ -152,6 +152,7 @@ json usageReport(const json& cfg, const History& history, Instant from, Instant 
     std::vector<On> on;
     constexpr minutes kCap{15};
     for (const auto& room : cfg.value("rooms", json::array())) {
+        if (!room.value("countCosts", true)) continue;  // left out of costs and usage (Settings -> Rooms)
         const auto ds = history.decisions(room.value("id", ""), from - hours{1}, to, false);
         for (std::size_t i = 0; i < ds.size(); ++i) {
             const Instant a = ds[i].at;

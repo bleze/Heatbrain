@@ -73,6 +73,7 @@ std::string costText(const json& report, const std::string& period) {
     bool anyLive = false;
     std::vector<std::string> perRoom, missing;
     for (const auto& r : report.at("rooms")) {
+        if (r.value("excluded", false)) continue;  // left out on purpose
         if (!r.contains("total")) {
             missing.push_back(r.value("name", "?"));
             continue;

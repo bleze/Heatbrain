@@ -153,3 +153,12 @@ TEST_CASE("Firmware notice: once per release, only when a plug is behind") {
     REQUIRE(mixed);
     CHECK(mixed->text.starts_with("A, B run older versions."));
 }
+
+TEST_CASE("A room left out of the costs is not listed as missing its power") {
+    json report = sampleReport(true);
+    report["rooms"].push_back({{"name", "Shed"}, {"excluded", true}});
+    report["rooms"][1]["name"] = "Office";
+    const auto m = weeklySummary(report);
+    CHECK_THAT(m.text, ContainsSubstring("No cost for: Basement"));
+    CHECK_THAT(m.text, !ContainsSubstring("Shed"));
+}
