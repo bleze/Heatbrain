@@ -359,7 +359,7 @@ function renderAway() {
         await api("/api/away", { method: "DELETE" });
         toast(away.active ? "Welcome home - programs are back" : "Away plan cancelled");
         awayFormOpen = false;
-        setTimeout(refreshStatus, 1200);
+        refreshAfterTick();
       } catch (e) { toast(e.message, true); end.disabled = false; }
     });
     return;
@@ -400,7 +400,7 @@ function renderAway() {
                                body: JSON.stringify({ from: fromTs, until: untilTs, keepAbove: Number(keep.value) }) });
       awayDraft = null;  // the panel now shows the saved period
       toast(fromTs * 1000 > Date.now() ? "Away mode planned" : "Away mode started");
-      setTimeout(refreshStatus, 1200);
+      refreshAfterTick();
     } catch (e) { toast(e.message, true); start.disabled = false; }
   });
 }
@@ -474,13 +474,19 @@ function renderBook() {
     try {
       const body = JSON.stringify({ room: d.room, from: Math.floor(from / 1000), until: Math.floor(until / 1000), target: d.target });
       const headers = { "Content-Type": "application/json" };
-      if (d.id) await api(`/api/bookings/${encodeURIComponent(d.id)}`, { method: "PUT", headers, body });
+      if (d.id) {
+        await api(`/api/bookings/${encodeURIComponent(d.id)}`, { method: "PUT", headers, body });
+        const sent = JSON.parse(body);
+        bookingEdited.set(d.id, { room: sent.room, from: sent.from, until: sent.until, target: sent.target });
+      }
       else await api(`/api/rooms/${encodeURIComponent(d.room)}/bookings`, { method: "POST", headers, body });
       try { localStorage.setItem("hb.bookingTarget", String(d.target)); } catch { /* private mode */ }
       toastMaybe(d.id ? "Booking changed" : `${room?.name || d.room} booked`);
       bookOpen = false;
       bookDraft = null;
-      setTimeout(refreshStatus, 1500);
+      renderBook();
+      renderBookingsCard();
+      refreshAfterTick();
     } catch (e) { err.textContent = e.message; save.disabled = false; }
   });
 }
@@ -491,6 +497,9 @@ $("book-btn").addEventListener("click", () => {
   renderBook();
   if (bookOpen) window.scrollTo({ top: 0, behavior: "smooth" });
 });
+
+const bookingRemoved = new Set();  // cancelled here, still in the last status
+const bookingEdited = new Map();   // id -> {room, from, until, target} changed here, not yet in the status
 
 // A booking's Edit: the Book panel, filled in with it.
 function editBooking(b) {
@@ -505,7 +514,17 @@ function editBooking(b) {
 // Every booking in one card above the rooms (only when there are any), soonest first.
 function renderBookingsCard() {
   const card = $("bookings");
-  const all = (state.status?.rooms || []).flatMap((r) => (r.bookings || []).map((b) => ({ ...b, room: r.id, roomName: r.name })))
+  // Until the server's next step reflects a change, show it as made: cancelled ones gone, edited
+  // ones with their new room, time and temperature.
+  const fromServer = (state.status?.rooms || []).flatMap((r) => (r.bookings || []).map((b) => ({ ...b, room: r.id, roomName: r.name })));
+  for (const id of [...bookingRemoved]) if (!fromServer.some((b) => b.id === id)) bookingRemoved.delete(id);
+  for (const [id, e] of [...bookingEdited]) {
+    const b = fromServer.find((x) => x.id === id);
+    if (!b || (b.room === e.room && b.from === e.from && b.until === e.until && b.target === e.target)) bookingEdited.delete(id);
+  }
+  const roomName = (id) => (state.status?.rooms || []).find((r) => r.id === id)?.name || id;
+  const all = fromServer.filter((b) => !bookingRemoved.has(b.id))
+    .map((b) => (bookingEdited.has(b.id) ? { ...b, ...bookingEdited.get(b.id), roomName: roomName(bookingEdited.get(b.id).room) } : b))
     .sort((a, b) => a.from - b.from);
   card.hidden = !all.length;
   card.replaceChildren();
@@ -557,7 +576,10 @@ function bookingRow(host, b) {
     try {
       await api(`/api/bookings/${encodeURIComponent(b.id)}`, { method: "DELETE" });
       toastMaybe(b.active ? "Booking ended - back to the program" : "Booking cancelled");
-      setTimeout(refreshStatus, 1500);
+      bookingRemoved.add(b.id);
+      if (bookDraft?.id === b.id) { bookOpen = false; bookDraft = null; renderBook(); }  // its change panel goes too
+      renderBookingsCard();
+      refreshAfterTick();
     } catch (err) { alertInline(err); x.disabled = false; }
   });
 }
@@ -651,6 +673,21 @@ let renderRooms = function () {
   }
 }
 
+// After a change (booking, away, override) the server re-plans at once, but the control step takes a
+// few seconds (sensors, plugs): ask again until the status of that new step is in, at most ~20 s.
+let tickWait = null;
+function refreshAfterTick() {
+  const before = state.status?.now;
+  if (tickWait) clearTimeout(tickWait);
+  let tries = 0;
+  const poll = async () => {
+    tickWait = null;
+    await refreshStatus();
+    if (state.status?.now === before && ++tries < 14) tickWait = setTimeout(poll, 1500);
+  };
+  tickWait = setTimeout(poll, 1200);
+}
+
 function toastMaybe(msg) { if (typeof toast === "function") toast(msg); else $("updated").textContent = msg; }
 
 // Room cards, then the outdoor card (kept as a separate step so it is added exactly once).
@@ -663,7 +700,7 @@ async function setOverride(id, on, minutes, button) {
     await api(`/api/rooms/${encodeURIComponent(id)}/override`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on, minutes }),
     });
-    setTimeout(refreshStatus, 1500);
+    refreshAfterTick();
   } catch (e) { alertInline(e); } finally { button.disabled = false; }
 }
 
@@ -671,7 +708,7 @@ async function clearOverride(id, button) {
   button.disabled = true;
   try {
     await api(`/api/rooms/${encodeURIComponent(id)}/override`, { method: "DELETE" });
-    setTimeout(refreshStatus, 1500);
+    refreshAfterTick();
   } catch (e) { alertInline(e); } finally { button.disabled = false; }
 }
 
