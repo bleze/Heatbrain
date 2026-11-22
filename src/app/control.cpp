@@ -287,8 +287,8 @@ std::pair<std::string, std::string> startMessage(const ControlEnv& env, const hb
     if (previous.empty()) title = "heatbrain started";
     else if (previous != rev) title = "heatbrain updated";
     else title = "heatbrain restarted";
-    if (previous != rev && !previous.empty()) text += std::format("Version {} (was {})\n", rev, previous);
-    else text += std::format("Version {}\n", rev);
+    // The version only matters when it changed.
+    if (previous != rev && !previous.empty()) text += std::format("New version {} (was {})\n", rev, previous);
 
     for (const auto& r : result.rooms) {
         const auto& in = r.decision.inputs;
