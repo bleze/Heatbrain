@@ -32,9 +32,13 @@ elif command -v docker-compose >/dev/null 2>&1; then
 else
     fail "docker compose not found"
 fi
-ls docker-compose.yml docker-compose.yaml compose.yml compose.yaml >/dev/null 2>&1 ||
-    fail "no compose file in $PROJECT_DIR - copy this script into the Container Manager project folder"
-echo "using: $DC"
+COMPOSE_FILE=""
+for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+    [ -f "$f" ] && { COMPOSE_FILE="$f"; break; }
+done
+[ -n "$COMPOSE_FILE" ] ||
+    fail "no compose file in $PROJECT_DIR (it has: $(ls | xargs)) - copy this script into the Container Manager project folder"
+echo "using: $DC with $COMPOSE_FILE"
 
 before=$(docker inspect --format '{{.Image}}' heatbrain 2>/dev/null || echo none)
 echo "pulling the newest image..."
