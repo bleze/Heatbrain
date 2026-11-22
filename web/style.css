@@ -514,3 +514,5 @@ details.events-log { margin-top: 16px; }
 /* Same marker as the other collapsible sections (the browser's own triangle) */
 details.events-log > summary { cursor: pointer; }
 details.events-log > summary h3 { margin: 0 6px 0 0; display: inline; }
+.place-results { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: 13px; color: var(--ink-2); }
+.place-results:empty { display: none; }

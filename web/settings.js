@@ -946,16 +946,54 @@
     fon.appendChild(chk(fcfg, "enabled", "Fetch the forecast from Open-Meteo (free, no account)", true, () => render()));
     if (fcfg.enabled !== false) {
       const st = state.status?.forecast;
-      field(fg, "Latitude", num(fcfg, "latitude", { step: 0.01, min: -90, max: 90,
-        placeholder: st?.from === "netatmo" ? st.latitude.toFixed(2) : "" }));
-      field(fg, "Longitude", num(fcfg, "longitude", { step: 0.01, min: -180, max: 180,
-        placeholder: st?.from === "netatmo" ? st.longitude.toFixed(2) : "" }));
+      // Where: a searched place, else where the Netatmo station is.
+      const where = el("div", { class: "field span2" }, fg);
+      el("span", {}, where, "Location");
+      const cur = el("div", { class: "row" }, where);
+      const own = fcfg.latitude != null && fcfg.longitude != null;
+      el("span", {}, cur, own ? `${fcfg.place || "Set by hand"} (${fcfg.latitude.toFixed(2)}, ${fcfg.longitude.toFixed(2)})`
+        : st?.from === "netatmo" ? `Your Netatmo station (${st.latitude.toFixed(2)}, ${st.longitude.toFixed(2)})`
+        : "Your Netatmo station (not known yet)");
+      if (own) btn(cur, "Use Netatmo's", "undo", () => { delete fcfg.latitude; delete fcfg.longitude; delete fcfg.place; changed(); render(); }, "ghost");
+
+      // Search a town or address (Open-Meteo's place search, called from this browser).
+      const search = el("div", { class: "field span2" }, fg);
+      el("span", {}, search, "Search for a place");
+      const srow = el("div", { class: "row" }, search);
+      const q = el("input", { type: "search", placeholder: "town or postcode, e.g. Roskilde", autocomplete: "off", value: S.placeQuery || "", style: "flex: 1; min-width: 0" }, srow);
+      const results = el("div", { class: "place-results" }, search);
+      const find = async () => {
+        const text = q.value.trim();
+        S.placeQuery = text;
+        results.replaceChildren();
+        if (text.length < 2) return;
+        results.textContent = "Searching…";
+        try {
+          const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(text)}&count=6&language=en&format=json`);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const places = (await r.json()).results || [];
+          results.replaceChildren();
+          if (!places.length) { results.textContent = "No place found."; return; }
+          for (const pl of places) {
+            const label = [pl.name, pl.admin1, pl.country].filter(Boolean).join(", ");
+            btn(results, label, "pin", () => {
+              fcfg.latitude = Math.round(pl.latitude * 100) / 100;
+              fcfg.longitude = Math.round(pl.longitude * 100) / 100;
+              fcfg.place = [pl.name, pl.admin1].filter(Boolean).join(", ");
+              S.placeQuery = "";
+              changed(); render();
+            }, "ghost");
+          }
+        } catch (e) { results.textContent = `Search failed: ${e.message}`; }
+      };
+      q.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); find(); } });
+      btn(srow, "Search", "search", find);
+
       const info = el("div", { class: "hint", style: "grid-column: 1 / -1" }, fg);
-      const hmOf = (ts) => hm(ts);  // the dashboard's 24-hour clock in the house's time zone
-      if (!st) info.textContent = "Empty = where your Netatmo station is. No position known yet.";
+      if (!st) info.textContent = "No position known yet: search for your town, or wait for the Netatmo station.";
       else if (st.error && st.min == null) info.textContent = `No forecast: ${st.error}`;
-      else if (st.min) info.textContent = `${st.from === "netatmo" ? "Position from your Netatmo station. " : ""}Next 24 h: ` +
-        `lowest ${st.min.temperature.toFixed(1)}° at ${hmOf(st.min.at)}, highest ${st.max.temperature.toFixed(1)}° at ${hmOf(st.max.at)}.`;
+      else if (st.min) info.textContent = `Next 24 h: lowest ${st.min.temperature.toFixed(1)}° at ${hm(st.min.at)}, ` +
+        `highest ${st.max.temperature.toFixed(1)}° at ${hm(st.max.at)}.` + (dirty() ? " (Save to use the new location.)" : "");
       else info.textContent = "Fetching the forecast…";
     }
 
