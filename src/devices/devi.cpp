@@ -131,7 +131,14 @@ void DeviGrid::ensureConnected(const DeviKey& key) {
         if (connected_) return;
         gGridConnectedFlag = &connected_;
     }
-    if (grid_) osdg_connection_destroy(static_cast<osdg_connection_t>(grid_));
+    if (grid_) {
+        // Only reached once the old grid connection reported closed/error (or never connected).
+        auto* old = static_cast<osdg_connection_t>(grid_);
+        const auto st = osdg_get_connection_state(old);
+        if (st == osdg_connected || st == osdg_connecting) osdg_connection_close(old);
+        osdg_connection_destroy(old);
+        grid_ = nullptr;
+    }
     auto* g = osdg_connection_create();
     osdg_set_private_key(g, key.data());
     osdg_set_blocking_mode(g, 1);
@@ -191,8 +198,12 @@ void DeviThermostat::ensureConnected() {
     std::lock_guard lock(mutex_);
     if (conn_ && state_.connected) return;
     if (conn_) {
+        // A failed send leaves the connection live in OpenSDG's network thread: close it before
+        // destroying it. Detach first, so its state callback does not wait for our mutex.
         auto* old = static_cast<osdg_connection_t>(conn_);
         osdg_set_user_data(old, nullptr);
+        const auto st = osdg_get_connection_state(old);
+        if (st == osdg_connected || st == osdg_connecting) osdg_connection_close(old);
         osdg_connection_destroy(old);
         conn_ = nullptr;
     }
@@ -231,6 +242,18 @@ void DeviThermostat::send(const std::vector<std::uint8_t>& bytes) {
 }
 
 void DeviThermostat::refresh() {
+    {
+        // The previous request got no answer at all: the connection died silently (the Wi-Fi was
+        // off, a router dropped it). Reconnect instead of asking into the void.
+        std::lock_guard lock(mutex_);
+        const auto now = floor<seconds>(system_clock::now());
+        const bool unanswered = askedAt_ && (!state_.updated || *state_.updated < *askedAt_) && now - *askedAt_ >= seconds{30};
+        if (conn_ && state_.connected && unanswered) {
+            state_.connected = false;
+            state_.error = "no answer - reconnecting";
+        }
+        askedAt_ = now;
+    }
     ensureConnected();
     using namespace dominion;
     std::vector<std::uint8_t> all;

@@ -86,6 +86,7 @@ public:
     void onState(int osdgState);
 
 private:
+    std::optional<Instant> askedAt_;  // the previous refresh
     void ensureConnected();
     void send(const std::vector<std::uint8_t>& bytes);
 
