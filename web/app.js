@@ -604,7 +604,8 @@ function bookingForm(host, r) {
   field("From", { type: "time", step: 900 }, "from");
   field("Until", { type: "time", step: 900 }, "until");
   field("Temperature", { type: "number", step: 0.5, min: 5, max: r.maxTemp - 0.5, style: "width:5.5em" }, "target");
-  el("div", { class: "hint" }, f, "It starts heating early enough by itself and goes back to the program afterwards. An end before the start means the next day.");
+  const hint = el("div", { class: "hint" }, f, "It starts heating early enough by itself and goes back to the program afterwards. An end before the start means the next day. ");
+  if (typeof helpButton === "function") helpButton(hint, "bookings", f);
   const row = el("div", { class: "actions" }, f);
   const save = el("button", { type: "button", class: "primary" }, row);
   save.appendChild(icon("check"));

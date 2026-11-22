@@ -109,6 +109,14 @@ const HELP = {
       "Plan a period (from - until) and every room only keeps above the temperature you choose; price-only rooms stay off. It starts and ends by itself - set it the evening before an early flight. Manual overrides and frost protection still work.",
     ],
   },
+  bookings: {
+    title: "Bookings",
+    body: [
+      "For a room you only use now and then: press Book on its card and say when you need it and how warm - say 22 deg on Saturday 16:00-23:00. The room heats to that temperature from early enough before the start until the end, also through expensive hours (someone is there), then follows its program again. A booking wins over the program and away mode; manual buttons and the room's maximum still apply.",
+      "How early it starts is learned from the room's own history: how fast it cools towards the outdoor temperature and how fast it warms when heated. From the room's current temperature and the weather that gives the warm-up time, with a margin - a few hours for a radiator, a day or more for floor heating in concrete. Until heatbrain has seen the room heat for a while, it uses the room's warm-up setting (Settings -> Rooms). Once warming has started it does not stop again.",
+      "If the card says the room may not reach the temperature in time, book earlier or check the room's maximum.",
+    ],
+  },
   plan: {
     title: "The next 24 hours",
     body: [
@@ -248,7 +256,7 @@ function renderManual(host) {
     "heatbrain switches your radiators' plugs on and off from the price of electricity, the temperature in each room and the program you set. Everything here is also available as '?' next to the settings.");
   const toc = el("nav", { class: "toc" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "thermostats", "sensors", "prices", "meter", "away", "wifiOff", "notifications", "phone", "costs", "transfer"];
+                 "thermostats", "sensors", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, card);
     el("h3", {}, sec, HELP[key].title);
