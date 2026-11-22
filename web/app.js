@@ -782,7 +782,7 @@ function renderDetail() {
   const priceTop = stripTop + stripH + (showStrip ? 30 : 0), priceH = 90;
   // Power mix per hour of the price area (wind, solar, power plants, imports), under the price.
   const mix = (state.mix?.hours || []).filter((r) => r[0] + 3600 > t0 && r[0] < t1);
-  const mixTop = priceTop + priceH + (mix.length ? 26 : 0), mixH = mix.length ? 28 : 0;
+  const mixTop = priceTop + priceH + (mix.length ? 30 : 0), mixH = mix.length ? priceH : 0;  // as tall as the price, for detail
   const H = mixTop + mixH + 24;
   const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": `${room.name}: temperature, heating and price` }, host);
@@ -910,17 +910,24 @@ function renderDetail() {
       const t = el("text", { class: "panel-note", x: lx + 13, y: mixTop - 6 }, svg, name);
       lx += 13 + t.getComputedTextLength() + 12;
     }
-    el("rect", { x: m.l, y: mixTop, width: W - m.l - m.r, height: mixH, fill: "var(--grid)", rx: 3, opacity: 0.35 }, svg);
+    // Like the price panel: a % axis and the time grid. Columns stack from the bottom (wind first),
+    // so the share of wind - and wind + solar - reads straight off the axis.
+    const yM = (share) => mixTop + (1 - share) * mixH;
+    for (const v of [0, 0.5, 1]) {
+      el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: yM(v), y2: yM(v) }, svg);
+      el("text", { x: m.l - 6, y: yM(v) + 4, "text-anchor": "end" }, svg, `${v * 100}%`);
+    }
+    drawTimeAxis(svg, x, ticks, mixTop, mixTop + mixH, null);
     for (const r of mix) {
       const parts = mixParts(r);
       const total = parts.reduce((a, p) => a + p.mw, 0);
       if (total <= 0) continue;
       const x0 = x(Math.max(r[0], t0)), x1 = x(Math.min(r[0] + 3600, t1, h.to));  // the hour so far
-      let yy = mixTop;
+      let share = 0;
       for (const p of parts) {
-        const hgt = (p.mw / total) * mixH;
-        if (hgt > 0) el("rect", { x: x0, y: yy, width: Math.max(1, x1 - x0), height: hgt, style: `fill: var(--mix-${p.key})` }, svg);
-        yy += hgt;
+        const part = p.mw / total;
+        if (part > 0) el("rect", { x: x0, y: yM(share + part), width: Math.max(1, x1 - x0), height: part * mixH, style: `fill: var(--mix-${p.key})` }, svg);
+        share += part;
       }
     }
   }
