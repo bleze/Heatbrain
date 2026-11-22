@@ -257,4 +257,6 @@ function renderManual(host) {
   const ra = el("a", { href: "#help-rules" }, toc, "How heatbrain decides");
   ra.addEventListener("click", (e) => { e.preventDefault(); rules.scrollIntoView({ behavior: "smooth" }); });
   for (const key of order.slice(1)) add(key);
+  const v = state.status?.version;
+  if (v) el("p", { class: "muted", style: "margin-top:24px" }, card, `heatbrain version ${v}`);
 }

@@ -6,6 +6,9 @@
 
 namespace hb {
 
+// The source revision this binary was built from: a short git commit ("1a2b3c4"), or "dev".
+std::string buildRevision();
+
 // "14.6.0(release-tasmota)", "v16.0.0", "16.0.0.1" -> {14, 6, 0} etc. Empty if no digits.
 std::vector<int> parseVersion(std::string_view s);
 

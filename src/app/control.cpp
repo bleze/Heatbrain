@@ -9,6 +9,8 @@
 #include <set>
 #include <thread>
 
+#include <fstream>
+#include "core/version.hpp"
 #include "app/cli.hpp"
 #include "app/config.hpp"
 #include "app/controller.hpp"
@@ -24,6 +26,7 @@
 namespace hbcli {
 
 using namespace std::chrono;
+namespace fs = std::filesystem;
 using hb::Instant;
 
 namespace {
@@ -230,6 +233,7 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                 {"wifiOff", wifiOff},
                 {"outdoor", outdoor},
                 {"tickSeconds", env.tick.count()},
+                {"version", hb::buildRevision()},
                 {"timezone", env.cfg.timezone},
                 {"currency", env.cfg.currency},
                 {"configError", nullptr},
@@ -237,6 +241,79 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                 {"problems", problems},
                 {"prices", prices},
                 {"sensors", sensors}};
+}
+
+// Short words for the start message (the web UI has its own, longer labels).
+std::string shortReason(hb::Reason r) {
+    using hb::Reason;
+    switch (r) {
+        case Reason::BelowTarget: case Reason::HoldOn: return "heating";
+        case Reason::TargetReached: case Reason::HoldOff: return "off, target reached";
+        case Reason::PreheatBeforePeak: return "pre-heating before the peak";
+        case Reason::PeakAvoid: return "off, expensive now";
+        case Reason::BelowComfortDuringPeak: return "heating, too cold to wait";
+        case Reason::CheapBoost: return "heating, cheap hour";
+        case Reason::CheapHours: return "on, cheapest hours";
+        case Reason::NotCheapHours: return "off, waiting for cheap hours";
+        case Reason::ScheduledOff: case Reason::AvoidWindow: return "off by program";
+        case Reason::KeepAbove: return "heating to stay above the floor";
+        case Reason::KeepSatisfied: return "off, above the floor";
+        case Reason::StaleDataLimp: return "no temperature yet (limp mode)";
+        case Reason::ManualOn: return "on (manual)";
+        case Reason::ManualOff: return "off (manual)";
+        case Reason::AboveMax: return "off, above maximum";
+        case Reason::BelowMin: return "heating, below minimum";
+        case Reason::FrostProtection: return "heating, frost protection";
+        case Reason::AwayOff: return "away";
+        case Reason::OfflineSchedule: return "following the night schedule";
+        case Reason::NoPricesFallback: return "on, no prices (fallback)";
+    }
+    return std::string(hb::reasonCode(r));
+}
+
+// Title + text for the start notification: updated / restarted / started, then what each room is
+// doing, the plugs, tonight's Wi-Fi off period and any problems. Remembers the version it announced.
+std::pair<std::string, std::string> startMessage(const ControlEnv& env, const hb::TickResult& result, Instant now) {
+    const std::string rev = hb::buildRevision();
+    const fs::path versionFile = env.cfg.dataDir / "version.json";
+    std::string previous;
+    try {
+        if (fs::exists(versionFile)) previous = nlohmann::json::parse(std::ifstream(versionFile)).value("revision", "");
+    } catch (const std::exception&) {
+    }
+    std::ofstream(versionFile) << nlohmann::json{{"revision", rev}}.dump();
+
+    std::string title, text;
+    if (previous.empty()) title = "heatbrain started";
+    else if (previous != rev) title = "heatbrain updated";
+    else title = "heatbrain restarted";
+    if (previous != rev && !previous.empty()) text += std::format("Version {} (was {})\n", rev, previous);
+    else text += std::format("Version {}\n", rev);
+
+    for (const auto& r : result.rooms) {
+        const auto& in = r.decision.inputs;
+        std::string line = r.room->name;
+        if (in.temperature) line += std::format(" {:.1f}°", *in.temperature);
+        std::string what = shortReason(r.decision.reason);
+        if (what == "heating" && in.target) what = std::format("heating to {:.0f}°", *in.target);
+        line += " · " + what;
+        text += line + "\n";
+    }
+
+    int live = 0, dry = 0;
+    for (const auto& p : env.plugs) (p.mode == hb::PlugMode::Live ? live : dry)++;
+    std::string tail = live && !dry ? std::format("{} plug{} live", live, live == 1 ? "" : "s")
+                       : !live      ? std::format("{} plug{} in dry-run", dry, dry == 1 ? "" : "s")
+                                    : std::format("{} live, {} in dry-run", live, dry);
+    if (const auto o = env.controller->offlineInfo(now)) {
+        const auto start = env.tz->toLocal(o->period.start), end = env.tz->toLocal(o->period.end);
+        tail += o->active ? std::format(" · Wi-Fi off until {:%H:%M}", end)
+                          : std::format(" · Wi-Fi off {:%H:%M}-{:%H:%M}", start, end);
+    }
+    const auto problems = result.problems.size();
+    tail += problems == 0 ? " · no problems" : std::format(" · {} problem{} (see the dashboard)", problems, problems == 1 ? "" : "s");
+    text += tail;
+    return {title, text};
 }
 
 // The control loop for one configuration. Returns when stopping or when the config changed.
@@ -254,16 +331,8 @@ void controlLoop(ControlEnv& env, hb::StatusBoard& board, std::unique_ptr<hb::Al
     else alertsPtr->reconfigure(notifications.policy, *env.tz);
     hb::AlertManager& alerts = *alertsPtr;
     hb::log::info("  notifications: {} channel(s)", notifications.channels.size());
-    if (announce && notifications.notifyOnStart) {
-        for (auto& ch : notifications.channels) {
-            try {
-                ch->sendText("heatbrain started", std::format("{} room(s), tick every {} s",
-                                                              env.controller->rooms().size(), env.tick.count()));
-            } catch (const std::exception& e) {
-                hb::log::warn("{}: {}", ch->name(), e.what());
-            }
-        }
-    }
+    // The start message goes out after the first control step, so it can tell what is happening.
+    bool announcePending = announce && notifications.notifyOnStart;
     const auto deliver = [&](const hb::Alert& a) {
         const char* kind = a.kind == hb::Alert::Kind::Resolved   ? "RESOLVED"
                            : a.kind == hb::Alert::Kind::Reminder ? "REMINDER"
@@ -310,6 +379,18 @@ void controlLoop(ControlEnv& env, hb::StatusBoard& board, std::unique_ptr<hb::Al
         }
         seenKeys = keys;
         alerts.update(now, result.problems, deliver);
+        if (announcePending) {
+            announcePending = false;
+            const auto [title, text] = startMessage(env, result, now);
+            hb::log::info("{}: {}", title, text);
+            for (auto& ch : notifications.channels) {
+                try {
+                    ch->sendText(title, text);
+                } catch (const std::exception& e) {
+                    hb::log::warn("{}: {}", ch->name(), e.what());
+                }
+            }
+        }
         board.set(buildStatus(env, result, alerts.activeProblems(), now));
 
         // Weekly summary (Monday morning) and tomorrow's-price heads-up.

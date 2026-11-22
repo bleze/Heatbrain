@@ -21,7 +21,8 @@ RUN baseline=$(sed -n 's/.*"builtin-baseline": *"\([0-9a-f]*\)".*/\1/p' vcpkg.js
     && "$VCPKG_ROOT/vcpkg" install --triplet x64-linux --x-install-root=/src/vcpkg_installed
 
 COPY . .
-RUN cmake --preset linux-release -DVCPKG_INSTALLED_DIR=/src/vcpkg_installed \
+ARG HEATBRAIN_REVISION=dev
+RUN cmake --preset linux-release -DVCPKG_INSTALLED_DIR=/src/vcpkg_installed -DHEATBRAIN_REVISION=${HEATBRAIN_REVISION} \
     && cmake --build --preset linux-release \
     && ctest --preset linux-release \
     && cmake --install out/build/linux-release --prefix /app

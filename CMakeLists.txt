@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(HEATBRAIN_BUILD_TESTS "Build unit tests" ON)
 option(HEATBRAIN_DEV_DEFAULTS "Use <source>/data as default data dir (local development)" OFF)
+set(HEATBRAIN_REVISION "dev" CACHE STRING "Source revision baked into the binary (the image build passes the git commit)")
 
 if(MSVC)
   add_compile_options(/W4 /utf-8 /permissive- /Zc:__cplusplus)
@@ -36,6 +37,7 @@ add_library(heatbrain_core STATIC
   src/core/offline.cpp
 )
 target_include_directories(heatbrain_core PUBLIC src)
+target_compile_definitions(heatbrain_core PRIVATE HEATBRAIN_REVISION="${HEATBRAIN_REVISION}")
 
 # --- IO: HTTP, providers, config ---
 add_library(heatbrain_io STATIC

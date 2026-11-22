@@ -4,6 +4,15 @@
 
 namespace hb {
 
+std::string buildRevision() {
+#ifdef HEATBRAIN_REVISION
+    const std::string r = HEATBRAIN_REVISION;
+#else
+    const std::string r = "dev";
+#endif
+    return r.size() > 7 && r != "dev" ? r.substr(0, 7) : r;
+}
+
 std::vector<int> parseVersion(std::string_view s) {
     std::vector<int> out;
     std::size_t i = 0;
