@@ -17,6 +17,8 @@
   <script>
     // Appearance is a per-browser preference: auto (follow the OS), light or dark.
     try { const t = localStorage.getItem("heatbrain-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+    // Animations likewise: auto (follow the OS's reduce-motion setting), always or off.
+    try { const m = localStorage.getItem("heatbrain-motion"); if (m === "always" || m === "off") document.documentElement.dataset.motion = m; } catch {}
   </script>
 </head>
 <body>

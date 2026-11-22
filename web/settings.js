@@ -1568,6 +1568,23 @@
       b.classList.toggle("active", current === value);
     }
     el("div", { class: "hint" }, ap, "this browser only");
+    // Animations (the fire on heating rooms): follow the OS's reduce-motion setting, always, or off.
+    const an = el("div", { class: "field" }, g);
+    el("span", {}, an, "Animations");
+    const aseg = el("div", { class: "segmented" }, an);
+    let motion = "auto";
+    try { motion = localStorage.getItem("heatbrain-motion") || "auto"; } catch {}
+    for (const [value, label] of [["auto", "Auto"], ["always", "Always"], ["off", "Off"]]) {
+      const b = btn(aseg, label, null, () => {
+        try { value === "auto" ? localStorage.removeItem("heatbrain-motion") : localStorage.setItem("heatbrain-motion", value); } catch {}
+        if (value === "auto") delete document.documentElement.dataset.motion;
+        else document.documentElement.dataset.motion = value;
+        render();
+      });
+      b.classList.toggle("active", motion === value);
+    }
+    el("div", { class: "hint" }, an, matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "this browser only · the system asks for less motion, so Auto is still" : "this browser only · Auto follows the system");
     if (S.fixedWebPort) {
       // In Docker the address is chosen by the compose file's port mapping, not here.
       const wp = el("div", { class: "field" }, g);

@@ -236,15 +236,18 @@ button.link-btn:hover { background: none; text-decoration: underline; }
   0% { background-position: 0 0, 0 0, 0 0, 0 0; }
   100% { background-position: 6px -120px, -4px -150px, 3px -100px, 0 0; }
 }
+/* Still when the OS asks for reduced motion (unless Settings -> System says "always"), or when it says "off" */
 @media (prefers-reduced-motion: reduce) {
-  .room.heating::before, .room.heating::after { animation: none; }
+  :root:not([data-motion="always"]) .room.heating::before, :root:not([data-motion="always"]) .room.heating::after { animation: none; }
 }
+:root[data-motion="off"] .room.heating::before, :root[data-motion="off"] .room.heating::after,
+:root[data-motion="off"] .room.heating .badge-warm .icon { animation: none; }
 .room.idle { background: linear-gradient(180deg, var(--cool-tint), transparent 60%), var(--surface); }
 .room-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .room-name { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 10px; }
 .room.heating .badge-warm .icon { animation: flicker 1.8s ease-in-out infinite; transform-origin: 50% 90%; }
 @keyframes flicker { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12) rotate(-3deg); } }
-@media (prefers-reduced-motion: reduce) { .room.heating .badge-warm .icon { animation: none; } }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="always"]) .room.heating .badge-warm .icon { animation: none; } }
 .hero { font-size: 40px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; margin: 10px 0 2px; }
 .hero small { font-size: 15px; font-weight: 400; color: var(--ink-2); margin-left: 6px; }
 .state {
