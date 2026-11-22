@@ -58,6 +58,9 @@ public:
     std::vector<Booking> forRoom(const RoomConfig& room) const;
     std::string add(const std::string& roomId, const Booking& b) const;  // throws invalid_argument on overlap
     bool remove(const std::string& id) const;
+    // Changes a booking in place (same id). false: unknown id; throws invalid_argument on overlap with
+    // another booking of the room. Warming up already under way is kept only if the start is unchanged.
+    bool update(const std::string& id, const std::string& roomId, const Booking& b) const;
     void markWarming(const std::string& id, Instant since) const;
 
 private:

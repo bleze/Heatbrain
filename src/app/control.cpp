@@ -213,6 +213,13 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                   {"plugs", r.plugs},
                   {"priceOnly", r.room->priceOnly.has_value()},
                   {"override", nullptr}};
+        if (const auto& ref = r.room->sensor; !ref.empty()) {
+            const std::string source = ref.substr(0, ref.find(':')), key = ref.substr(ref.find(':') + 1);
+            for (const auto& [k, reading] : env.controller->readings()) {
+                const bool match = k == ref || (k.starts_with(source + ":") && reading.name == key);
+                if (match && reading.humidity) room["humidity"] = *reading.humidity;
+            }
+        }
         json plan = json::array();
         for (const auto& s : r.plan) {
             json seg{{"from", s.from.time_since_epoch().count()}, {"to", s.to.time_since_epoch().count()}, {"kind", s.kind}};

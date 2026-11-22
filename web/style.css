@@ -156,6 +156,7 @@ a { color: var(--accent); }
 .bk-target { font-weight: 600; }
 .bk-target .icon { color: var(--flame-1); }
 .bk-x .icon { color: var(--critical); }
+.bk-edit .icon { color: var(--accent); }
 .away-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-color: var(--accent);
   background: linear-gradient(90deg, var(--accent-soft), transparent 70%), var(--surface); }
 .away-bar .grow { flex: 1; min-width: 200px; }
@@ -163,7 +164,7 @@ a { color: var(--accent); }
    the button is as tall as the inputs. A status panel (no fields) keeps its button centred. */
 .away-bar:has(.field) { align-items: flex-end; }
 .away-bar:has(.field) > .badge, .away-bar:has(.field) > .grow { align-self: center; }
-.away-bar:has(.field) > button { height: 36px; }
+.away-bar:has(.field) > button { height: var(--control-h); box-sizing: border-box; }
 .away-bar .hint:empty { display: none; }
 .wifi-bar { display: flex; align-items: center; gap: 12px; }
 .wifi-bar .grow { flex: 1; min-width: 200px; }
@@ -234,6 +235,26 @@ button.link-btn:hover { background: none; text-decoration: underline; }
 .plugs { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--ink-2); }
 .chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; background: var(--surface); }
 .chip .icon { width: 13px; height: 13px; }
+/* Humidity beside a room's temperature line */
+.hero .hum { display: inline-flex; align-items: center; gap: 3px; margin-left: 10px; }
+.hero .hum .icon { width: 13px; height: 13px; color: var(--cat-comfort); }
+/* Menus: each item's icon in a colour of its own (the text keeps the menu's ink) */
+.nav a[data-view="dashboard"] .icon { color: var(--accent); }
+.nav a[data-view="settings"] .icon { color: var(--flame-2); }
+.nav a[data-view="help"] .icon { color: var(--cat-comfort); }
+#settings-tabs .icon[data-icon="home"] { color: var(--accent); }
+#settings-tabs .icon[data-icon="flame"] { color: var(--flame-1); }
+#settings-tabs .icon[data-icon="thermo"] { color: var(--critical); }
+#settings-tabs .icon[data-icon="bolt"] { color: var(--flame-2); }
+#settings-tabs .icon[data-icon="bell"] { color: var(--cat-comfort); }
+#settings-tabs .icon[data-icon="cpu"] { color: var(--cat-safety); }
+/* Time and date fields: the picker button as our own clock / calendar, in violet (works in both themes) */
+input[type="time"]::-webkit-calendar-picker-indicator {
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238378e3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E") center / 15px no-repeat;
+  opacity: 1; cursor: pointer; }
+input[type="date"]::-webkit-calendar-picker-indicator, input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238378e3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='5' width='16' height='15' rx='2'/%3E%3Cpath d='M4 10h16M9 3v4M15 3v4'/%3E%3C/svg%3E") center / 15px no-repeat;
+  opacity: 1; cursor: pointer; }
 /* A neutral chip's icon has a colour of its own, by what it shows (status chips colour the whole chip) */
 .chip:not(.ok):not(.warn):not(.error):not(.live) .icon[data-icon="battery"] { color: var(--good); }
 .chip:not(.ok):not(.warn):not(.error):not(.live) .icon[data-icon="clock"] { color: var(--accent); }
@@ -347,6 +368,12 @@ input, select, textarea {
   font: inherit; color: var(--ink); background-color: var(--surface);  /* not the shorthand: keeps the select chevron */
   border: 1px solid var(--axis); border-radius: 8px; padding: 6px 8px; min-width: 0;
 }
+/* One height for every one-line control: the browser draws date/time fields 2 px taller than a
+   select or a spinbox, which shows when they stand side by side. */
+:root { --control-h: 34px; }
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select { height: var(--control-h); box-sizing: border-box; }
+.stepper { height: var(--control-h); box-sizing: border-box; }
+.stepper.stepper input:not([type="checkbox"]):not([type="radio"]) { height: auto; }  /* fills the spinbox, inside its border */
 textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
 input[type="number"] { width: 90px; }
 input[type="time"] { width: 110px; }
@@ -443,7 +470,7 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 .help-btn { width: 18px; height: 18px; padding: 0; border-radius: 50%; font-size: 11px; font-weight: 700; line-height: 1;
   justify-content: center; color: var(--accent); border-color: var(--accent-soft); background: var(--accent-soft);
   vertical-align: middle; margin-left: 4px; }
-.help-btn .icon { width: 13px; height: 13px; stroke-width: 2.6; }
+.help-btn .icon { width: 14px; height: 14px; stroke-width: 2.5; }  /* even size: on whole pixels in the 16 px inside */
 .help-btn:hover, .help-btn.open { background: var(--accent-fill); color: var(--accent-ink); }
 .helpbox { margin: 8px 0; padding: 10px 14px; border-radius: 10px; background: var(--accent-soft); color: var(--ink);
   font-size: 13px; font-weight: 400; border-left: 3px solid var(--accent); grid-column: 1 / -1; }

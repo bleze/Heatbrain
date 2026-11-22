@@ -376,3 +376,34 @@ TEST_CASE("Limp alerts wait 15 minutes") {
     REQUIRE(limp != r.problems.end());
     CHECK(limp->debounce == minutes{15});
 }
+
+TEST_CASE("A booking can be changed in place; overlaps are refused, a moved start warms up afresh") {
+    test::TempDir dir;
+    const BookingStore store{dir.path() / "bookings.json"};
+    const Instant base = floor<seconds>(system_clock::now()) + hours{24};
+    const std::string a = store.add("pizzeria", Booking{22, base, base + hours{6}});
+    store.add("pizzeria", Booking{22, base + hours{24}, base + hours{30}});
+    store.markWarming(a, base - hours{3});
+
+    // Same start, other end and temperature: still warming.
+    REQUIRE(store.update(a, "pizzeria", Booking{21, base, base + hours{8}}));
+    auto all = store.load();
+    REQUIRE(all.size() == 2);
+    CHECK(all[0].id == a);
+    CHECK(all[0].booking.target == 21);
+    CHECK(all[0].booking.until == base + hours{8});
+    CHECK(all[0].warmingSince);
+
+    // Into the other booking: refused, nothing changed.
+    CHECK_THROWS_AS(store.update(a, "pizzeria", Booking{21, base + hours{20}, base + hours{26}}), std::invalid_argument);
+    CHECK(store.load()[0].booking.from == base);
+
+    // Moved: works out its warm-up afresh. Another room: no overlap with this room's bookings.
+    REQUIRE(store.update(a, "bedroom", Booking{20, base + hours{25}, base + hours{27}}));
+    all = store.load();
+    const auto moved = std::ranges::find_if(all, [&](const StoredBooking& s) { return s.id == a; });
+    REQUIRE(moved != all.end());
+    CHECK(moved->room == "bedroom");
+    CHECK_FALSE(moved->warmingSince);
+    CHECK_FALSE(store.update("nope", "bedroom", Booking{20, base, base + hours{1}}));
+}

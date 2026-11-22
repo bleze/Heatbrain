@@ -274,29 +274,51 @@ void WebServer::routes() {
 
     // Room bookings: {"from": unix seconds, "until": unix seconds, "target": 22}. The room heats to the
     // target from its warm-up time before "from" until "until", then follows its program again.
-    s.Post(R"(/api/rooms/([\w-]+)/bookings)", [this](const httplib::Request& req, httplib::Response& res) {
-        const std::string id = req.matches[1];
+    // Checks a booking for a room; the error to answer with, if any.
+    const auto checkBooking = [this](const std::string& roomId, const json& body, Booking& out) -> std::pair<int, std::string> {
         const auto all = rooms();
-        const auto room = std::ranges::find_if(all, [&](const RoomConfig& r) { return r.id == id; });
-        if (room == all.end()) return sendError(res, 404, "unknown room");
-        if (room->priceOnly) return sendError(res, 400, "A room without a temperature sensor cannot be booked");
-        const json body = parseBody(req);
+        const auto room = std::ranges::find_if(all, [&](const RoomConfig& r) { return r.id == roomId; });
+        if (room == all.end()) return {404, "unknown room"};
+        if (room->priceOnly) return {400, "A room without a temperature sensor cannot be booked"};
         const auto now = floor<seconds>(system_clock::now());
         const Instant from{seconds{body.value("from", 0LL)}};
         const Instant until{seconds{body.value("until", 0LL)}};
         const double target = body.value("target", 22.0);
-        if (until <= now || from > now + days{90}) return sendError(res, 400, "The booking must end in the future and start within 90 days");
-        if (from >= until) return sendError(res, 400, "The start must be before the end");
-        if (until - from > days{14}) return sendError(res, 400, "A booking can be at most 14 days (use away mode for longer)");
+        if (until <= now || from > now + days{90}) return {400, "The booking must end in the future and start within 90 days"};
+        if (from >= until) return {400, "The start must be before the end"};
+        if (until - from > days{14}) return {400, "A booking can be at most 14 days (use away mode for longer)"};
         if (target < room->frostTemp || target >= room->maxTemp) {
-            return sendError(res, 400, std::format("The temperature must be {:.0f}..{:.1f} °C (below the room's maximum; raise it "
-                                                   "in Settings → Rooms if needed)", room->frostTemp, room->maxTemp - 0.5));
+            return {400, std::format("The temperature must be {:.0f}..{:.1f} °C (below the room's maximum; raise it "
+                                     "in Settings → Rooms if needed)", room->frostTemp, room->maxTemp - 0.5)};
         }
+        out = Booking{target, from, until};
+        return {0, ""};
+    };
+    s.Post(R"(/api/rooms/([\w-]+)/bookings)", [this, checkBooking](const httplib::Request& req, httplib::Response& res) {
+        const std::string id = req.matches[1];
+        Booking b;
+        if (const auto [status, why] = checkBooking(id, parseBody(req), b); status) return sendError(res, status, why);
         try {
-            const std::string bid = BookingStore(ctx_.dataDir / "bookings.json").add(id, Booking{target, from, until});
-            log::info("Web: {} booked {} - {} at {:.1f} °C", id, formatIsoUtc(from), formatIsoUtc(until), target);
+            const std::string bid = BookingStore(ctx_.dataDir / "bookings.json").add(id, b);
+            log::info("Web: {} booked {} - {} at {:.1f} °C", id, formatIsoUtc(b.from), formatIsoUtc(b.until), b.target);
             if (ctx_.onOverride) ctx_.onOverride();
-            sendJson(res, json{{"id", bid}, {"room", id}, {"from", epoch(from)}, {"until", epoch(until)}, {"target", target}});
+            sendJson(res, json{{"id", bid}, {"room", id}, {"from", epoch(b.from)}, {"until", epoch(b.until)}, {"target", b.target}});
+        } catch (const std::invalid_argument& e) {
+            sendError(res, 409, e.what());
+        }
+    });
+    // Change a booking: {"room", "from", "until", "target"} (the room may change too).
+    s.Put(R"(/api/bookings/([\w-]+))", [this, checkBooking](const httplib::Request& req, httplib::Response& res) {
+        const std::string bid = req.matches[1];
+        const json body = parseBody(req);
+        const std::string roomId = body.value("room", std::string());
+        Booking b;
+        if (const auto [status, why] = checkBooking(roomId, body, b); status) return sendError(res, status, why);
+        try {
+            if (!BookingStore(ctx_.dataDir / "bookings.json").update(bid, roomId, b)) return sendError(res, 404, "unknown booking");
+            log::info("Web: booking {} changed: {} {} - {} at {:.1f} °C", bid, roomId, formatIsoUtc(b.from), formatIsoUtc(b.until), b.target);
+            if (ctx_.onOverride) ctx_.onOverride();
+            sendJson(res, json{{"id", bid}, {"room", roomId}, {"from", epoch(b.from)}, {"until", epoch(b.until)}, {"target", b.target}});
         } catch (const std::invalid_argument& e) {
             sendError(res, 409, e.what());
         }

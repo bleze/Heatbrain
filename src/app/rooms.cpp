@@ -296,6 +296,23 @@ void BookingStore::markWarming(const std::string& id, Instant since) const {
     save(all);
 }
 
+bool BookingStore::update(const std::string& id, const std::string& roomId, const Booking& b) const {
+    auto all = load();
+    const auto it = std::ranges::find_if(all, [&](const StoredBooking& s) { return s.id == id; });
+    if (it == all.end()) return false;
+    for (const auto& s : all) {
+        if (s.id != id && s.room == roomId && b.from < s.booking.until && s.booking.from < b.until) {
+            throw std::invalid_argument("It overlaps another booking of this room");
+        }
+    }
+    const bool sameStart = it->room == roomId && it->booking.from == b.from;
+    it->room = roomId;
+    it->booking = b;
+    if (!sameStart) it->warmingSince.reset();  // a moved booking works out its warm-up afresh
+    save(all);
+    return true;
+}
+
 bool BookingStore::remove(const std::string& id) const {
     auto all = load();
     const auto n = std::erase_if(all, [&](const StoredBooking& s) { return s.id == id; });

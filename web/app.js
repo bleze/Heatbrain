@@ -439,7 +439,7 @@ function renderBook() {
   d.target = Math.min(d.target, maxFor());
   bar.appendChild(badge("calendar", "violet"));
   const t = el("div", { class: "grow" }, bar);
-  const ga = el("b", {}, t, "Book a room ");
+  const ga = el("b", {}, t, d.id ? "Change the booking " : "Book a room ");
   if (typeof helpButton === "function") helpButton(ga, "bookings", t);
   el("div", { class: "muted" }, t, "It starts heating early enough by itself and goes back to the program afterwards. An end before the start means the next day.");
   const field = (label) => { const l = el("label", { class: "field" }, bar); el("span", {}, l, label); return l; };
@@ -460,7 +460,7 @@ function renderBook() {
   field("Temperature").appendChild(tBox);
   const save = el("button", { type: "button", class: "primary" }, bar);
   save.appendChild(icon("check"));
-  save.appendChild(document.createTextNode("Book"));
+  save.appendChild(document.createTextNode(d.id ? "Save changes" : "Book"));
   const err = el("div", { class: "hint", style: "color:var(--critical);flex-basis:100%" }, bar);
   save.addEventListener("click", async () => {
     syncT();
@@ -472,12 +472,12 @@ function renderBook() {
     save.disabled = true;
     err.textContent = "";
     try {
-      await api(`/api/rooms/${encodeURIComponent(d.room)}/bookings`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: Math.floor(from / 1000), until: Math.floor(until / 1000), target: d.target }),
-      });
+      const body = JSON.stringify({ room: d.room, from: Math.floor(from / 1000), until: Math.floor(until / 1000), target: d.target });
+      const headers = { "Content-Type": "application/json" };
+      if (d.id) await api(`/api/bookings/${encodeURIComponent(d.id)}`, { method: "PUT", headers, body });
+      else await api(`/api/rooms/${encodeURIComponent(d.room)}/bookings`, { method: "POST", headers, body });
       try { localStorage.setItem("hb.bookingTarget", String(d.target)); } catch { /* private mode */ }
-      toastMaybe(`${room?.name || d.room} booked`);
+      toastMaybe(d.id ? "Booking changed" : `${room?.name || d.room} booked`);
       bookOpen = false;
       bookDraft = null;
       setTimeout(refreshStatus, 1500);
@@ -486,15 +486,26 @@ function renderBook() {
 }
 $("book-btn").addEventListener("click", () => {
   bookOpen = !bookOpen;
+  if (bookDraft?.id) bookDraft = null;  // the button books anew; editing starts from a booking's Edit
   if (location.hash.startsWith("#settings") || location.hash.startsWith("#help")) { location.hash = ""; bookOpen = true; }
   renderBook();
   if (bookOpen) window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
-// Every booking in one card under the rooms (only when there are any), soonest first.
+// A booking's Edit: the Book panel, filled in with it.
+function editBooking(b) {
+  const f = new Date(b.from * 1000), u = new Date(b.until * 1000);
+  const hmLocal = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  bookDraft = { id: b.id, room: b.room, date: isoDate(f), from: hmLocal(f), until: hmLocal(u), target: b.target };
+  bookOpen = true;
+  renderBook();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+// Every booking in one card above the rooms (only when there are any), soonest first.
 function renderBookingsCard() {
   const card = $("bookings");
-  const all = (state.status?.rooms || []).flatMap((r) => (r.bookings || []).map((b) => ({ ...b, roomName: r.name })))
+  const all = (state.status?.rooms || []).flatMap((r) => (r.bookings || []).map((b) => ({ ...b, room: r.id, roomName: r.name })))
     .sort((a, b) => a.from - b.from);
   card.hidden = !all.length;
   card.replaceChildren();
@@ -534,6 +545,10 @@ function bookingRow(host, b) {
   const tgt = el("span", { class: "chip bk-target" }, row);
   tgt.appendChild(icon("thermo"));
   tgt.appendChild(document.createTextNode(temp(b.target)));
+  const ed = el("button", { type: "button", class: "ghost bk-edit", title: "Change the time, temperature or room" }, row);
+  ed.appendChild(icon("edit"));
+  ed.appendChild(document.createTextNode("Edit"));
+  ed.addEventListener("click", () => editBooking(b));
   const x = el("button", { type: "button", class: "ghost bk-x", title: b.active ? "End the booking now" : "Cancel the booking" }, row);
   x.appendChild(icon(b.active ? "undo" : "trash"));
   x.appendChild(document.createTextNode(b.active ? "End" : "Cancel"));
@@ -587,6 +602,11 @@ let renderRooms = function () {
     else if (inp.mode === "off") el("small", {}, hero, `off ${inp.targetLabel || ""}`.trim());
     else if (inp.mode === "keep") el("small", {}, hero, `keep above ${temp(inp.target)}`);
     else if (inp.target != null) el("small", {}, hero, `target ${temp(inp.target)}`);
+    if (!r.priceOnly && r.humidity != null) {
+      const hum = el("small", { class: "hum", title: "Humidity" }, hero);
+      hum.appendChild(icon("drop"));
+      hum.appendChild(document.createTextNode(`${Math.round(r.humidity)} %`));
+    }
 
     const reason = el("div", { class: "reason" }, card);
     if (cat) el("span", { class: "swatch", style: `background:${catColor(cat)}` }, reason);
