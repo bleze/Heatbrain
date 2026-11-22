@@ -786,6 +786,16 @@ function renderDetail() {
   const temps = h.temperatures, decisions = h.decisions;
   const prices = h.prices.filter((p) => p[0] >= t0 - 900 && p[0] <= t1);
   const targets = decisions.map((d) => [d[0], d[3]]);
+  // Ahead of now the target comes from the room's plan, so the line doesn't seem to stop at the last
+  // decision (an off period has no target: a gap, then the line where heating resumes).
+  const roomPlan = state.status?.rooms?.find((r) => r.id === room.id)?.plan || [];
+  const lastDecision = decisions.length ? decisions[decisions.length - 1][0] : h.to;
+  const step = Math.min(900, tick);  // within stepPath's gap limit, so the steps join up
+  for (const seg of roomPlan) {
+    for (let t = Math.max(seg.from, lastDecision + step); t < seg.to && t <= t1; t += step) {
+      targets.push([t, seg.kind === "off" || seg.kind === "nightoff" ? null : seg.target ?? null]);
+    }
+  }
   const segs = heatingSegments(decisions, tick, h.to);
   const wifi = h.wifi && (h.wifi.seen.length || h.wifi.planned.length) ? h.wifi : null;
   renderLegend(room, segs, wifi);
