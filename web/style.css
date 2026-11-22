@@ -510,8 +510,6 @@ table.events { width: 100%; border-collapse: collapse; font-size: 13px; }
 }
 
 details.events-log { margin-top: 16px; }
-details.events-log > summary { cursor: pointer; display: flex; align-items: baseline; gap: 8px; list-style: none; }
-details.events-log > summary::-webkit-details-marker { display: none; }
-details.events-log > summary::before { content: "▸"; color: var(--muted); font-size: 12px; }
-details.events-log[open] > summary::before { content: "▾"; }
-details.events-log > summary h3 { margin: 0; display: inline; }
+/* Same marker as the other collapsible sections (the browser's own triangle) */
+details.events-log > summary { cursor: pointer; }
+details.events-log > summary h3 { margin: 0 6px 0 0; display: inline; }
