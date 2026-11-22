@@ -613,12 +613,17 @@
     el("span", { class: "muted" }, left, `id: ${p.id}`);
 
     const right = el("div", { class: "row" }, head);
-    const sw = el("label", { class: "switch", title: "Live" }, right);
-    const swi = el("input", { type: "checkbox" }, sw);
-    swi.checked = p.mode === "live";
-    el("span", {}, sw);
-    const modeText = el("b", {}, right, p.mode === "live" ? "Live" : "Dry-run");
-    swi.addEventListener("change", () => { p.mode = swi.checked ? "live" : "dryrun"; modeText.textContent = swi.checked ? "Live" : "Dry-run"; changed(); });
+    // Two named choices, the active one filled: a lone switch labelled "Dry-run" read as "dry-run is off".
+    const seg = el("div", { class: "segmented mode-seg", role: "radiogroup", "aria-label": "Plug mode" }, right);
+    for (const [value, label, tip] of [["dryrun", "Dry-run", "heatbrain decides and logs, but never switches this plug"],
+                                       ["live", "Live", "heatbrain switches this plug"]]) {
+      const b = btn(seg, label, value === "live" ? "bolt" : null, () => { p.mode = value; changed(); render(); });
+      b.title = tip;
+      b.setAttribute("role", "radio");
+      b.setAttribute("aria-checked", String((p.mode || "dryrun") === value));
+      b.classList.toggle("active", (p.mode || "dryrun") === value);
+      if (value === "live") b.classList.add("live");
+    }
     confirmBtn(right, "", "trash", "Remove plug?", () => {
       S.cfg.plugs.splice(idx, 1);
       for (const r of S.cfg.rooms || []) r.plugs = (r.plugs || []).filter((x) => x !== p.id);

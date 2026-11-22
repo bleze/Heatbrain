@@ -159,6 +159,7 @@ a { color: var(--accent); }
 .room { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; position: relative; overflow: hidden;
         display: flex; flex-direction: column; }
 .room-foot { margin-top: auto; padding-top: 2px; }
+.room-foot .plugs { min-height: 22px; }  /* empty when all plugs are live and fine: keep cards aligned */
 .room:hover { border-color: var(--axis); }
 .room.selected { box-shadow: 0 0 0 2px var(--accent) inset; }
 .room.heating { background: linear-gradient(180deg, var(--warm-tint), transparent 70%), var(--surface); border-color: var(--warm-edge); }
@@ -288,6 +289,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 .segmented { display: inline-flex; border: 1px solid var(--axis); border-radius: 9px; overflow: hidden; height: 34px; box-sizing: border-box; }
 .segmented button { border: 0; border-radius: 0; padding: 5px 12px; }
 .segmented button.active { background: var(--accent-fill); color: var(--accent-ink); font-weight: 600; }
+/* Plug mode: Live in the "good" colour when chosen, so it reads as "this plug is switched". */
+.mode-seg button.live.active { background: var(--good); color: #fff; }
+.mode-seg button.live.active .icon { color: #fff; }
 .switch { position: relative; width: 38px; height: 22px; display: inline-block; flex: none; }
 .check .switch { margin-right: 2px; }
 /* Selectable pills: choose several (e.g. a room's plugs) */

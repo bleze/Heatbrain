@@ -273,6 +273,13 @@ void TasmotaSwitch::armOffline(const std::vector<OnSpan>& spans, Instant now, In
     command(scheduleOnAt(spans, now) ? "Power1 On" : "Power1 Off");
 }
 
+void TasmotaSwitch::keepAlive(Instant now, std::optional<Instant> until) {
+    seconds watchdog = duration_cast<seconds>(failsafe_.watchdog);
+    if (until && *until > now) watchdog += duration_cast<seconds>(*until - now);
+    command(std::format("RuleTimer1 {}", watchdog.count()));
+    command("RuleTimer2 0");  // ends a limp phase; a relay left on still goes off by its auto-off
+}
+
 void TasmotaSwitch::disarmOffline() {
     for (const char* slot : {"Rule2", "Rule3"}) {
         const std::string existing = command(slot).at(slot).value("Rules", "");

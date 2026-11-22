@@ -123,6 +123,8 @@ private:
     std::optional<OfflinePeriod> armedPeriod_;             // the planned period the schedules are for
     std::optional<Instant> lastDisarmTry_;
     std::optional<Instant> handledPeriodEnd_;  // schedules were loaded for the period ending then
+    std::map<std::string, std::pair<bool, Instant>> dryRunFailsafe_;  // plug id -> (installed, checked at)
+    bool dryRunHasFailsafe(Plug& plug, Instant now);
     std::map<std::string, std::pair<std::string, Instant>> offlineArmErrors_;  // plug id -> (why, period end)
 };
 

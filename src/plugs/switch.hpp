@@ -59,6 +59,10 @@ public:
     }
     // Back on the network: remove the schedule and restore the normal fail-safe timers.
     virtual void disarmOffline() {}
+
+    // Dry-run plug with a fail-safe: restart the watchdog without switching anything, so limp mode
+    // only ever starts when heatbrain itself is gone. `until`: keep it quiet until then (Wi-Fi off).
+    virtual void keepAlive(Instant now, std::optional<Instant> until) { (void)now, (void)until; }
 };
 
 }  // namespace hb

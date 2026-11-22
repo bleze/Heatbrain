@@ -22,6 +22,7 @@ public:
     void restore(const nlohmann::json& backup) override;
     void armOffline(const std::vector<OnSpan>& spans, Instant now, Instant until) override;
     void disarmOffline() override;
+    void keepAlive(Instant now, std::optional<Instant> until) override;
 
     // Sends one command and returns the parsed JSON reply. Throws on failure.
     nlohmann::json command(const std::string& cmnd);

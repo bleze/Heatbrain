@@ -27,6 +27,13 @@ public:
         if (!reachable_) throw std::runtime_error("simulated: unreachable");
         schedule_.reset();
     }
+    void keepAlive(Instant, std::optional<Instant> until) override {
+        if (!reachable_) throw std::runtime_error("simulated: unreachable");
+        ++keepAlives_;
+        keptUntil_ = until;
+    }
+    int keepAlives() const { return keepAlives_; }
+    const std::optional<Instant>& keptUntil() const { return keptUntil_; }
     // For tests: Wi-Fi off, and what the device was told to follow.
     void setReachable(bool r) { reachable_ = r; }
     const std::optional<std::vector<OnSpan>>& schedule() const { return schedule_; }
@@ -45,6 +52,8 @@ private:
     bool provisioned_ = false;
     bool reachable_ = true;
     std::optional<std::vector<OnSpan>> schedule_;
+    int keepAlives_ = 0;
+    std::optional<Instant> keptUntil_;
 };
 
 }  // namespace hb

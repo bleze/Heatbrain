@@ -505,12 +505,18 @@ let renderRooms = function () {
     // Pinned to the bottom so plan, plugs and buttons line up across cards of different text length
     const foot = el("div", { class: "room-foot" }, card);
     if (r.plan?.length) planStrip(foot, r.plan);
+    // Only what's worth knowing: a plug in dry-run, on its night schedule, or with a problem. Live and
+    // fine is the normal state - the card's on/off badge already tells it.
     const plugs = el("div", { class: "plugs" }, foot);
     for (const p of r.plugs || []) {
-      const text = p.mode === "live" ? `${p.id} · live${p.state != null ? (p.state ? " · on" : " · off") : ""}` : `${p.id} · dry-run`;
-      const chipEl = el("span", { class: `chip ${p.mode}${p.error ? " error" : ""}`, title: p.error || "" }, plugs);
-      chipEl.appendChild(icon(p.error ? "alert" : "plug"));
-      chipEl.appendChild(document.createTextNode(p.error ? `${p.id} · ${p.error}` : text));
+      let text = null, cls = "", ic = "plug";
+      if (p.error) { text = `${p.id} · ${p.error}`; cls = "error"; ic = "alert"; }
+      else if (p.schedule) { text = `${p.id} · night schedule`; ic = "wifi"; }
+      else if (p.mode !== "live") { text = `${p.id} · dry-run`; cls = "dryrun"; }
+      if (!text) continue;
+      const chipEl = el("span", { class: `chip ${cls}`, title: p.error || "" }, plugs);
+      chipEl.appendChild(icon(ic));
+      chipEl.appendChild(document.createTextNode(text));
     }
 
     const actions = el("div", { class: "actions" }, foot);

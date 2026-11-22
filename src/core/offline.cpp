@@ -61,6 +61,7 @@ std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& pr
     struct Slot {
         Instant start;
         Group group;
+        std::optional<double> target;
     };
     std::vector<Slot> slots;
     for (Instant t = floorToSlot(from); t < to; t += kSlotLength) {
@@ -84,19 +85,19 @@ std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& pr
         } else {
             g = Group::Heat;
         }
-        slots.push_back({t, g});
+        slots.push_back({t, g, d.inputs.target});
     }
 
     // Heat/keep runs: the room's duty share, in the run's cheapest slots.
     std::vector<bool> on(slots.size(), false);
     for (std::size_t i = 0; i < slots.size();) {
         std::size_t j = i;
-        while (j < slots.size() && slots[j].group == slots[i].group) ++j;
+        while (j < slots.size() && slots[j].group == slots[i].group && slots[j].target == slots[i].target) ++j;
         const Group g = slots[i].group;
         if (g == Group::On) {
             for (std::size_t k = i; k < j; ++k) on[k] = true;
         } else if (g == Group::Heat || g == Group::Keep) {
-            const double share = std::clamp(g == Group::Heat ? duty.heat : duty.keep, 0.0, 1.0);
+            const double share = std::clamp(duty.forRun(g == Group::Keep, slots[i].target), 0.0, 1.0);
             const auto count = static_cast<std::size_t>(std::lround(share * static_cast<double>(j - i)));
             std::vector<std::size_t> idx;
             for (std::size_t k = i; k < j; ++k) idx.push_back(k);

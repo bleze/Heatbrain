@@ -143,3 +143,18 @@ TEST_CASE("Gaps in the sensor readings show when the Wi-Fi was off") {
     REQUIRE(gaps.size() == 2);
     CHECK(gaps[1].ongoing);
 }
+
+TEST_CASE("Night schedule: the share is learned per target, so a cool night stays off") {
+    // The room heats a lot at 20 degrees in the day, but never needed heat at 16 at night.
+    OfflineDuty duty{0.6, 0.25, {}};
+    duty.byTarget[OfflineDuty::key(false, 16.0)] = 0.0;
+    RoomConfig r = room(ProgramMode::Heat);  // night: "heat to 16" from 23:00
+    const auto spans = offlineSchedule(r, nightPrices(), tz(), at(0, 23, 30), at(1, 6, 30), duty, std::nullopt);
+    CHECK(spans.empty());
+    // Unknown target: at most 15 min per hour, not the daytime share.
+    const auto unseen = offlineSchedule(r, nightPrices(), tz(), at(0, 23, 30), at(1, 6, 30), OfflineDuty{0.6, 0.25, {}},
+                                        std::nullopt);
+    minutes total{0};
+    for (const auto& s : unseen) total += duration_cast<minutes>(s.to - s.from);
+    CHECK(total == minutes{105});
+}

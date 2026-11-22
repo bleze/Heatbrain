@@ -318,3 +318,17 @@ TEST_CASE("Wi-Fi off period: back late - plugs keep their schedule, one quiet no
     for (const auto& p : r.problems) CHECK_FALSE(p.key.starts_with("plug:bedroom:unreachable"));
     CHECK(f.controller->offlineInfo(f.now)->late);
 }
+
+TEST_CASE("Dry-run plugs with a fail-safe get their watchdog fed, never switched") {
+    Fixture f;
+    auto* spare = dynamic_cast<SimulatedSwitch*>(f.plug("spare").sw.get());  // dry-run
+    f.controller->tick(f.now, true);
+    CHECK(spare->keepAlives() == 0);  // no fail-safe: not touched
+    f.plug("spare").sw->provision(false);
+    f.now += minutes{31};             // the fail-safe check is repeated every 30 minutes
+    const auto r = f.controller->tick(f.now, true);
+    CHECK(spare->keepAlives() == 1);
+    CHECK_FALSE(spare->keptUntil());
+    CHECK_FALSE(f.plugOn("spare"));
+    CHECK(r.rooms[1].plugs[0].value("watchdog", false));
+}

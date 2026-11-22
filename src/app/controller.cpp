@@ -203,6 +203,17 @@ json Controller::applyToPlugs(const RoomConfig& room, bool on, Instant now, Tick
         if (auto armed = armedPlugs_.find(id); armed != armedPlugs_.end()) {
             pj["schedule"] = true;  // switching by itself; not reachable, and not to be touched
             pj["state"] = on;
+        } else if (plug.mode != PlugMode::Live && dryRunHasFailsafe(plug, now)) {
+            // Dry-run never switches, but a fail-safe on the plug would otherwise run limp mode
+            // around the clock: keep its watchdog fed (quietly - dry-run problems are not alerts).
+            try {
+                const auto inOffline = armedPeriod_ && now < armedPeriod_->end + kOfflineBuffer;
+                plug.sw->keepAlive(now, inOffline ? std::optional<Instant>(armedPeriod_->end + kOfflineBuffer)
+                                                  : std::nullopt);
+                pj["watchdog"] = true;
+            } catch (const std::exception&) {
+                dryRunFailsafe_.erase(id);  // check again once it answers
+            }
         } else if (plug.mode == PlugMode::Live) {
             if (const std::string problem = failsafeProblem(plug, now); !problem.empty()) {
                 pj["error"] = "fail-safe not verified: not switched";
@@ -401,6 +412,7 @@ OfflineDuty Controller::learnedDuty(const std::string& roomId, Instant now) cons
     OfflineDuty duty;  // fallback until there is enough history: 15 min per hour
     if (!history_) return duty;
     int on[2] = {0, 0}, total[2] = {0, 0};
+    std::map<std::pair<int, int>, std::pair<int, int>> perTarget;  // key -> (on, total)
     try {
         for (const auto& d : history_->decisions(roomId, now - days{7}, now, false)) {
             // Only decisions made on a real temperature by the thermostat logic.
@@ -413,6 +425,11 @@ OfflineDuty Controller::learnedDuty(const std::string& roomId, Instant now) cons
             if (g < 0) continue;
             ++total[g];
             if (d.on) ++on[g];
+            if (d.inputs.contains("target") && d.inputs["target"].is_number()) {
+                auto& c = perTarget[OfflineDuty::key(g == 1, d.inputs["target"].get<double>())];
+                ++c.second;
+                if (d.on) ++c.first;
+            }
         }
     } catch (const std::exception& e) {
         log::warn("Learning the duty cycle of {}: {}", roomId, e.what());
@@ -420,6 +437,10 @@ OfflineDuty Controller::learnedDuty(const std::string& roomId, Instant now) cons
     constexpr int kEnough = 36;  // 3 hours of 5-minute decisions
     if (total[0] >= kEnough) duty.heat = std::min(0.9, static_cast<double>(on[0]) / total[0]);
     if (total[1] >= kEnough) duty.keep = std::min(0.9, static_cast<double>(on[1]) / total[1]);
+    constexpr int kEnoughForTarget = 12;  // an hour of decisions with that target
+    for (const auto& [k, c] : perTarget) {
+        if (c.second >= kEnoughForTarget) duty.byTarget[k] = std::min(0.9, static_cast<double>(c.first) / c.second);
+    }
     return duty;
 }
 
@@ -434,7 +455,18 @@ void Controller::armOffline(const OfflinePeriod& period, Instant now, std::optio
                   duty.heat * 100, duty.keep * 100);
         for (const auto& id : room.plugIds) {
             auto it = std::ranges::find_if(plugs_, [&](const Plug& p) { return p.id == id; });
-            if (it == plugs_.end() || it->mode != PlugMode::Live) continue;  // dry-run: nothing to load
+            if (it == plugs_.end()) continue;
+            if (it->mode != PlugMode::Live) {
+                // Dry-run: no schedule, but a fail-safe must not run limp mode all night.
+                if (dryRunHasFailsafe(*it, now)) {
+                    try {
+                        it->sw->keepAlive(now, period.end + kOfflineBuffer);
+                    } catch (const std::exception& e) {
+                        log::warn("Plug {} (dry-run): watchdog not extended for the night: {}", id, e.what());
+                    }
+                }
+                continue;
+            }
             if (!failsafeProblem(*it, now).empty()) continue;               // not switched by heatbrain anyway
             try {
                 it->sw->armOffline(spans, now, period.end + kOfflineBuffer);
@@ -550,6 +582,20 @@ void Controller::saveOfflineState() const {
     if (armedPeriod_) out["period"] = {epoch(armedPeriod_->start), epoch(armedPeriod_->end)};
     if (handledPeriodEnd_) out["handledEnd"] = epoch(*handledPeriodEnd_);
     std::ofstream(dataDir_ / "offline.json") << out.dump(2);
+}
+
+bool Controller::dryRunHasFailsafe(Plug& plug, Instant now) {
+    // Checked every 30 minutes: a dry-run plug without a fail-safe is never touched.
+    auto it = dryRunFailsafe_.find(plug.id);
+    if (it != dryRunFailsafe_.end() && now - it->second.second < minutes{30}) return it->second.first;
+    bool installed = false;
+    try {
+        installed = plug.sw->checkFailsafe().installed();
+    } catch (const std::exception&) {
+        installed = false;
+    }
+    dryRunFailsafe_[plug.id] = {installed, now};
+    return installed;
 }
 
 }  // namespace hb
