@@ -949,9 +949,10 @@
       el("span", { class: "muted" }, left, from);
       const chips = el("div", { class: "plugs" }, r);
       const chip = (cls, iconName, text) => { const ch = el("span", { class: `chip ${cls}` }, chips); ch.appendChild(icon(iconName)); ch.appendChild(document.createTextNode(text)); };
-      if (s.temperature != null) chip("", "thermo", `${s.temperature.toFixed(1)}°C`);
-      if (s.humidity != null) chip("", "info", `${Math.round(s.humidity)}%`);
+      // Battery first: the chips are right-aligned, so temperature and age line up on every module.
       if (s.battery != null) chip(s.battery <= 20 ? "error" : s.battery <= 40 ? "warn" : "ok", "battery", `${s.battery}%`);
+      if (s.humidity != null) chip("", "info", `${Math.round(s.humidity)}%`);
+      if (s.temperature != null) chip("", "thermo", `${s.temperature.toFixed(1)}°C`);
       if (!s.reachable) chip("error", "alert", "offline");
       else if (s.ageMinutes != null) chip("", "clock", `${s.ageMinutes} min ago`);
     }
