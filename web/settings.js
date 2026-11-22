@@ -979,20 +979,29 @@
       topic.style.fontFamily = "ui-monospace, Consolas, monospace";
       row.appendChild(topic);
       btn(row, "Copy", "check", async () => {
-        try { await navigator.clipboard.writeText(ntfy.topic); toast("Topic copied"); }
-        catch { topic.select(); }
+        if (await copyText(ntfy.topic)) toast("Topic copied"); else topic.select();
       });
       btn(row, "New topic", "undo", () => { ntfy.topic = randomTopic(); changed(); render(); }, "ghost");
       const server = (ntfy.server || "https://ntfy.sh").replace(/\/+$/, "");
       const hint = el("div", { class: "hint" }, phone, "On your phone you can also just open ");
       el("a", { href: `${server}/${encodeURIComponent(ntfy.topic)}`, target: "_blank", rel: "noopener" }, hint, `${server.replace(/^https?:\/\//, "")}/${ntfy.topic}`);
       hint.appendChild(document.createTextNode(" - it opens the subscription in the app."));
-      // Faster still: scan it with the phone's camera.
-      const qr = el("div", { class: "qr-box" }, phone);
-      try {
-        qr.appendChild(QR.svg(`${server}/${ntfy.topic}`, 168));
-        el("div", { class: "hint" }, qr, "Scan with the phone camera to open the topic");
-      } catch { qr.remove(); }
+      // Faster still: scan with the phone's camera. The iPhone app has no link it answers to, so
+      // its code carries just the topic (the camera offers "Copy"); Android's opens the app directly.
+      const qrs = el("div", { class: "qr-row" }, phone);
+      const host = server.replace(/^https?:\/\//, "");
+      const insecure = server.startsWith("http://") ? "?secure=false" : "";
+      for (const [label, text, how] of [
+        ["iPhone", ntfy.topic, "Scan → Copy → in ntfy tap + and paste"],
+        ["Android", `ntfy://${host}/${ntfy.topic}${insecure}`, "Scan → opens ntfy and subscribes"],
+      ]) {
+        const box = el("div", { class: "qr-box" }, qrs);
+        try {
+          el("b", {}, box, label);
+          box.appendChild(QR.svg(text, 150));
+          el("div", { class: "hint" }, box, how);
+        } catch { box.remove(); }
+      }
       const ol2 = el("ol", { class: "steps", start: 3 }, phone);
       el("li", {}, ol2, "Save & apply, then send a test message.");
       testButton(el("div", { class: "actions" }, phone));
@@ -1075,6 +1084,61 @@
       el("div", { class: "hint" }, wk, "the nights ending Saturday and Sunday morning");
     }
     renderWifiSeen(card);
+  }
+
+  // --- On your phone: home-screen app and a widget (Scriptable) ------------------------
+  // Copy without the Clipboard API: it needs HTTPS, and heatbrain runs on plain http at home.
+  function copyText(text, fallbackEl) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text).then(() => true, () => false);
+    const ta = fallbackEl || el("textarea", { style: "position:fixed;opacity:0" }, document.body);
+    ta.value = text; ta.focus(); ta.select(); ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    if (!fallbackEl) ta.remove();
+    return Promise.resolve(ok);
+  }
+  function renderPhone(body) {
+    const card = el("section", { class: "card" }, body);
+    sectionHead(card, "On your phone", "home", "violet",
+      "heatbrain as an app on the home screen, and a widget with your rooms at a glance.", "phone");
+    const grid = el("div", { class: "transfer" }, card);
+
+    const app = el("div", {}, grid);
+    const ah = el("h3", {}, app); ah.appendChild(icon("home")); ah.appendChild(document.createTextNode("Home-screen app"));
+    const ol = el("ol", { class: "phone-steps" }, app);
+    el("li", {}, ol, `On the phone, open ${location.origin} in Safari (Chrome on Android).`);
+    el("li", {}, ol, "iPhone: Share → Add to Home Screen. Android: ⋮ → Add to Home screen / Install app.");
+    el("li", {}, ol, "It opens full screen with the heatbrain icon.");
+    const qr = el("div", { class: "qr-box", style: "margin-top:8px" }, app);
+    try { qr.appendChild(QR.svg(location.origin + "/", 130)); el("div", { class: "hint" }, qr, "scan to open heatbrain on the phone"); } catch { qr.remove(); }
+
+    const wid = el("div", {}, grid);
+    const wh = el("h3", {}, wid); wh.appendChild(icon("gauge")); wh.appendChild(document.createTextNode("Widget (iPhone)"));
+    const ol2 = el("ol", { class: "phone-steps" }, wid);
+    el("li", {}, ol2, "Install the free app Scriptable from the App Store.");
+    el("li", {}, ol2, "Open this page on the phone, tap Copy widget script below, then in Scriptable tap + and paste. Name it heatbrain.");
+    el("li", {}, ol2, "Home screen: long-press → Edit → + → Scriptable → pick a size → tap the widget → Script: heatbrain.");
+    // Optional second address for away from home (e.g. Tailscale); remembered in this browser.
+    let away = "";
+    try { away = localStorage.getItem("heatbrain-away-url") || ""; } catch {}
+    const af = el("div", { class: "field", style: "margin-top:8px" }, wid);
+    el("span", {}, af, "Address away from home (optional)");
+    const ai = el("input", { type: "url", value: away, placeholder: "e.g. http://100.101.102.103:8090 (Tailscale)" }, af);
+    ai.addEventListener("input", () => { try { localStorage.setItem("heatbrain-away-url", ai.value.trim()); } catch {} });
+    el("div", { class: "hint" }, af, "with Tailscale on the NAS and the phone; never forward a router port to heatbrain - it has no login");
+    const row = el("div", { class: "row", style: "margin-top:8px" }, wid);
+    const ta = el("textarea", { class: "widget-script", rows: 4, readonly: true, spellcheck: "false" });
+    btn(row, "Copy widget script", "check", async () => {
+      try {
+        const src = await (await fetch("widget-scriptable.js", { cache: "no-store" })).text();
+        const urls = [location.origin, ai.value.trim().replace(/\/+$/, "")].filter((u, i, a) => u && a.indexOf(u) === i);
+        const script = src.replace("__HEATBRAIN_URLS__", JSON.stringify(urls));
+        ta.value = script;
+        if (!ta.isConnected) wid.appendChild(ta);
+        toast((await copyText(script, ta)) ? "Widget script copied - paste it in Scriptable" : "Select the script below and copy it");
+      } catch (e) { toast(`Could not load the script: ${e.message}`, true); }
+    }, "primary");
+    el("div", { class: "hint" }, wid, "It tries the addresses in order; when none answers it shows the last data it got.");
   }
 
   // --- Wi-Fi off times as the sensors saw them -------------------------------------------
@@ -1253,6 +1317,7 @@
     }
 
     renderWifiOff(body);
+    renderPhone(body);
     renderTransfer(body);
 
     const raw = el("section", { class: "card" }, body);

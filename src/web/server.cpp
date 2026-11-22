@@ -648,6 +648,7 @@ void WebServer::routes() {
         s.Get("/", index);
         s.Get("/index.html", index);
         s.set_mount_point("/", ctx_.webRoot.string());
+        s.set_file_extension_and_mimetype_mapping("webmanifest", "application/manifest+json");
     }
 
     // Never let browsers keep UI files: with heuristic caching (and even with no-cache plus

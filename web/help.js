@@ -132,6 +132,13 @@ const HELP = {
       "The dashboard's 'Electricity use' card shows the household's measured use per quarter or hour, with the part heatbrain's radiators drew in the same intervals (live plugs that were on × their power) at the bottom. If the radiators ever look bigger than the measured total, a radiator's power is probably set too high under Settings → Plugs.",
     ],
   },
+  phone: {
+    title: "heatbrain on your phone",
+    body: [
+      "Home-screen app: open heatbrain in Safari on the iPhone (Chrome on Android) and use Share → Add to Home Screen. It then opens full screen with its own icon, like an app.",
+      "Widget: with the free iPhone app Scriptable, heatbrain gets a home-screen widget showing each room's temperature and target, a flame when it heats, the price now and the cheapest hour ahead. iOS refreshes widgets by itself, usually every 10-15 minutes; tapping it opens heatbrain. It needs to reach heatbrain: at home that's your network; away from home only through Tailscale (free; Synology package + iPhone app), whose address you can add before copying the script. Never forward a router port to heatbrain - it has no login. When nothing answers, the widget shows the last data it got.",
+    ],
+  },
   transfer: {
     title: "Moving heatbrain (export and import)",
     body: [
@@ -233,7 +240,7 @@ function renderManual(host) {
     "heatbrain switches your radiators' plugs on and off from the price of electricity, the temperature in each room and the program you set. Everything here is also available as '?' next to the settings.");
   const toc = el("nav", { class: "toc" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "sensors", "prices", "meter", "away", "wifiOff", "notifications", "costs", "transfer"];
+                 "sensors", "prices", "meter", "away", "wifiOff", "notifications", "phone", "costs", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, card);
     el("h3", {}, sec, HELP[key].title);
