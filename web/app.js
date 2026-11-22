@@ -536,9 +536,8 @@ let renderRooms = function () {
     };
     act("Heat 1 h", "flame", "act-heat", (b) => setOverride(r.id, true, 60, b));
     act("Off 2 h", "power", "act-off", (b) => setOverride(r.id, false, 120, b));
+    if (!r.priceOnly) act("Book", "calendar", "act-book", () => openBooking(r));
     if (r.override) act("Back to auto", "undo", "", (b) => clearOverride(r.id, b));
-    if (!r.priceOnly && bookingDraft?.room !== r.id) act("Book", "calendar", "", () => openBooking(r));
-    if (bookingDraft?.room === r.id) bookingForm(foot, r);
   }
 }
 
@@ -585,14 +584,24 @@ function openBooking(r) {
   let target = 22;
   try { target = Number(localStorage.getItem("hb.bookingTarget")) || 22; } catch { /* private mode */ }
   bookingDraft = { room: r.id, date: isoDate(new Date()), from: "16:00", until: "23:00", target: Math.min(target, r.maxTemp - 0.5) };
-  renderRooms();
+  bookingDialog(r);
 }
 
-function bookingForm(host, r) {
+// One dialog for all rooms, outside the cards (they are redrawn every 30 s).
+function bookingDialog(r) {
+  let dlg = $("booking-dialog");
+  if (!dlg) {
+    dlg = el("dialog", { id: "booking-dialog", class: "booking-dialog" }, document.body);
+    dlg.addEventListener("close", () => { bookingDraft = null; });
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });  // click outside
+  }
+  dlg.replaceChildren();
   const d = bookingDraft;
-  const f = el("div", { class: "booking-form" }, host);
-  f.addEventListener("click", (e) => e.stopPropagation());
-  f.addEventListener("keydown", (e) => e.stopPropagation());
+  const head = el("div", { class: "booking-head" }, dlg);
+  head.appendChild(badge("calendar", "violet"));
+  el("b", {}, head, `Book ${r.name}`);
+  if (typeof helpButton === "function") helpButton(head, "bookings", dlg);
+  const f = el("div", { class: "booking-form" }, dlg);
   const field = (label, attrs, key) => {
     const l = el("label", {}, f);
     el("span", { class: "muted" }, l, label);
@@ -604,9 +613,9 @@ function bookingForm(host, r) {
   field("From", { type: "time", step: 900 }, "from");
   field("Until", { type: "time", step: 900 }, "until");
   field("Temperature", { type: "number", step: 0.5, min: 5, max: r.maxTemp - 0.5, style: "width:5.5em" }, "target");
-  const hint = el("div", { class: "hint" }, f, "It starts heating early enough by itself and goes back to the program afterwards. An end before the start means the next day. ");
-  if (typeof helpButton === "function") helpButton(hint, "bookings", f);
-  const row = el("div", { class: "actions" }, f);
+  el("div", { class: "hint" }, dlg, "It starts heating early enough by itself and goes back to the program afterwards. An end before the start means the next day.");
+  const err = el("div", { class: "hint", style: "color:var(--critical)" }, dlg);
+  const row = el("div", { class: "actions" }, dlg);
   const save = el("button", { type: "button", class: "primary" }, row);
   save.appendChild(icon("check"));
   save.appendChild(document.createTextNode("Book"));
@@ -615,21 +624,22 @@ function bookingForm(host, r) {
     const until = new Date(`${d.date}T${d.until}`);
     if (until <= from) until.setDate(until.getDate() + 1);
     save.disabled = true;
+    err.textContent = "";
     try {
       await api(`/api/rooms/${encodeURIComponent(r.id)}/bookings`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ from: Math.floor(from / 1000), until: Math.floor(until / 1000), target: d.target }),
       });
       try { localStorage.setItem("hb.bookingTarget", String(d.target)); } catch { /* private mode */ }
-      bookingDraft = null;
+      dlg.close();
       toastMaybe(`${r.name} booked`);
       setTimeout(refreshStatus, 1500);
-      renderRooms();
-    } catch (e) { alertInline(e); save.disabled = false; }
+    } catch (e) { err.textContent = e.message; save.disabled = false; }
   });
   const cancel = el("button", { type: "button" }, row);
   cancel.appendChild(document.createTextNode("Cancel"));
-  cancel.addEventListener("click", () => { bookingDraft = null; renderRooms(); });
+  cancel.addEventListener("click", () => dlg.close());
+  dlg.showModal();
 }
 
 function toastMaybe(msg) { if (typeof toast === "function") toast(msg); else $("updated").textContent = msg; }
