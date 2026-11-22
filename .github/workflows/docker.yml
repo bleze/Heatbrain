@@ -48,3 +48,41 @@ jobs:
             HEATBRAIN_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # When the image build fails, build again outside Docker and turn compiler errors and failed
+  # tests into annotations, which show on the run's page (and in the public checks API) without
+  # digging through the Docker log.
+  diagnose:
+    needs: image
+    if: failure()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      CC: gcc-14
+      CXX: g++-14
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_DISABLE_METRICS: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-14 cmake ninja-build pkg-config libsodium-dev
+      - name: vcpkg
+        run: |
+          baseline=$(sed -n 's/.*"builtin-baseline": *"\([0-9a-f]*\)".*/\1/p' vcpkg.json)
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg "$VCPKG_ROOT"
+          git -C "$VCPKG_ROOT" checkout "$baseline"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+      - name: Build and test
+        run: |
+          set -o pipefail
+          status=0
+          { cmake --preset linux-release && cmake --build --preset linux-release; } 2>&1 | tee build.log || status=1
+          if [ $status -eq 0 ]; then ctest --preset linux-release 2>&1 | tee test.log || status=1; fi
+          # One annotation per problem (first 30), file:line: error: ... and failed test lines.
+          grep -E "error:|undefined reference|CMake Error" build.log 2>/dev/null | head -30 | sed 's/^/::error::/' || true
+          grep -E -B2 -A12 "FAILED:|REQUIRE|CHECK\(|Failed  |\*\*\*Failed|tests failed" test.log 2>/dev/null \
+            | head -60 | tr '\n' ' ' | sed 's/^/::error title=tests::/' || true
+          exit $status
