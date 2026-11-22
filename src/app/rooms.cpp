@@ -74,6 +74,8 @@ RoomConfig parseRoom(const json& rj) {
     r.minTemp = rj.value("minTemp", r.minTemp);
     r.maxTemp = rj.value("maxTemp", r.maxTemp);
     r.frostTemp = rj.value("frostTemp", r.frostTemp);
+    r.warmup = minutes{rj.value("warmupMinutes", 180)};
+    if (r.warmup < minutes{0} || r.warmup > minutes{12 * 60}) throw std::runtime_error("warmupMinutes must be 0..720");
     r.strategy = parseStrategy(rj.value("strategy", json::object()));
 
     if (rj.contains("priceOnly")) {
@@ -227,6 +229,68 @@ void AwayStore::set(const AwayMode& a) const {
                                {"from", a.from.time_since_epoch().count()},
                                {"until", a.until.time_since_epoch().count()}}.dump(2);
     fs::rename(tmp, file_);
+}
+
+std::vector<StoredBooking> BookingStore::load() const {
+    std::vector<StoredBooking> out;
+    if (!fs::exists(file_)) return out;
+    try {
+        const json j = json::parse(std::ifstream(file_));
+        const auto now = floor<seconds>(system_clock::now());
+        for (const auto& b : j) {
+            StoredBooking s{b.at("id").get<std::string>(), b.at("room").get<std::string>(),
+                            Booking{b.at("target").get<double>(), Instant{seconds{b.at("from").get<long long>()}},
+                                    Instant{seconds{b.at("until").get<long long>()}}}};
+            if (s.booking.until > now) out.push_back(std::move(s));
+        }
+    } catch (const std::exception&) {
+        // a broken file must never stop heating control
+    }
+    std::ranges::sort(out, {}, [](const StoredBooking& s) { return s.booking.from; });
+    return out;
+}
+
+std::vector<Booking> BookingStore::forRoom(const RoomConfig& room) const {
+    std::vector<Booking> out;
+    for (auto s : load()) {
+        if (s.room != room.id) continue;
+        s.booking.warmup = room.warmup;
+        out.push_back(s.booking);
+    }
+    return out;
+}
+
+void BookingStore::save(const std::vector<StoredBooking>& all) const {
+    json j = json::array();
+    for (const auto& s : all) {
+        j.push_back({{"id", s.id}, {"room", s.room}, {"target", s.booking.target},
+                     {"from", s.booking.from.time_since_epoch().count()},
+                     {"until", s.booking.until.time_since_epoch().count()}});
+    }
+    fs::path tmp = file_;
+    tmp += ".tmp";
+    std::ofstream(tmp) << j.dump(2);
+    fs::rename(tmp, file_);
+}
+
+std::string BookingStore::add(const std::string& roomId, const Booking& b) const {
+    auto all = load();
+    for (const auto& s : all) {
+        if (s.room == roomId && b.from < s.booking.until && s.booking.from < b.until) {
+            throw std::invalid_argument("It overlaps another booking of this room");
+        }
+    }
+    const std::string id = std::format("b{}", b.from.time_since_epoch().count());
+    all.push_back({id, roomId, b});
+    save(all);
+    return id;
+}
+
+bool BookingStore::remove(const std::string& id) const {
+    auto all = load();
+    const auto n = std::erase_if(all, [&](const StoredBooking& s) { return s.id == id; });
+    save(all);
+    return n > 0;
 }
 
 void AwayStore::clear() const {

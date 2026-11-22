@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <algorithm>
 #include <array>
 
 #include "core/planner.hpp"
@@ -361,4 +362,69 @@ TEST_CASE("Price-only rooms pick whole hours, so the relay does not flap every 1
     }
     CHECK(decide(input(at(3, 30), std::nullopt), shed, p).reason == Reason::CheapHours);
     CHECK(decide(input(at(12, 15), std::nullopt), shed, p).reason == Reason::NotCheapHours);
+}
+
+namespace {
+// The pizzeria: kept above 5 deg all day, booked now and then.
+RoomConfig pizzeria() {
+    RoomConfig r;
+    r.id = "pizzeria";
+    r.name = "Pizzeria";
+    r.thermostat = "pizzeria";
+    r.sensor = "devi:pizzeria";
+    r.minTemp = 5;
+    r.maxTemp = 25;
+    r.program = {{0, ProgramMode::Keep, 5.0}};
+    r.warmup = hours{3};
+    return r;
+}
+}  // namespace
+
+TEST_CASE("A booking warms the room up early, holds the target through the peak, then hands back") {
+    const auto room = pizzeria();
+    const Booking b{22.0, at(16), at(23), room.warmup};  // 16-23, so warming from 13:00
+
+    auto in = input(at(12), 6.0);
+    in.booking = bookingAt({b}, in.now);
+    CHECK_FALSE(in.booking);  // too early: the program (keep above 5) applies
+    CHECK_FALSE(decide(in, room).on);
+
+    in = input(at(13, 30), 8.0);
+    in.booking = bookingAt({b}, in.now);
+    auto d = decide(in, room);
+    CHECK(d.on);
+    CHECK(d.inputs.mode == "booked");
+    CHECK(d.inputs.target == 22.0);
+    CHECK_THAT(d.inputs.targetLabel, ContainsSubstring("warming up"));
+
+    // 18:00 is in the expensive peak; a heat period would coast, the booking does not.
+    in = input(at(18), 21.0);
+    in.booking = bookingAt({b}, in.now);
+    d = decide(in, room);
+    CHECK(d.on);
+    CHECK(d.reason != Reason::PeakAvoid);
+    CHECK_THAT(d.inputs.targetLabel, ContainsSubstring("booked until 23:00"));
+
+    in = input(at(23, 15), 21.0);
+    in.booking = bookingAt({b}, in.now);
+    d = decide(in, room);
+    CHECK_FALSE(d.on);
+    CHECK(d.inputs.mode == "keep");
+}
+
+TEST_CASE("A booking wins over away mode, and the plan shows it") {
+    const auto room = pizzeria();
+    const Booking b{22.0, at(16), at(20), room.warmup};
+    auto in = input(at(17), 15.0);
+    in.away = AwayMode{12.0, at(0), at(23)};
+    in.booking = bookingAt({b}, in.now);
+    CHECK(decide(in, room).inputs.mode == "booked");
+
+    const auto plan = planAhead(room, makePrices(), tz(), at(12), hours{10}, std::nullopt, std::nullopt, {b});
+    const auto booked = std::ranges::find_if(plan, [](const PlanSegment& s) { return s.kind == "booked"; });
+    REQUIRE(booked != plan.end());
+    CHECK(booked->from == at(13));
+    CHECK(booked->to == at(20));
+    CHECK(booked->target == 22.0);
+    CHECK(plan.back().kind == "keep");
 }

@@ -355,6 +355,8 @@ TickResult Controller::tick(Instant now, bool apply) {
         if (auto it = overrides.find(room.id); it != overrides.end()) in.override = it->second;
         in.away = away;
         in.outdoorTemp = outdoor;
+        const auto bookings = bookings_ && !room.priceOnly ? bookings_->forRoom(room) : std::vector<Booking>{};
+        in.booking = bookingAt(bookings, now);
 
         RoomResult rr;
         rr.room = &room;
@@ -373,7 +375,7 @@ TickResult Controller::tick(Instant now, bool apply) {
                                   tz_.toLocal(a.until), tz_.toLocal(a.loadedAt), spansText(a.spans, tz_));
         }
         rr.changed = prev == lastOn_.end() || prev->second != rr.decision.on;
-        rr.plan = planAhead(room, prices_, tz_, now, hours{24}, away, outdoor);
+        rr.plan = planAhead(room, prices_, tz_, now, hours{24}, away, outdoor, bookings);
         if (offline && offline->start < now + hours{24}) {
             // Show the night as it will run: the loaded schedule, or what would be loaded now.
             const auto spans = following ? armed->second.spans

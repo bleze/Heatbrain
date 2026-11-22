@@ -47,6 +47,7 @@ struct ControlEnv {
     std::vector<hb::Plug> plugs;
     std::unique_ptr<hb::Overrides> overrides;
     std::unique_ptr<hb::AwayStore> away;
+    std::unique_ptr<hb::BookingStore> bookings;
     std::unique_ptr<hb::History> history;
     std::unique_ptr<hb::Controller> controller;
     seconds tick{300};
@@ -64,6 +65,7 @@ std::unique_ptr<ControlEnv> loadControlEnv(const Args& args) {
     auto rooms = hb::parseRooms(e->cfg.raw, e->plugs);
     e->overrides = std::make_unique<hb::Overrides>(e->cfg.dataDir / "overrides.json");
     e->away = std::make_unique<hb::AwayStore>(e->cfg.dataDir / "away.json");
+    e->bookings = std::make_unique<hb::BookingStore>(e->cfg.dataDir / "bookings.json");
     e->history = std::make_unique<hb::History>(e->cfg.dataDir / "history.db");
     if (e->cfg.raw.contains("control")) e->tick = seconds{e->cfg.raw["control"].value("tickSeconds", 300)};
     if (e->tick < seconds{60}) throw std::runtime_error("control.tickSeconds must be at least 60");
@@ -71,6 +73,7 @@ std::unique_ptr<ControlEnv> loadControlEnv(const Args& args) {
                                                      e->overrides.get(), e->history.get());
     e->controller->setDataDir(e->cfg.dataDir);
     e->controller->setAwayStore(e->away.get());
+    e->controller->setBookingStore(e->bookings.get());
     e->controller->setOutdoorSensor(e->cfg.raw.value("outdoorSensor", std::string()));
     // Thermostats (DEVIreg Smart): their own sensors are a temperature source too.
     hb::DeviRegistry::instance().setDataDir(e->cfg.dataDir);
@@ -177,6 +180,7 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                            const std::vector<hb::Problem>& active, Instant now) {
     using nlohmann::json;
     const auto overrides = env.overrides->load();
+    const auto bookings = env.bookings->load();
     json rooms = json::array();
     for (const auto& r : result.rooms) {
         json room{{"id", r.room->id},
@@ -195,6 +199,17 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
             plan.push_back(seg);
         }
         room["plan"] = plan;
+        json booked = json::array();
+        for (const auto& b : bookings) {
+            if (b.room != r.room->id) continue;
+            booked.push_back({{"id", b.id}, {"target", b.booking.target},
+                              {"from", b.booking.from.time_since_epoch().count()},
+                              {"until", b.booking.until.time_since_epoch().count()},
+                              {"warmupFrom", (b.booking.from - r.room->warmup).time_since_epoch().count()},
+                              {"active", b.booking.coversAt(now)}});
+        }
+        room["bookings"] = booked;
+        room["maxTemp"] = r.room->maxTemp;
         if (auto it = overrides.find(r.room->id); it != overrides.end() && it->second.until > now) {
             room["override"] = {{"on", it->second.on}, {"until", it->second.until.time_since_epoch().count()}};
         }

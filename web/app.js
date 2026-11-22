@@ -283,6 +283,7 @@ const PLAN = {
   boost: () => "cheap boost",
   keep: (t) => `keep above ${temp(t)}`,
   away: (t) => `away - keep above ${temp(t)}`,
+  booked: (t) => `booked - ${temp(t)}`,
   off: () => "off",
   night: () => "Wi-Fi off - heating by night schedule",
   nightoff: () => "Wi-Fi off - off",
@@ -489,6 +490,7 @@ let renderRooms = function () {
     const hero = el("div", { class: "hero" }, card, r.priceOnly ? price(inp.price) : temp(inp.temperature));
     if (r.priceOnly) el("small", {}, hero, `${state.status.currency}/kWh · no sensor`);
     else if (inp.mode === "away") el("small", {}, hero, `away · keep above ${temp(inp.target)}`);
+    else if (inp.mode === "booked") el("small", {}, hero, `booked · ${temp(inp.target)}`);
     else if (inp.mode === "off") el("small", {}, hero, `off ${inp.targetLabel || ""}`.trim());
     else if (inp.mode === "keep") el("small", {}, hero, `keep above ${temp(inp.target)}`);
     else if (inp.target != null) el("small", {}, hero, `target ${temp(inp.target)}`);
@@ -501,6 +503,8 @@ let renderRooms = function () {
     if (r.override && !["MANUAL_ON", "MANUAL_OFF"].includes(r.reason)) {
       el("div", { class: "override-note" }, card, `Manual ${r.override.on ? "ON" : "OFF"} until ${hm(r.override.until)}`);
     }
+
+    renderBookings(card, r);
 
     // Pinned to the bottom so plan, plugs and buttons line up across cards of different text length
     const foot = el("div", { class: "room-foot" }, card);
@@ -533,8 +537,92 @@ let renderRooms = function () {
     act("Heat 1 h", "flame", "act-heat", (b) => setOverride(r.id, true, 60, b));
     act("Off 2 h", "power", "act-off", (b) => setOverride(r.id, false, 120, b));
     if (r.override) act("Back to auto", "undo", "", (b) => clearOverride(r.id, b));
+    if (!r.priceOnly && bookingDraft?.room !== r.id) act("Book", "calendar", "", () => openBooking(r));
+    if (bookingDraft?.room === r.id) bookingForm(foot, r);
   }
 }
+
+// ---------------------------------------------------------------------------------------
+// Room bookings: "22 deg on Saturday 16:00-23:00". The room warms up early by itself and
+// follows its program again afterwards. The draft survives the 30 s re-render.
+let bookingDraft = null;
+const pad2 = (n) => String(n).padStart(2, "0");
+const isoDate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+function renderBookings(card, r) {
+  for (const b of r.bookings || []) {
+    const row = el("div", { class: `booking${b.active ? " active" : ""}` }, card);
+    row.appendChild(icon("calendar"));
+    const now = Date.now() / 1000;
+    const text = b.active && now >= b.from ? `Booked until ${hm(b.until)} · ${temp(b.target)}`
+      : b.active ? `Warming up for ${hm(b.from)}–${hm(b.until)} · ${temp(b.target)}`
+      : `Booked ${dayHm(b.from)}–${hm(b.until)} · ${temp(b.target)} (warms up from ${hm(b.warmupFrom)})`;
+    el("span", {}, row, text);
+    const x = el("button", { type: "button", class: "ghost", title: b.active ? "End the booking now" : "Cancel the booking", "aria-label": "Cancel booking" }, row);
+    x.appendChild(icon(b.active ? "undo" : "trash"));
+    x.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      x.disabled = true;
+      try {
+        await api(`/api/bookings/${encodeURIComponent(b.id)}`, { method: "DELETE" });
+        toastMaybe(b.active ? "Booking ended - back to the program" : "Booking cancelled");
+        setTimeout(refreshStatus, 1500);
+      } catch (err) { alertInline(err); x.disabled = false; }
+    });
+  }
+}
+
+function openBooking(r) {
+  let target = 22;
+  try { target = Number(localStorage.getItem("hb.bookingTarget")) || 22; } catch { /* private mode */ }
+  bookingDraft = { room: r.id, date: isoDate(new Date()), from: "16:00", until: "23:00", target: Math.min(target, r.maxTemp - 0.5) };
+  renderRooms();
+}
+
+function bookingForm(host, r) {
+  const d = bookingDraft;
+  const f = el("div", { class: "booking-form" }, host);
+  f.addEventListener("click", (e) => e.stopPropagation());
+  f.addEventListener("keydown", (e) => e.stopPropagation());
+  const field = (label, attrs, key) => {
+    const l = el("label", {}, f);
+    el("span", { class: "muted" }, l, label);
+    const i = el("input", { ...attrs, value: d[key] }, l);
+    i.addEventListener("input", () => { d[key] = attrs.type === "number" ? Number(i.value) : i.value; });
+    return i;
+  };
+  field("Day", { type: "date" }, "date");
+  field("From", { type: "time", step: 900 }, "from");
+  field("Until", { type: "time", step: 900 }, "until");
+  field("Temperature", { type: "number", step: 0.5, min: 5, max: r.maxTemp - 0.5, style: "width:5.5em" }, "target");
+  el("div", { class: "hint" }, f, "It starts heating early enough by itself and goes back to the program afterwards. An end before the start means the next day.");
+  const row = el("div", { class: "actions" }, f);
+  const save = el("button", { type: "button", class: "primary" }, row);
+  save.appendChild(icon("check"));
+  save.appendChild(document.createTextNode("Book"));
+  save.addEventListener("click", async () => {
+    const from = new Date(`${d.date}T${d.from}`);
+    const until = new Date(`${d.date}T${d.until}`);
+    if (until <= from) until.setDate(until.getDate() + 1);
+    save.disabled = true;
+    try {
+      await api(`/api/rooms/${encodeURIComponent(r.id)}/bookings`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: Math.floor(from / 1000), until: Math.floor(until / 1000), target: d.target }),
+      });
+      try { localStorage.setItem("hb.bookingTarget", String(d.target)); } catch { /* private mode */ }
+      bookingDraft = null;
+      toastMaybe(`${r.name} booked`);
+      setTimeout(refreshStatus, 1500);
+      renderRooms();
+    } catch (e) { alertInline(e); save.disabled = false; }
+  });
+  const cancel = el("button", { type: "button" }, row);
+  cancel.appendChild(document.createTextNode("Cancel"));
+  cancel.addEventListener("click", () => { bookingDraft = null; renderRooms(); });
+}
+
+function toastMaybe(msg) { if (typeof toast === "function") toast(msg); else $("updated").textContent = msg; }
 
 // Room cards, then the outdoor card (kept as a separate step so it is added exactly once).
 const renderRoomCards = renderRooms;
@@ -727,7 +815,7 @@ function renderDetail() {
   // Planned heating ahead (lighter): what the planner intends for the coming hours.
   const plan = (state.status?.rooms || []).find((x) => x.id === room.id)?.plan || [];
   for (const s of plan) {
-    const cat = { heat: "comfort", keep: "comfort", away: "safety", preheat: "price", boost: "price", night: "price" }[s.kind];
+    const cat = { heat: "comfort", keep: "comfort", booked: "comfort", away: "safety", preheat: "price", boost: "price", night: "price" }[s.kind];
     if (!cat) continue;  // off / coast: nothing planned
     const a = Math.max(s.from, h.to), b = Math.min(s.to, t1);
     if (b <= a) continue;

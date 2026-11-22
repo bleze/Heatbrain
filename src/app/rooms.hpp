@@ -44,6 +44,25 @@ private:
     std::filesystem::path file_;
 };
 
+// Room bookings, stored in <dataDir>/bookings.json (set from the web UI). Ended ones drop out.
+struct StoredBooking {
+    std::string id;
+    std::string room;
+    Booking booking;  // warmup comes from the room's config (forRoom)
+};
+class BookingStore {
+public:
+    explicit BookingStore(std::filesystem::path file) : file_(std::move(file)) {}
+    std::vector<StoredBooking> load() const;               // planned or under way, by start
+    std::vector<Booking> forRoom(const RoomConfig& room) const;
+    std::string add(const std::string& roomId, const Booking& b) const;  // throws invalid_argument on overlap
+    bool remove(const std::string& id) const;
+
+private:
+    void save(const std::vector<StoredBooking>& all) const;
+    std::filesystem::path file_;
+};
+
 // Manual overrides, stored in <dataDir>/overrides.json so the CLI can set them while
 // `heatbrain run` is running (it re-reads the file every tick).
 class Overrides {

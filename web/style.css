@@ -194,6 +194,14 @@ a { color: var(--accent); }
 .chip.error { border-color: var(--critical); color: var(--critical); }
 .actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
 .override-note { margin-top: 8px; font-size: 13px; font-weight: 600; }
+.booking { margin-top: 8px; display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.booking.active { font-weight: 600; }
+.booking > span { flex: 1; min-width: 0; }
+.booking button { padding: 2px 6px; }
+.booking-form { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+.booking-form label { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.booking-form .hint, .booking-form .actions { flex-basis: 100%; }
+.booking-form .actions { margin-top: 0; }
 .act-heat .icon { color: var(--flame-1); }
 .act-off .icon { color: var(--cat-comfort); }
 .empty-state { text-align: center; padding: 36px 16px; color: var(--ink-2); }
@@ -385,6 +393,7 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 .planbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--grid); gap: 1px; }
 .planbar > div { min-width: 2px; }
 .planbar .pl-heat { background: var(--cat-comfort); opacity: 0.55; }
+.planbar .pl-booked { background: var(--cat-comfort); opacity: 0.9; }
 .planbar .pl-keep { background: var(--cat-comfort); opacity: 0.28; }
 .planbar .pl-preheat, .planbar .pl-boost { background: var(--cat-price); opacity: 0.8; }
 .planbar .pl-coast { background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--grid) 4px 8px); }

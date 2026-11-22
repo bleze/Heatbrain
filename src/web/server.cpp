@@ -271,6 +271,43 @@ void WebServer::routes() {
         sendJson(res, json{{"room", id}, {"cleared", true}});
     });
 
+    // Room bookings: {"from": unix seconds, "until": unix seconds, "target": 22}. The room heats to the
+    // target from its warm-up time before "from" until "until", then follows its program again.
+    s.Post(R"(/api/rooms/([\w-]+)/bookings)", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string id = req.matches[1];
+        const auto all = rooms();
+        const auto room = std::ranges::find_if(all, [&](const RoomConfig& r) { return r.id == id; });
+        if (room == all.end()) return sendError(res, 404, "unknown room");
+        if (room->priceOnly) return sendError(res, 400, "A room without a temperature sensor cannot be booked");
+        const json body = parseBody(req);
+        const auto now = floor<seconds>(system_clock::now());
+        const Instant from{seconds{body.value("from", 0LL)}};
+        const Instant until{seconds{body.value("until", 0LL)}};
+        const double target = body.value("target", 22.0);
+        if (until <= now || from > now + days{90}) return sendError(res, 400, "The booking must end in the future and start within 90 days");
+        if (from >= until) return sendError(res, 400, "The start must be before the end");
+        if (until - from > days{14}) return sendError(res, 400, "A booking can be at most 14 days (use away mode for longer)");
+        if (target < room->frostTemp || target >= room->maxTemp) {
+            return sendError(res, 400, std::format("The temperature must be {:.0f}..{:.1f} °C (below the room's maximum; raise it "
+                                                   "in Settings → Rooms if needed)", room->frostTemp, room->maxTemp - 0.5));
+        }
+        try {
+            const std::string bid = BookingStore(ctx_.dataDir / "bookings.json").add(id, Booking{target, from, until});
+            log::info("Web: {} booked {} - {} at {:.1f} °C", id, formatIsoUtc(from), formatIsoUtc(until), target);
+            if (ctx_.onOverride) ctx_.onOverride();
+            sendJson(res, json{{"id", bid}, {"room", id}, {"from", epoch(from)}, {"until", epoch(until)}, {"target", target}});
+        } catch (const std::invalid_argument& e) {
+            sendError(res, 409, e.what());
+        }
+    });
+    s.Delete(R"(/api/bookings/([\w-]+))", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string id = req.matches[1];
+        if (!BookingStore(ctx_.dataDir / "bookings.json").remove(id)) return sendError(res, 404, "unknown booking");
+        log::info("Web: booking {} removed", id);
+        if (ctx_.onOverride) ctx_.onOverride();
+        sendJson(res, json{{"removed", id}});
+    });
+
     // Away/holiday period: {"from": unix seconds (default now), "until": unix seconds, "keepAbove": 12}
     s.Post("/api/away", [this](const httplib::Request& req, httplib::Response& res) {
         const json body = parseBody(req);

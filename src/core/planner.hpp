@@ -64,6 +64,22 @@ struct AwayMode {
     bool activeAt(Instant t) const { return t >= from && t < until; }
 };
 
+// A room booked for a while ("the pizzeria at 22 deg from Saturday 16:00 until 23:00"): from
+// `warmup` before `from` until `until` the room heats to `target` like a heat period, but never
+// coasts in expensive hours - someone is (about to be) there. Wins over the program and away.
+struct Booking {
+    double target = 22.0;
+    Instant from;
+    Instant until;
+    std::chrono::minutes warmup{180};
+    bool activeAt(Instant t) const { return t >= from && t < until; }
+    bool warmingAt(Instant t) const { return t >= from - warmup && t < from; }
+    bool coversAt(Instant t) const { return warmingAt(t) || activeAt(t); }
+};
+
+// The booking in effect at `t` (warming up or under way), if any.
+std::optional<Booking> bookingAt(const std::vector<Booking>& bookings, Instant t);
+
 struct PlannerInput {
     Instant now;
     std::optional<double> temperature;
@@ -71,6 +87,7 @@ struct PlannerInput {
     bool currentlyOn = false;  // the planner's previous decision (hysteresis)
     std::optional<ManualOverride> override;
     std::optional<AwayMode> away;  // whole-house away/holiday mode
+    std::optional<Booking> booking;  // this room booked (in effect now)
     std::optional<double> outdoorTemp;  // °C, recent reading of an outdoor sensor
 };
 
@@ -106,7 +123,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 // What a room is set to do over the coming hours, for display. Each slot is decided by the
 // real planner assuming the room sits at its target, which yields the intent per period:
 //   "heat" (to target, as needed), "preheat", "coast" (expensive: lets it cool a little),
-//   "boost" (cheapest hours), "keep" (keep above), "away", "off".
+//   "boost" (cheapest hours), "keep" (keep above), "away", "booked" (incl. warm-up), "off".
 struct PlanSegment {
     Instant from;
     Instant to;
@@ -115,6 +132,6 @@ struct PlanSegment {
 };
 std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz, Instant now,
                                    std::chrono::hours horizon, std::optional<AwayMode> away,
-                                   std::optional<double> outdoorTemp);
+                                   std::optional<double> outdoorTemp, const std::vector<Booking>& bookings = {});
 
 }  // namespace hb

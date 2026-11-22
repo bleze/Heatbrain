@@ -212,8 +212,18 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         inputs.targetLabel = "away until " + formatLocalDate(tz.toLocal(in.away->until)).substr(5) + " " +
                              formatLocalHm(tz.toLocal(in.away->until));
     }
+    // A booking wins over both: heat to its target, starting `warmup` early.
+    const bool booked = in.booking && in.booking->coversAt(in.now);
+    if (booked) {
+        mode = ProgramMode::Heat;
+        target = in.booking->target;
+        const auto hm = [&](Instant i) { return formatLocalHm(tz.toLocal(i)); };
+        inputs.targetLabel = in.booking->warmingAt(in.now)
+                                 ? std::format("warming up for the booking {}-{}", hm(in.booking->from), hm(in.booking->until))
+                                 : std::format("booked until {}", hm(in.booking->until));
+    }
     if (mode != ProgramMode::Off) inputs.target = target;
-    inputs.mode = away ? "away" : std::string(modeName(mode));
+    inputs.mode = booked ? "booked" : away ? "away" : std::string(modeName(mode));
 
     const bool fresh = in.temperature && in.measuredAt && in.now - *in.measuredAt <= s.staleAfter;
     const double t = in.temperature.value_or(0.0);
@@ -278,8 +288,8 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                     inputs);
     }
 
-    // 7. Expensive now: coast, unless it gets too cold.
-    if (outlook.expensive) {
+    // 7. Expensive now: coast, unless it gets too cold (not when booked: someone is there).
+    if (outlook.expensive && !booked) {
         const double floor = target - s.peakAllowedDrop;
         if (t < floor || (in.currentlyOn && t < floor + h)) {
             return make(true, Reason::BelowComfortDuringPeak,
@@ -331,9 +341,16 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 
 namespace hb {
 
+std::optional<Booking> bookingAt(const std::vector<Booking>& bookings, Instant t) {
+    for (const auto& b : bookings) {
+        if (b.coversAt(t)) return b;
+    }
+    return std::nullopt;
+}
+
 std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz, Instant now,
                                    std::chrono::hours horizon, std::optional<AwayMode> away,
-                                   std::optional<double> outdoorTemp) {
+                                   std::optional<double> outdoorTemp, const std::vector<Booking>& bookings) {
     std::vector<PlanSegment> out;
     for (Instant t = floorToSlot(now); t < now + horizon; t += kSlotLength) {
         // The target in effect at t, so the planner sees a room that is exactly at target.
@@ -344,12 +361,15 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
         const auto period = periodAt(room, minuteOfDay(tz.toLocal(t)));
         double assumed = period && period->point.mode != ProgramMode::Off ? period->point.target : room.minTemp + 1;
         if (away && away->activeAt(t)) assumed = away->keepAbove + 1;
+        in.booking = bookingAt(bookings, t);
+        if (in.booking) assumed = in.booking->target;
         in.temperature = std::max(assumed, room.minTemp);
         in.measuredAt = t;
         const Decision d = decideRoom(room, in, prices, tz);
 
         std::string kind;
-        switch (d.reason) {
+        if (d.inputs.mode == "booked" && d.reason != Reason::AboveMax) kind = "booked";
+        else switch (d.reason) {
             case Reason::PreheatBeforePeak: kind = "preheat"; break;
             case Reason::PeakAvoid:
             case Reason::BelowComfortDuringPeak: kind = "coast"; break;

@@ -55,6 +55,7 @@ public:
         loadReadings();
     }
     void setAwayStore(const AwayStore* away) { away_ = away; }
+    void setBookingStore(const BookingStore* bookings) { bookings_ = bookings; }
     void setOutdoorSensor(std::string ref) { outdoorSensor_ = std::move(ref); }
     void setThermostats(std::vector<ThermostatConfig> t) { thermostats_ = std::move(t); }
     // The outdoor reading used in the last tick, if any.
@@ -111,6 +112,7 @@ private:
     std::vector<RoomConfig> rooms_;
     const Overrides* overrides_;
     const AwayStore* away_ = nullptr;
+    const BookingStore* bookings_ = nullptr;
     std::string outdoorSensor_;  // "<source>:<id or name>"; empty = first outdoor sensor
     std::optional<OutdoorUsed> outdoorUsed_;
     History* history_;
