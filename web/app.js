@@ -753,8 +753,9 @@ function renderLegend(room, segs, wifi) {
   const host = $("legend");
   host.replaceChildren();
   if (wifi) {
+    const o = el("span", {}, host); el("i", { class: "key-wifi-on" }, o); o.appendChild(document.createTextNode("Wi-Fi on"));
+    const s = el("span", {}, host); el("i", { class: "key-wifi-off" }, s); s.appendChild(document.createTextNode("Wi-Fi off"));
     const p = el("span", {}, host); el("i", { class: "key-wifi-planned" }, p); p.appendChild(document.createTextNode("Wi-Fi off: planned"));
-    const s = el("span", {}, host); el("i", { class: "key-wifi-seen" }, s); s.appendChild(document.createTextNode("Wi-Fi off: seen"));
   }
   if (!room.priceOnly) {
     const a = el("span", {}, host); el("i", { class: "key-line" }, a); a.appendChild(document.createTextNode("Temperature"));
@@ -855,24 +856,30 @@ function renderDetail() {
     if (!temps.length) el("text", { class: "empty", x: W / 2, y: tempTop + tempH / 2, "text-anchor": "middle" }, svg, "No temperatures recorded yet");
   }
 
-  // Wi-Fi lane: planned periods as a hatched band, what the sensors saw as a solid bar on top.
+  // Wi-Fi lane, read like the rest of the UI: on = a lit bar, off = the dark stripes "off" has in the
+  // program; a planned off period is a dashed outline, so plan and reality can be compared.
   if (wifi) {
-    const pat = el("pattern", { id: "wifi-hatch", width: 4, height: 4, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" },
+    // Dark stripes like .tl-off. CSS variables only work in style, not in SVG presentation attributes.
+    const pat = el("pattern", { id: "wifi-off", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" },
                    el("defs", {}, svg));
-    // CSS variables only work in style, not in SVG presentation attributes.
-    el("line", { x1: 0, y1: 0, x2: 0, y2: 4, style: "stroke: var(--muted); stroke-width: 1.5" }, pat);
-    el("text", { class: "panel-label", x: m.l, y: wifiTop - 4 }, svg, "Wi-Fi off");
+    el("rect", { width: 6, height: 6, style: "fill: var(--surface-2)" }, pat);
+    el("rect", { width: 3, height: 6, style: "fill: var(--grid)" }, pat);
+    el("text", { class: "panel-label", x: m.l, y: wifiTop - 4 }, svg, "Wi-Fi");
     el("rect", { x: m.l, y: wifiTop, width: W - m.l - m.r, height: wifiH, fill: "var(--grid)", rx: 3, opacity: 0.35 }, svg);
-    const band = (a, b, attrs) => {
-      const x0 = x(Math.max(a, t0)), x1 = x(Math.min(b, t1));
-      if (x1 > x0) el("rect", { x: x0, y: wifiTop, width: Math.max(2, x1 - x0), height: wifiH, rx: 3, ...attrs }, svg);
-    };
-    // The pattern fill as an attribute: url(#id) in the stylesheet would resolve against style.css.
-    for (const [a, b] of wifi.planned) band(a, b, { class: "wifi-planned", fill: "url(#wifi-hatch)" });
-    // Seen: a solid, slimmer bar inside the lane, so it reads the same over a planned band or without one.
-    for (const [a, b] of wifi.seen) {
-      const x0 = x(Math.max(a, t0)), x1 = x(Math.min(b, t1));
-      if (x1 > x0) el("rect", { class: "wifi-seen", x: x0, y: wifiTop + 2, width: Math.max(2, x1 - x0), height: wifiH - 4, rx: 2 }, svg);
+    const span = (a, b) => [x(Math.max(a, t0)), x(Math.min(b, t1))];
+    // On: from the first reading in the chart until now, minus what the sensors saw as off.
+    const [o0, o1] = span(temps.length ? Math.max(t0, temps[0][0]) : t0, h.to);
+    if (o1 > o0) el("rect", { class: "wifi-on", x: o0, y: wifiTop, width: o1 - o0, height: wifiH, rx: 3 }, svg);
+    // Off: what the sensors saw, and planned periods still ahead. The pattern goes in as an attribute:
+    // url(#id) in the stylesheet would resolve against style.css.
+    const off = [...wifi.seen.map(([a, b]) => [a, b]), ...wifi.planned.filter(([, b]) => b > h.to).map(([a, b]) => [Math.max(a, h.to), b])];
+    for (const [a, b] of off) {
+      const [x0, x1] = span(a, b);
+      if (x1 > x0) el("rect", { x: x0, y: wifiTop, width: Math.max(2, x1 - x0), height: wifiH, fill: "url(#wifi-off)" }, svg);
+    }
+    for (const [a, b] of wifi.planned) {
+      const [x0, x1] = span(a, b);
+      if (x1 > x0) el("rect", { class: "wifi-planned", x: x0 + 0.5, y: wifiTop + 0.5, width: Math.max(2, x1 - x0 - 1), height: wifiH - 1, rx: 3 }, svg);
     }
   }
 

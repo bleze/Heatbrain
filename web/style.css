@@ -468,13 +468,14 @@ a.chip { text-decoration: none; }
 .legend .key-dash { width: 16px; border-top: 2px dashed var(--target); display: inline-block; }
 .legend .key-estimate { width: 16px; border-top: 2px dotted var(--ink-2); display: inline-block; }
 /* Wi-Fi off lane: planned = hatched outline band, seen = solid neutral bar (status-neutral, not a series colour) */
-.chart .wifi-planned { stroke: var(--axis); stroke-width: 1; }
-.chart .wifi-seen { fill: var(--ink-2); }
-/* The legend keys draw what the lane draws: a hatched outlined band (the hatch in --muted, like the
-   SVG pattern) and a solid, slimmer bar. */
-.legend .key-wifi-planned { width: 16px; height: 10px; box-sizing: border-box; border: 1px solid var(--axis); border-radius: 3px; display: inline-block;
-  background: repeating-linear-gradient(-45deg, var(--muted) 0 1.5px, transparent 1.5px 4px); }
-.legend .key-wifi-seen { width: 16px; height: 6px; border-radius: 2px; display: inline-block; background: var(--ink-2); }
+.chart .wifi-on { fill: var(--ink-2); opacity: 0.45; }
+.chart .wifi-planned { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 2; }
+/* The legend keys draw what the lane draws: a lit bar, the dark "off" stripes (as in the program
+   timeline), a dashed outline. */
+.legend .key-wifi-on { width: 16px; height: 10px; border-radius: 3px; display: inline-block; background: var(--ink-2); opacity: 0.45; }
+.legend .key-wifi-off { width: 16px; height: 10px; border-radius: 3px; display: inline-block;
+  background: repeating-linear-gradient(135deg, var(--surface-2) 0 3px, var(--grid) 3px 6px); }
+.legend .key-wifi-planned { width: 16px; height: 10px; box-sizing: border-box; border: 1px dashed var(--muted); border-radius: 3px; display: inline-block; }
 .chart { position: relative; width: 100%; margin-top: 8px; transition: opacity 0.2s; }
 .chart.loading { opacity: 0.5; }
 .chart svg { display: block; width: 100%; overflow: visible; }
