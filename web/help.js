@@ -6,7 +6,7 @@ const HELP = {
     title: "Getting started",
     list: [
       "Settings → Heaters: scan your network, add your Tasmota plugs and enter each radiator's power (W).",
-      "Settings → Sensors: connect Netatmo so rooms get their temperature.",
+      "Settings → Sensors: connect Netatmo, VELUX ACTIVE or a Shelly H&T so rooms get their temperature.",
       "Settings → Rooms: add a room, pick its plug(s) and sensor, and set its daily program.",
       "Leave plugs in dry-run for a day or two and watch what heatbrain would do on the dashboard.",
       "Happy? Install the fail-safe on a plug, test it, then switch the plug to live - straight away: with the fail-safe installed, a dry-run plug switches itself off and runs limp mode, because heatbrain does not refresh it.",

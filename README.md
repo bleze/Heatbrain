@@ -30,6 +30,11 @@ a NAS or on a PC.
   just above a floor. For a network that is switched off at night, a schedule is loaded onto
   each plug beforehand. A room whose temperature falls fast (a window open) pauses its heating
   for a while.
+- **Watches the rooms themselves.** How well each room keeps its heat (heat loss in W/°C, per
+  m² floor and per month in kroner), with a note when a room loses clearly more than the others
+  or suddenly faster than its own normal. CO₂ from the room sensors, with a notification when the
+  air gets poor (a high night comes as one message in the morning). Sensor batteries are warned
+  about when they are projected to run out, not at a fixed level.
 - **Safe by design.** Every plug carries its own dead-man switch and a limp-mode watchdog,
   so a crash or a lost network never means "heat forever" (see [Fail-safe](#fail-safe)).
 - **Knows what it costs.** Cost per room per day, the average price paid against the market
@@ -59,9 +64,10 @@ a NAS or on a PC.
 
 | What | Supported | Notes |
 |---|---|---|
-| Heaters on smart plugs | Tasmota (e.g. Sonoff Basic R2) | heatbrain installs a fail-safe on each plug and tests it per firmware version |
+| Heaters on smart plugs | Tasmota (e.g. Sonoff Basic R2, Basic R4) | heatbrain installs a fail-safe on each plug and tests it per firmware version; upgrades pick the image for the plug's chip (ESP8266, ESP32-C3, ...) |
 | Floor heating | Danfoss DEVIreg Smart | paired from the DEVI app with a one-time code; heatbrain sets the setpoint and reads the floor temperature and real heating time |
-| Room temperatures | Netatmo Weather Station (indoor modules), DEVIreg Smart's own sensors | |
+| Room temperatures | Netatmo Weather Station (indoor modules), VELUX ACTIVE (wall switch / climate sensors), Shelly H&T Gen3, DEVIreg Smart's own sensors | VELUX: read from the VELUX app's cloud (unofficial; log in once, only the token is kept). Shelly: battery sensors send their readings to heatbrain (no cloud) |
+| CO₂ | Netatmo indoor modules, VELUX ACTIVE | kept with the readings; notification above a chosen level |
 | Outdoor temperature | Netatmo outdoor module, plus the Open-Meteo forecast | |
 | Prices | Energi Data Service (DK1/DK2 spot, Danish grid tariffs) | any country via time-of-day `schedule` components |
 | Meter data | Eloverblik (Danish smart meters) | hourly household consumption, about a day behind |
@@ -89,10 +95,10 @@ router port to it. Full steps for a Synology NAS are under [Deployment](#deploym
 
 ```
 src/core/       Pure logic, no IO: time/DST, tariffs, price outlook, planner, thermal model,
-                forecast, open-window detection, alerts, costs
+                forecast, open-window detection, alerts, costs, insulation, air quality, batteries
 src/net/        HTTP client + file cache (public APIs are rate limited)
 src/providers/  Prices (Energi Data Service), meter data (Eloverblik), weather (Open-Meteo)
-src/sensors/    Temperature sources (Netatmo)
+src/sensors/    Temperature sources (Netatmo, VELUX ACTIVE, pushed readings from Shelly H&T)
 src/plugs/      Tasmota plugs with the on-plug fail-safe; a simulated plug for development
 src/devices/    DEVIreg Smart thermostats (SecureDeviceGrid via OpenSDG)
 src/storage/    SQLite history (decisions, temperatures, prices, meter readings)
@@ -269,7 +275,10 @@ power plants, imports and CO2 per hour, from Energinet's open data) - each can b
 in Settings → System; then heating cost and meter data. The outdoor card opens the same chart for the outdoor temperature. Overrides
 from the UI are applied immediately. **Settings** edits everything in the config (rooms and
 programs, plugs incl. fail-safe and firmware upgrades, sensors, prices, notifications,
-system) with validation and backups; **Help** explains every feature, and "?" buttons show
+system) with validation and backups. It is arranged as Rooms, Heaters, Sensors (the sensor
+connections and a card per module with its readings, battery and charts from 2 days to a year),
+Climate (outdoor sensor, weather forecast, open windows, air quality), Prices, Notifications
+and System; **Help** explains every feature, and "?" buttons show
 the same text next to the settings. Light/dark/system theme. The frontend is plain HTML/JS in `web/` (no build step); in dev builds it is served
 straight from the source folder, so edits only need a browser refresh.
 
@@ -298,7 +307,9 @@ against the month before); a heads-up at 14:00 when tomorrow is at least 20 % mo
 cheaper than the past week; and a message when a new Tasmota release is out for your plugs.
 
 Alerts: plug unreachable, plug state differs from commanded state, Netatmo re-login
-required, Netatmo module offline / low battery, stale temperature (room in limp mode),
+required, Netatmo module offline, a sensor battery that will run out within about three weeks
+(or before a planned away period ends), poor air (CO₂ above the chosen level for 20 minutes),
+a room losing heat much faster than usual, stale temperature (room in limp mode),
 tomorrow's prices missing by ~15:00, room below minimum despite heating (open window /
 radiator off), window open (heating paused), thermostat unreachable, a live plug whose
 fail-safe is not verified, heatbrain restarted.
