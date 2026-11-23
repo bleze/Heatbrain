@@ -91,6 +91,15 @@ const HELP = {
       "The outdoor module scales pre-heating: when it is cold outside rooms cool faster during off periods, so heatbrain stores a little more heat beforehand.",
     ],
   },
+  velux: {
+    title: "VELUX ACTIVE room climate",
+    body: [
+      "VELUX ACTIVE measures temperature, humidity and CO₂ in its wall switch (and in separate climate sensors, if you have them), one reading per VELUX room. heatbrain reads them from the VELUX cloud, the same place the VELUX app gets them from, at each control step. It only reads: it never opens or closes windows.",
+      "Connect with your VELUX ACTIVE app login. The password is used once to log in and is not stored; heatbrain keeps only the login token. If VELUX later rejects it, heatbrain warns you and you log in again here.",
+      "This uses the VELUX app's own connection, not an official public interface, so a VELUX update could break it. The VELUX gateway also needs internet: during Wi-Fi-off periods the readings pause, just as for a Netatmo module.",
+      "Mount the wall switch away from heaters, direct sun and electronics - it is a room thermometer like any other.",
+    ],
+  },
   insulation: {
     title: "How well a room keeps its heat",
     body: [
@@ -282,7 +291,7 @@ function renderManual(host) {
     "heatbrain switches your radiators' plugs on and off from the price of electricity, the temperature in each room and the program you set. Everything here is also available as '?' next to the settings.");
   const toc = el("nav", { class: "toc" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "thermostats", "sensors", "forecast", "openWindow", "insulation", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
+                 "thermostats", "sensors", "velux", "forecast", "openWindow", "insulation", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, card);
     el("h3", {}, sec, HELP[key].title);

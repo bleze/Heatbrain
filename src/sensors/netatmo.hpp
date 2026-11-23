@@ -20,9 +20,9 @@ namespace hb::netatmo {
 inline constexpr const char* kApiBase = "https://api.netatmo.com";
 
 // The refresh token was rejected: a human has to generate a new one.
-class AuthError : public std::runtime_error {
+class AuthError : public SourceAuthError {
 public:
-    using std::runtime_error::runtime_error;
+    using SourceAuthError::SourceAuthError;
 };
 
 class Auth {

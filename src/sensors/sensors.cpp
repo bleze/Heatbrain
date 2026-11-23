@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "sensors/netatmo.hpp"
+#include "sensors/velux.hpp"
 
 namespace hb {
 
@@ -24,9 +25,13 @@ std::vector<std::unique_ptr<TemperatureSource>> loadTemperatureSources(
             netatmo::Auth auth(http, sj.value("clientId", ""), sj.value("clientSecret", ""),
                                sj.value("refreshToken", ""), dataDir / (id + "-tokens.json"), now);
             sources.push_back(std::make_unique<netatmo::Source>(id, http, std::move(auth)));
+        } else if (type == "velux") {
+            // Logged in from Settings -> Sensors: the tokens are in <id>-tokens.json, never in the config.
+            velux::Auth auth(http, dataDir / (id + "-tokens.json"), now);
+            sources.push_back(std::make_unique<velux::Source>(id, http, std::move(auth), now));
         } else {
             throw std::runtime_error("Temperature source " + id + ": unknown type '" + type +
-                                     "' (known: netatmo)");
+                                     "' (known: netatmo, velux)");
         }
     }
     return sources;

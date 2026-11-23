@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,12 @@ struct SensorReading {
     bool reachable = true;
     std::optional<int> batteryPercent;
     std::optional<std::pair<double, double>> location;  // latitude, longitude of the station, if known
+};
+
+// The source's login was rejected or is missing: a human has to set it up again.
+class SourceAuthError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
 };
 
 // Something that reports room temperatures. Selected by "type" in temperatureSources.

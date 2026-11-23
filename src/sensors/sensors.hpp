@@ -13,7 +13,7 @@
 namespace hb {
 
 // Builds sources from the config's "temperatureSources" array. Token/state files are
-// kept in dataDir. Types: "netatmo".
+// kept in dataDir. Types: "netatmo", "velux".
 std::vector<std::unique_ptr<TemperatureSource>> loadTemperatureSources(
     const nlohmann::json& cfg, HttpClient& http, const std::filesystem::path& dataDir,
     std::function<Instant()> now);

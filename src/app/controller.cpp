@@ -226,7 +226,7 @@ void Controller::readSensors(TickResult& result) {
                 }
                 readings_[key] = std::move(r);
             }
-        } catch (const netatmo::AuthError& e) {
+        } catch (const SourceAuthError& e) {
             add(result, "source:" + src->id() + ":auth", Severity::Critical, e.what());
         } catch (const std::exception& e) {
             // Keep the previous readings: they age, and the planner stops trusting them.

@@ -27,6 +27,7 @@
 #include "app/meter_sync.hpp"
 #include "app/thermostats.hpp"
 #include "core/offline.hpp"
+#include "sensors/velux.hpp"
 
 namespace hb {
 
@@ -544,6 +545,39 @@ void WebServer::routes() {
             log::warn("DEVI pairing failed: {}", e.what());
             sendError(res, 502, e.what());
         }
+    });
+
+    // VELUX ACTIVE: log in once with the account (the password is used for this request only, never
+    // stored), then list the rooms with climate readings so the page can show what was found.
+    s.Post("/api/velux/connect", [this](const httplib::Request& req, httplib::Response& res) {
+        const json body = parseBody(req);
+        const auto tokenFile = ctx_.dataDir / "velux-tokens.json";
+        try {
+            HttplibClient internet;
+            const auto clock = [] { return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()); };
+            velux::login(internet, body.value("email", ""), body.value("password", ""), tokenFile, clock());
+            velux::Source src("velux", internet, velux::Auth(internet, tokenFile, clock), clock);
+            json rooms = json::array();
+            for (const auto& r : src.read()) {
+                json room{{"name", r.name}, {"temperature", *r.temperature}};
+                if (r.humidity) room["humidity"] = *r.humidity;
+                if (r.co2) room["co2"] = *r.co2;
+                rooms.push_back(room);
+            }
+            sendJson(res, json{{"connected", true}, {"rooms", rooms}});
+        } catch (const std::invalid_argument& e) {
+            sendError(res, 400, e.what());
+        } catch (const SourceAuthError& e) {
+            sendError(res, 401, e.what());
+        } catch (const std::exception& e) {
+            log::warn("VELUX login failed: {}", e.what());
+            sendError(res, 502, e.what());
+        }
+    });
+    s.Post("/api/velux/disconnect", [this](const httplib::Request&, httplib::Response& res) {
+        std::error_code ec;
+        std::filesystem::remove(ctx_.dataDir / "velux-tokens.json", ec);
+        sendJson(res, json{{"connected", false}});
     });
 
     s.Post("/api/config/validate", [this](const httplib::Request& req, httplib::Response& res) {

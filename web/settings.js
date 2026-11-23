@@ -954,6 +954,52 @@
       el("li", {}, ol, "Save. Your modules appear below within a minute.");
     }
 
+    // VELUX ACTIVE: the room climate its wall switch / sensors measure (read only).
+    const vx = el("section", { class: "card" }, body);
+    sectionHead(vx, "VELUX ACTIVE", "thermo", "warm", "Temperature, humidity and CO₂ from the VELUX wall switch or climate sensors, per VELUX room.", "velux");
+    const vIdx = sources.findIndex((s) => s.type === "velux");
+    const vRead = (state.status?.sensors || []).filter((s) => s.key.startsWith("velux:"));
+    if (vIdx >= 0) {
+      const chips = el("div", { class: "row", style: "margin-top:10px;flex-wrap:wrap;gap:6px" }, vx);
+      if (!vRead.length) el("span", { class: "hint" }, chips, "Connected. The readings appear here within a minute.");
+      for (const s of vRead) {
+        el("span", { class: "chip" }, chips, `${s.name}${s.temperature != null ? ` · ${s.temperature.toFixed(1)}°` : ""}${s.humidity != null ? ` · ${Math.round(s.humidity)} %` : ""}`);
+      }
+      el("div", { class: "hint", style: "margin-top:8px" }, vx, "Choose a VELUX room as a room's sensor on the Rooms tab.");
+      btn(el("div", { style: "margin-top:10px" }, vx), "Disconnect", "trash", async () => {
+        try { await api("/api/velux/disconnect", { method: "POST" }); } catch { /* the file may already be gone */ }
+        sources.splice(vIdx, 1); S.veluxResult = null; changed(); render();
+      });
+    }
+    // Log in (again): the password goes to heatbrain once, which keeps only the login tokens.
+    const vlog = vIdx >= 0 ? section(vx, "velux-login") : el("div", { style: "margin-top:12px" }, vx);
+    if (vIdx >= 0) el("summary", {}, vlog, "Log in again");
+    const vrow = el("div", { class: "row", style: "margin-top:8px;flex-wrap:wrap;gap:8px" }, vlog);
+    const vEmail = el("input", { type: "email", placeholder: "VELUX account e-mail", autocomplete: "username", style: "width:240px", value: S.veluxEmail || "" }, vrow);
+    vEmail.addEventListener("input", () => { S.veluxEmail = vEmail.value; });
+    const vPass = el("input", { type: "password", placeholder: "password", autocomplete: "current-password", style: "width:180px" }, vrow);
+    const vBtn = btn(vrow, S.veluxBusy ? "Connecting…" : "Connect", "check", async () => {
+      S.veluxBusy = true; S.veluxResult = null; const password = vPass.value; render();
+      try {
+        const r = await api("/api/velux/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: S.veluxEmail || "", password }) });
+        const found = r.rooms.map((x) => `${x.name} ${x.temperature.toFixed(1)}°`).join(", ");
+        S.veluxResult = { ok: true, text: r.rooms.length ? `Connected: ${found}.` : "Connected, but no VELUX room reports a temperature yet." };
+        // Saved at once (with any other changes on the page), so heatbrain starts reading it.
+        if (!sources.some((s) => s.type === "velux")) { sources.push({ id: "velux", type: "velux" }); changed(); $("btn-save").click(); }
+      } catch (e) {
+        S.veluxResult = { ok: false, text: e.message };
+      }
+      S.veluxBusy = false; render();
+    }, "primary");
+    vBtn.disabled = !!S.veluxBusy;
+    for (const input of [vEmail, vPass]) {
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !vBtn.disabled) { e.preventDefault(); vBtn.click(); } });
+    }
+    el("div", { class: "hint", style: "margin-top:6px" }, vlog, "Your VELUX ACTIVE app login. heatbrain uses the password once to log in and keeps only the login token, never the password.");
+    if (S.veluxResult) {
+      el("div", { class: "hint", style: `margin-top:8px;color:var(${S.veluxResult.ok ? "--good" : "--critical"})` }, vlog, S.veluxResult.text);
+    }
+
     const out = el("section", { class: "card" }, body);
     sectionHead(out, "Outdoor temperature", "snow", "cool",
       "Used to pre-heat more before expensive or off periods when it is cold outside, and less when it is mild.");

@@ -49,7 +49,7 @@ std::string nowIso() { return formatIsoUtc(floor<seconds>(system_clock::now()));
 
 bool isTransferablePath(const std::string& relative) {
     static const std::regex allowed(
-        R"(^(netatmo-tokens|overrides|away|bookings|digest|devi)\.json$|^plugs/[A-Za-z0-9_-]+/(backup-\d{8}T\d{6}Z|firmware)\.json$)");
+        R"(^(netatmo-tokens|velux-tokens|overrides|away|bookings|digest|devi)\.json$|^plugs/[A-Za-z0-9_-]+/(backup-\d{8}T\d{6}Z|firmware)\.json$)");
     return std::regex_match(relative, allowed);
 }
 
