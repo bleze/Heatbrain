@@ -28,6 +28,7 @@
 #include "app/thermostats.hpp"
 #include "core/offline.hpp"
 #include "sensors/velux.hpp"
+#include "sensors/push.hpp"
 
 namespace hb {
 
@@ -554,6 +555,40 @@ void WebServer::routes() {
             sendError(res, 502, e.what());
         }
     });
+
+    // A battery sensor reporting by itself (Shelly H&T Gen3 "Actions"/webhooks):
+    //   /api/push/shelly?id=shed&name=Shed&temp=${ev.tC}   and   ...&hum=${ev.rh}
+    // GET or POST; temp/tC/temperature, hum/rh/humidity, batt/battery are all accepted.
+    const auto pushHandler = [](const httplib::Request& req, httplib::Response& res) {
+        const std::string id = req.get_param_value("id");
+        static const std::regex idOk("^[A-Za-z0-9_-]{1,40}$");
+        if (!std::regex_match(id, idOk)) return sendError(res, 400, "id must be 1-40 letters, digits, - or _");
+        const auto number = [&](std::initializer_list<const char*> names, double lo, double hi) -> std::optional<double> {
+            for (const char* n : names) {
+                if (!req.has_param(n)) continue;
+                const std::string v = req.get_param_value(n);
+                if (v.find("${") != std::string::npos) {
+                    log::warn("Shelly {}: '{}={}' was not filled in by the device - check the token in its Action URL", id, n, v);
+                    return std::nullopt;
+                }
+                char* end = nullptr;
+                const double d = std::strtod(v.c_str(), &end);
+                if (end == v.c_str() || *end != '\0' || !(d >= lo && d <= hi)) return std::nullopt;
+                return d;
+            }
+            return std::nullopt;
+        };
+        const auto temp = number({"temp", "tC", "temperature"}, -40, 80);
+        const auto hum = number({"hum", "rh", "humidity"}, 0, 100);
+        const auto batt = number({"batt", "battery"}, 0, 100);
+        if (!temp && !hum && !batt) return sendError(res, 400, "no temperature, humidity or battery in the request");
+        PushRegistry::instance().put(id, req.get_param_value("name"), temp, hum,
+                                     batt ? std::optional<int>(static_cast<int>(*batt)) : std::nullopt,
+                                     std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()));
+        sendJson(res, json{{"ok", true}});
+    };
+    s.Get("/api/push/shelly", pushHandler);
+    s.Post("/api/push/shelly", pushHandler);
 
     // VELUX ACTIVE: log in once with the account (the password is used for this request only, never
     // stored), then list the rooms with climate readings so the page can show what was found.

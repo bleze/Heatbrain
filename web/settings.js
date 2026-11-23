@@ -266,6 +266,7 @@
     netatmo: { label: "Netatmo", icon: "netatmo" },
     velux: { label: "VELUX ACTIVE", icon: "velux" },
     devi: { label: "DEVI thermostat", icon: "devi" },
+    shelly: { label: "Shelly", icon: "thermo" },
   };
   const sourceOf = (key) => (key || "").split(":")[0];
   const sourceInfo = (src) => SOURCES[src] || { label: src, icon: "thermo" };
@@ -1080,6 +1081,44 @@
     if (S.veluxResult) {
       el("div", { class: "hint", style: `margin-top:8px;color:var(${S.veluxResult.ok ? "--good" : "--critical"})` }, vlog, S.veluxResult.text);
     }
+
+    // Shelly H&T (battery, sleeps between readings): it sends its readings to heatbrain.
+    const sh = el("section", { class: "card" }, body);
+    sectionHead(sh, "Shelly H&T", "thermo", "warm", "A battery sensor that sends its temperature and humidity to heatbrain whenever they change.", "shelly");
+    const shRead = (state.status?.sensors || []).filter((s) => s.key.startsWith("shelly:"));
+    if (shRead.length) {
+      const chips = el("div", { class: "row", style: "margin-top:10px;flex-wrap:wrap;gap:6px" }, sh);
+      for (const s of shRead) {
+        el("span", { class: "chip" }, chips, `${s.name}${s.temperature != null ? ` · ${s.temperature.toFixed(1)}°` : ""}${s.humidity != null ? ` · ${Math.round(s.humidity)} %` : ""}${s.reachable ? "" : " · no report for 3 h"}`);
+      }
+    }
+    const shSetup = shRead.length ? section(sh, "shelly-setup") : el("div", { style: "margin-top:10px" }, sh);
+    if (shRead.length) el("summary", {}, shSetup, "Add another / set up again");
+    const sg = el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:8px" }, shSetup);
+    el("span", { class: "muted" }, sg, "Name in heatbrain");
+    const shName = el("input", { type: "text", value: S.shellyName ?? "Shed", style: "width:180px", autocomplete: "off" }, sg);
+    shName.addEventListener("change", () => { S.shellyName = shName.value; render(); });  // on leaving the field: typing keeps its focus
+    const nm = (S.shellyName ?? "Shed").trim() || "Shed";
+    const id = nm.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "sensor";
+    const base = `${location.protocol}//${location.host}/api/push/shelly?id=${id}&name=${encodeURIComponent(nm)}`;
+    const urlRow = (label, url) => {
+      const r = el("div", { class: "field", style: "margin-top:8px" }, shSetup);
+      el("span", {}, r, label);
+      const row = el("div", { class: "row", style: "gap:8px" }, r);
+      const i = el("input", { type: "text", readonly: "", value: url, style: "flex:1;min-width:0;font-family:ui-monospace,Consolas,monospace;font-size:12px" }, row);
+      i.addEventListener("focus", () => i.select());
+      btn(row, "Copy", "check", async (b) => {
+        try { await navigator.clipboard.writeText(url); toast("Copied"); } catch { i.select(); }
+      });
+    };
+    const ol = el("ol", { class: "phone-steps", style: "margin-top:10px" }, shSetup);
+    el("li", {}, ol, "Set up the Shelly in its app (or its own web page) and connect it to your Wi-Fi.");
+    el("li", {}, ol, "In the Shelly app: the device → Actions → add one: When Temperature changes (Any), Then call a URL - paste the first address below.");
+    el("li", {}, ol, "Add a second action: When Humidity changes (Any), with the second address.");
+    el("li", {}, ol, "Change the temperature a little (hold it in your hand): it appears above within a few minutes. Then choose it as a room's sensor on the Rooms tab.");
+    urlRow("When temperature changes", `${base}&temp=\${ev.tC}`);
+    urlRow("When humidity changes", `${base}&hum=\${ev.rh}`);
+    el("div", { class: "hint", style: "margin-top:6px" }, shSetup, "It reports only when a value changes (by the threshold you set in the action, e.g. 0.5°), so heatbrain treats no news as no change for up to 3 hours. During Wi-Fi-off periods nothing arrives.");
 
     const out = el("section", { class: "card" }, body);
     sectionHead(out, "Outdoor temperature", "snow", "cool",

@@ -100,6 +100,14 @@ const HELP = {
       "Mount the wall switch away from heaters, direct sun and electronics - it is a room thermometer like any other.",
     ],
   },
+  shelly: {
+    title: "Shelly H&T",
+    body: [
+      "The Shelly H&T (Gen3) runs on batteries and sleeps between readings, so heatbrain cannot ask it - it tells heatbrain. You set up two Actions on the Shelly (in its app or web page): when the temperature changes, call heatbrain's address with the temperature; when the humidity changes, with the humidity. Settings -> Sensors gives both addresses, ready to copy. Everything stays on your network: no Shelly cloud needed.",
+      "It only reports when a value changes by the action's threshold (e.g. 0.5°), so a steady room can be quiet for a long time. heatbrain treats no news as no change for up to 3 hours; after that the reading counts as stale, like any sensor that has gone quiet. The last readings are kept across restarts.",
+      "During Wi-Fi-off periods the sensor cannot reach heatbrain; it catches up once the Wi-Fi is back.",
+    ],
+  },
   airQuality: {
     title: "Air quality (CO₂)",
     body: [
@@ -299,7 +307,7 @@ function renderManual(host) {
     "heatbrain switches your radiators' plugs on and off from the price of electricity, the temperature in each room and the program you set. Everything here is also available as '?' next to the settings.");
   const toc = el("nav", { class: "toc" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "thermostats", "sensors", "velux", "forecast", "openWindow", "insulation", "airQuality", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
+                 "thermostats", "sensors", "velux", "shelly", "forecast", "openWindow", "insulation", "airQuality", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, card);
     el("h3", {}, sec, HELP[key].title);

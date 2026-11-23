@@ -20,6 +20,7 @@
 #include "app/power_mix_sync.hpp"
 #include "core/insulation.hpp"
 #include "core/air_quality.hpp"
+#include "sensors/push.hpp"
 #include "app/rooms.hpp"
 #include "core/log.hpp"
 #include "notify/notifier.hpp"
@@ -64,6 +65,9 @@ std::unique_ptr<ControlEnv> loadControlEnv(const Args& args) {
     e->ctx = std::make_unique<hb::ProviderContext>(hb::ProviderContext{*e->cache, *e->tz, e->cfg.currency, nowSeconds});
     e->prices = std::make_unique<hb::PriceModel>(e->cfg.raw.at("price"), *e->ctx);
     e->sources = hb::loadTemperatureSources(e->cfg.raw, e->internet, e->cfg.dataDir, nowSeconds);
+    // Battery sensors that report by themselves (Shelly H&T): there as soon as one has reported.
+    hb::PushRegistry::instance().setFile(e->cfg.dataDir / "pushed-sensors.json");
+    e->sources.push_back(std::make_unique<hb::PushSource>("shelly", nowSeconds));
     e->plugs = hb::loadPlugs(e->cfg.raw, e->lan);
     auto rooms = hb::parseRooms(e->cfg.raw, e->plugs);
     e->overrides = std::make_unique<hb::Overrides>(e->cfg.dataDir / "overrides.json");
