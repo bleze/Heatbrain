@@ -91,6 +91,14 @@ const HELP = {
       "The outdoor module scales pre-heating: when it is cold outside rooms cool faster during off periods, so heatbrain stores a little more heat beforehand.",
     ],
   },
+  insulation: {
+    title: "How well a room keeps its heat",
+    body: [
+      "From a room's own history heatbrain learns how fast it cools towards the outdoor temperature and how fast it warms at full power. With the heater's power that gives the heat that leaks out per degree between inside and outside: the heat loss in W/°C. 58 W/°C means that at 19 °C inside and 2 °C outside about 1000 W escapes - all the time.",
+      "With the floor area set (Settings -> Rooms) it is also given per m², so rooms of different sizes compare fairly. Heat escapes through the outer walls, ceiling, windows and floor, so rooms with a high ceiling or many outer walls naturally come out somewhat higher. As a rough guide: around 1 W/°C per m² or less is well insulated, 1.5-2.5 is typical for older houses, much more points to a weak spot.",
+      "heatbrain tells you when a room loses clearly more heat per m² than your other rooms (worth checking the ceiling, windows and vents), and when a room starts losing heat clearly faster than its own normal over the last week (a window on the latch, a vent left open, wet insulation). Sun, people, electronics and warm neighbouring rooms affect the figures, so they settle over a week or two and are guides, not an energy rating.",
+    ],
+  },
   forecast: {
     title: "Weather forecast",
     body: [
@@ -274,7 +282,7 @@ function renderManual(host) {
     "heatbrain switches your radiators' plugs on and off from the price of electricity, the temperature in each room and the program you set. Everything here is also available as '?' next to the settings.");
   const toc = el("nav", { class: "toc" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "thermostats", "sensors", "forecast", "openWindow", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
+                 "thermostats", "sensors", "forecast", "openWindow", "insulation", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, card);
     el("h3", {}, sec, HELP[key].title);

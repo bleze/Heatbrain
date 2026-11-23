@@ -860,6 +860,25 @@ function renderElectricity({ t0, t1, now, prices, W, m, ticks }) {
   });
 }
 
+// Readings without the first 20 minutes after a gap of over 30 minutes (a thermostat's sensor settling).
+function settledReadings(pts) {
+  const out = [];
+  let settledAt = 0;
+  for (let i = 0; i < pts.length; i++) {
+    if (i > 0 && pts[i][0] - pts[i - 1][0] > 1800) settledAt = pts[i][0] + 1200;
+    if (pts[i][0] >= settledAt) out.push(pts[i]);
+  }
+  return out;
+}
+
+// "heat loss 58 W/°C · 4.1 per m² · ≈ 310 kr/month"
+function heatLossText(hl) {
+  const parts = [`heat loss ${Math.round(hl.wattsPerK)} W/°C`];
+  if (hl.perM2 != null) parts.push(`${hl.perM2.toFixed(1)} per m²`);
+  if (hl.monthCost > 0) parts.push(`≈ ${Math.round(hl.monthCost)} ${state.status?.currency === "DKK" ? "kr" : state.status?.currency || ""}/month at today's temperatures`);
+  return parts.join(" · ");
+}
+
 // The power mix lane: [epoch, offshore wind, onshore wind, solar, power plants, imports, co2] per hour.
 const MIX_PARTS = [["wind", "Wind"], ["solar", "Solar"], ["plants", "Power plants"], ["imports", "Imports"]];
 function mixParts(r) {
@@ -911,6 +930,10 @@ function renderDetail() {
   const h = state.history;
   const room = h.room;
   $("detail-title").textContent = room.name;
+  // How well the room keeps its heat (once heatbrain has learned it).
+  const hl = state.status?.rooms?.find((r) => r.id === room.id)?.heatLoss;
+  $("detail-heatloss").textContent = hl ? heatLossText(hl) : "";
+  $("detail-heatloss").title = hl ? "Heat that leaks out per degree between inside and outside, from how fast the room cools and warms. Settings -> Rooms: floor area for a per-m² figure." : "";
   const tick = state.status?.tickSeconds || 300;
   const host = $("room-chart");
   host.replaceChildren();
@@ -920,7 +943,11 @@ function renderDetail() {
   const t0 = h.from;
   const lastPrice = h.prices.length ? h.prices[h.prices.length - 1][0] + 900 : h.to;
   const t1 = Math.max(h.to, Math.min(h.to + (h.to - h.from), lastPrice));
-  const temps = h.temperatures, decisions = h.decisions;
+  // A thermostat's built-in sensor reads low after a Wi-Fi-off night and catches up within ~15 min:
+  // those readings are left out, so the dotted estimate across the night ends at a settled reading.
+  const isThermostatRoom = (state.status?.rooms?.find((r) => r.id === room.id)?.plugs || []).some((p) => p.thermostat);
+  const temps = isThermostatRoom ? settledReadings(h.temperatures) : h.temperatures;
+  const decisions = h.decisions;
   const prices = h.prices.filter((p) => p[0] >= t0 - 900 && p[0] <= t1);
   const targets = decisions.map((d) => [d[0], d[3]]);
   // Ahead of now the target comes from the room's plan, so the line doesn't seem to stop at the last

@@ -18,6 +18,7 @@
 #include "app/digest.hpp"
 #include "app/meter_sync.hpp"
 #include "app/power_mix_sync.hpp"
+#include "core/insulation.hpp"
 #include "app/rooms.hpp"
 #include "core/log.hpp"
 #include "notify/notifier.hpp"
@@ -197,11 +198,92 @@ std::vector<fs::path> webRootCandidates() {
     return c;
 }
 
+// How well each room keeps its heat (from its learned model and heater power): W/K, per m2 floor
+// when set, and the heat it needs for a month at today's outdoor temperature and prices.
+struct RoomInsulation {
+    double wattsPerK = 0;
+    std::optional<double> perM2;
+    hb::MonthlyHeat month;
+};
+std::map<std::string, RoomInsulation> roomInsulation(const ControlEnv& env, const hb::TickResult& result, Instant now) {
+    using nlohmann::json;
+    std::map<std::string, RoomInsulation> out;
+    const auto& cfg = env.cfg.raw;
+    std::map<std::string, double> plugWatts, thermostatWatts;
+    for (const auto& p : cfg.value("plugs", json::array())) plugWatts[p.value("id", "")] = p.value("watts", 0.0);
+    for (const auto& t : cfg.value("thermostats", json::array())) thermostatWatts[t.value("id", "")] = t.value("watts", 0.0);
+    // Outdoors over the next 24 h (forecast, else now) and the average price ahead.
+    std::optional<double> outside;
+    if (const auto& f = env.controller->forecast().forecast) outside = f->meanOver(now, now + hours{24});
+    if (!outside && env.controller->outdoor()) outside = env.controller->outdoor()->temperature;
+    double priceSum = 0;
+    int priceN = 0;
+    for (const auto& s : env.controller->prices().slots) {
+        if (s.total && s.start >= now - minutes{15} && s.start < now + hours{24}) { priceSum += *s.total; ++priceN; }
+    }
+    for (const auto& r : result.rooms) {
+        if (!r.thermal || r.room->priceOnly) continue;
+        double watts = 0;
+        if (!r.room->thermostat.empty()) watts = thermostatWatts[r.room->thermostat];
+        for (const auto& id : r.room->plugIds) watts += plugWatts[id];
+        const auto wpk = hb::heatLossWattsPerK(*r.thermal, watts);
+        if (!wpk) continue;
+        RoomInsulation ri;
+        ri.wattsPerK = *wpk;
+        for (const auto& rc : cfg.value("rooms", json::array())) {
+            if (rc.value("id", "") == r.room->id && rc.contains("areaM2") && rc["areaM2"].is_number() && rc["areaM2"].get<double>() > 0) {
+                ri.perM2 = *wpk / rc["areaM2"].get<double>();
+            }
+        }
+        if (outside && priceN) {
+            // The program's average demand over a day: heat/keep hours at their target, off hours none.
+            double demand = 0;
+            for (int h = 0; h < 24; ++h) {
+                const auto p = hb::periodAt(*r.room, h * 60 + 30);
+                if (p && p->point.mode != hb::ProgramMode::Off) demand += std::max(0.0, p->point.target - *outside);
+            }
+            ri.month = hb::monthlyHeat(*wpk, *outside + demand / 24, *outside, priceSum / priceN);
+        }
+        out[r.room->id] = ri;
+    }
+    return out;
+}
+
+// Insulation notes: a room losing clearly more heat per m2 than the others, and a room that started
+// losing heat faster than its own normal.
+void insulationProblems(const ControlEnv& env, hb::TickResult& result, Instant now) {
+    const auto ins = roomInsulation(env, result, now);
+    for (const auto& r : result.rooms) {
+        const auto it = ins.find(r.room->id);
+        if (it != ins.end() && it->second.perM2) {
+            std::vector<double> others;
+            for (const auto& [id, o] : ins) if (id != r.room->id && o.perM2) others.push_back(*o.perM2);
+            if (hb::poorInsulation(*it->second.perM2, others)) {
+                std::string extra = it->second.month.cost > 0
+                    ? std::format(" Keeping it warm costs about {:.0f} {} a month at today's temperatures.", it->second.month.cost, env.cfg.currency)
+                    : "";
+                result.problems.push_back({"room:" + r.room->id + ":insulation", hb::Severity::Info,
+                    std::format("{} loses a lot of heat: {:.0f} W per °C, {:.1f} W per °C per m² - worth checking the ceiling, "
+                                "windows and vents.{}", r.room->name, it->second.wattsPerK, *it->second.perM2, extra),
+                    minutes{0}, hours{24 * 7}});
+            }
+        }
+        if (r.recentThermal && r.earlierThermal && hb::heatLossRose(*r.recentThermal, *r.earlierThermal)) {
+            result.problems.push_back({"room:" + r.room->id + ":heatloss-rose", hb::Severity::Warning,
+                std::format("{} has been losing heat {:.0f} % faster this week than the weeks before. A window on the latch, "
+                            "a vent left open, or something in the insulation?", r.room->name,
+                            (r.recentThermal->loss / r.earlierThermal->loss - 1) * 100),
+                minutes{0}, hours{24}});
+        }
+    }
+}
+
 // Snapshot for the web UI, rebuilt after every tick.
 nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                            const std::vector<hb::Problem>& active, Instant now) {
     using nlohmann::json;
     const auto overrides = env.overrides->load();
+    const auto insulation = roomInsulation(env, result, now);
     json rooms = json::array();
     for (const auto& r : result.rooms) {
         json room{{"id", r.room->id},
@@ -239,6 +321,10 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
         }
         room["bookings"] = booked;
         if (r.thermal) room["thermal"] = {{"gain", r.thermal->gain}, {"loss", r.thermal->loss}};
+        if (const auto it = insulation.find(r.room->id); it != insulation.end()) {
+            room["heatLoss"] = {{"wattsPerK", it->second.wattsPerK}, {"monthKWh", it->second.month.kWh}, {"monthCost", it->second.month.cost}};
+            if (it->second.perM2) room["heatLoss"]["perM2"] = *it->second.perM2;
+        }
         room["maxTemp"] = r.room->maxTemp;
         if (auto it = overrides.find(r.room->id); it != overrides.end() && it->second.until > now) {
             room["override"] = {{"on", it->second.on}, {"until", it->second.until.time_since_epoch().count()}};
@@ -450,6 +536,11 @@ void controlLoop(ControlEnv& env, hb::StatusBoard& board, std::unique_ptr<hb::Al
             if (!seenKeys.contains(p.key)) hb::log::info("Problem seen [{}] {}", p.key, p.message);
         }
         seenKeys = keys;
+        try {
+            insulationProblems(env, result, now);
+        } catch (const std::exception& e) {
+            hb::log::warn("Insulation: {}", e.what());
+        }
         alerts.update(now, result.problems, deliver);
         if (announcePending) {
             announcePending = false;

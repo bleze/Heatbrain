@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -32,6 +33,16 @@ struct TemperatureRecord {
     std::string roomId;     // empty if the sensor is not mapped to a room
     double temperature = 0;
     std::optional<double> humidity;
+    std::optional<Instant> day;  // start of the local day it belongs to: then also counted in the daily summary
+};
+
+// One sensor's day: temperature range and average, average humidity. Kept for years (the detailed
+// readings for 3 years), for the year-long charts in Settings -> Sensors.
+struct SensorDay {
+    Instant day;
+    int readings = 0;
+    double minTemp = 0, avgTemp = 0, maxTemp = 0;
+    std::optional<double> avgHumidity;
 };
 
 struct PricePoint {
@@ -57,6 +68,9 @@ public:
     std::optional<DecisionRecord> lastDecision(const std::string& roomId) const;
     std::vector<TemperatureRecord> temperatures(const std::string& roomId, Instant from, Instant to) const;
     std::vector<TemperatureRecord> sensorTemperatures(const std::string& sensorKey, Instant from, Instant to) const;
+    std::vector<SensorDay> sensorDays(const std::string& sensorKey, Instant from, Instant to) const;
+    // Once: the daily summary from the detailed readings already stored (dayOf: local day start).
+    void fillSensorDays(const std::function<Instant(Instant)>& dayOf);
     std::vector<PricePoint> prices(Instant from, Instant to) const;
     // Household meter readings (Eloverblik), replaced when fetched again.
     void recordMeter(const std::vector<MeterReading>& readings);

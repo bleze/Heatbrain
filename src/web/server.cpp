@@ -11,6 +11,7 @@
 #include <iterator>
 #include <regex>
 
+#include "core/battery.hpp"
 #include "app/power_mix_sync.hpp"
 #include "app/config_service.hpp"
 #include "app/cost_report.hpp"
@@ -445,6 +446,39 @@ void WebServer::routes() {
         json out = usageReport(readConfigFile(ctx_.configFile), history, from, to);
         out["from"] = epoch(from);
         out["to"] = epoch(to);
+        sendJson(res, out);
+    });
+
+    // A sensor's last year, a point per day: [[day, minTemp, avgTemp, maxTemp, avgHumidity|null], ...] - for the
+    // charts in Settings -> Sensors (with /api/batteries for the battery).
+    s.Get("/api/sensor-days", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!req.has_param("key")) return sendError(res, 400, "key missing");
+        History history(ctx_.dataDir / "history.db");
+        const Instant to = floor<seconds>(system_clock::now()) + days{1};
+        json days = json::array();
+        for (const auto& d : history.sensorDays(req.get_param_value("key"), to - std::chrono::days{400}, to)) {
+            days.push_back({epoch(d.day), d.minTemp, d.avgTemp, d.maxTemp, d.avgHumidity ? json(*d.avgHumidity) : json(nullptr)});
+        }
+        sendJson(res, json{{"days", days}});
+    });
+
+    // Battery levels per sensor (one a day, see Controller::checkBatteries) and when each is
+    // projected to run out: {"<source>:<id>": {"samples": [[day, percent], ...], "daysLeft": 141.2|null}}.
+    s.Get("/api/batteries", [this](const httplib::Request&, httplib::Response& res) {
+        json out = json::object();
+        try {
+            if (std::ifstream in(ctx_.dataDir / "battery.json"); in) {
+                const json saved = json::parse(in);
+                for (const auto& [key, arr] : saved.items()) {
+                    std::vector<BatterySample> samples;
+                    for (const auto& p : arr) samples.push_back({Instant{seconds{p.at(0).get<long long>()}}, p.at(1).get<int>()});
+                    const auto left = daysUntilEmpty(samples);
+                    out[key] = {{"samples", arr}, {"daysLeft", left ? json(*left) : json(nullptr)}};
+                }
+            }
+        } catch (const std::exception& e) {
+            return sendError(res, 500, std::string("battery history: ") + e.what());
+        }
         sendJson(res, out);
     });
 

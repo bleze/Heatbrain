@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <tuple>
 #include <memory>
 #include <optional>
 #include <set>
@@ -39,6 +40,7 @@ struct RoomResult {
     const RoomConfig* room = nullptr;
     std::vector<BookingPlan> bookings;
     std::optional<ThermalModel> thermal;  // when learned well enough to use
+    std::optional<ThermalModel> recentThermal, earlierThermal;  // last 7 days / the 4 weeks before
     Decision decision;
     std::vector<PlanSegment> plan;  // next 24 h
     bool changed = false;
@@ -120,19 +122,24 @@ private:
     // Past prices the history doesn't have yet (it only records from when heatbrain ran): the last
     // 8 days, like the power mix, so the price chart reaches back too. Tried once a day.
     void backfillPrices(Instant now);
-    // Battery levels once a day per sensor (<dataDir>/battery.json, 120 days), and the warnings
+    // Battery levels once a day per sensor (<dataDir>/battery.json, 3 years), and the warnings
     // timed by when each battery will run out (or before a planned away period).
     void checkBatteries(Instant now, const std::optional<AwayMode>& away, TickResult& result);
     std::map<std::string, std::vector<BatterySample>> battery_;
     bool batteryLoaded_ = false;
     std::optional<Instant> backfillTried_;
-    std::optional<Instant> firstTick_;  // the backfill waits until the start-up requests are done
+    std::optional<Instant> firstTick_;
+    bool sensorDaysFilled_ = false;  // the backfill waits until the start-up requests are done
     void readSensors(TickResult& result);
     const SensorReading* findSensor(const std::string& ref) const;
     nlohmann::json applyToPlugs(const RoomConfig& room, bool on, Instant now, TickResult& result);
     nlohmann::json applyToThermostat(const RoomConfig& room, const Decision& d, TickResult& result);
     std::vector<ThermostatConfig> thermostats_;
     ThermalModel thermalModel(const RoomConfig& room, Instant now);  // learned, refreshed hourly
+    ThermalModel fitBetween(const RoomConfig& room, Instant from, Instant to);
+    // The last 7 days and the 4 weeks before them, fitted once a day: has the room started losing
+    // heat faster (a window on the latch, a vent, wet insulation)?
+    std::map<std::string, std::tuple<Instant, ThermalModel, ThermalModel>> trend_;
     void refreshForecast(Instant now, std::optional<double> outdoor, TickResult& result);
     CachingHttpClient* forecastHttp_ = nullptr;
     std::optional<std::pair<double, double>> forecastLocation_;

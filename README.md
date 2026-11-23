@@ -244,7 +244,7 @@ temperature from – until. Warming up starts by itself as early as the room nee
 
 ### Decision log
 
-Every tick stores one decision per room in SQLite (`data/history.db`, 90 days): ON/OFF,
+Every tick stores one decision per room in SQLite (`data/history.db`, kept 3 years - about 100 MB a year with four rooms; daily summaries per sensor and the battery history are kept for good): ON/OFF,
 whether it changed, reason code, plain-language detail, a snapshot of the inputs
 (temperature and age, target, price, median) and what happened at each plug. Temperatures
 and prices are stored too, for the web UI's graphs.

@@ -435,6 +435,10 @@
     field(g, "Never above", num(room, "maxTemp", { step: 0.5, unit: "°C" }), { hint: "hard stop, even when manual" });
     field(g, "Frost protection", num(room, "frostTemp", { step: 0.5, placeholder: "5", unit: "°C" }));
     field(g, "Warm-up for bookings", num(room, "warmupMinutes", { step: 15, min: 0, max: 720, placeholder: "180", unit: "min" }), { hint: "until heatbrain has learned how fast the room warms (concrete floors: 12+ h)" });
+    const hl = state.status?.rooms?.find((r) => r.id === room.id)?.heatLoss;
+    const fa = field(g, "Floor area", num(room, "areaM2", { step: 1, min: 1, max: 500, unit: "m²" }),
+      { hint: hl ? heatLossText(hl) : "for comparing how well rooms keep their heat" });
+    helpButton(fa.querySelector("span"), "insulation", g);
 
     const ph = el("h3", {}, c, "Daily program ");
     helpButton(ph, ["program", "modes"]);
@@ -1044,29 +1048,190 @@
     }
 
     const mods = el("section", { class: "card" }, body);
-    sectionHead(mods, "Modules", "wifi", "violet");
+    const mh = sectionHead(mods, "Modules", "wifi", "violet");
+    // One time range for all module charts, like the room chart's (remembered in this browser).
+    if (!S.moduleDays) { try { S.moduleDays = Number(localStorage.getItem("hb.moduleDays")) || 30; } catch { S.moduleDays = 30; } }
+    const rg = el("div", { class: "range", role: "group", "aria-label": "Module chart range" }, mh);
+    for (const [d, label] of [[2, "2 days"], [7, "7 days"], [30, "30 days"], [91, "3 months"], [365, "1 year"]]) {
+      const b = el("button", { type: "button", class: S.moduleDays === d ? "active" : "" }, rg, label);
+      b.addEventListener("click", () => { S.moduleDays = d; try { localStorage.setItem("hb.moduleDays", String(d)); } catch { /* private mode */ } render(); });
+    }
+    loadBatteries();
     // Indoor modules by name (Netatmo first, then the thermostats' own probes), the outdoor ones last.
     const rank = (s) => (s.kind === "outdoor" ? 2 : s.key.startsWith("devi:") ? 1 : 0);
     const sensors = [...(state.status?.sensors || [])].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
     if (!sensors.length) el("div", { class: "muted", style: "margin-top:12px" }, mods, "No readings yet.");
-    const list = el("div", { class: "list" }, mods);
+    // A card per module: its readings now, and its year - temperature, humidity and battery, a point
+    // per day - on one time axis (12 months back, 3 ahead for the battery's projection).
+    const cards = el("div", { class: "module-cards" }, mods);
     for (const s of sensors) {
-      const r = el("div", { class: "item-head" }, list);
+      const card = el("div", { class: "module-card" }, cards);
+      const r = el("div", { class: "item-head" }, card);
       const left = el("div", { class: "row" }, r);
       left.appendChild(badge(s.kind === "outdoor" ? "snow" : "thermo", s.kind === "outdoor" ? "cool" : "warm"));
-      el("b", {}, left, s.name);
+      const nm = el("div", {}, left);
+      el("b", {}, nm, s.name);
       // Where the reading comes from: a Netatmo module, or a thermostat's own probe (set up under Heating).
       const from = (s.key || "").startsWith("devi:") ? `thermostat · ${s.key.endsWith("-floor") ? "floor probe" : "room sensor"}`
         : [s.station, s.kind].filter(Boolean).join(" · ");
-      el("span", { class: "muted" }, left, from);
+      el("div", { class: "muted", style: "font-size:12px" }, nm, from);
       const chips = el("div", { class: "plugs" }, r);
       const chip = (cls, iconName, text) => { const ch = el("span", { class: `chip ${cls}` }, chips); ch.appendChild(icon(iconName)); ch.appendChild(document.createTextNode(text)); };
-      // Battery first: the chips are right-aligned, so temperature and age line up on every module.
-      if (s.battery != null) chip(s.battery <= 20 ? "error" : s.battery <= 40 ? "warn" : "ok", "battery", `${s.battery}%`);
+      // The battery chip's colour follows when it runs out, not a fixed level (see the chart).
+      const bh = S.batteries?.[s.key];
+      if (s.battery != null) {
+        const soon = s.battery <= 5 || (bh?.daysLeft != null && bh.daysLeft <= 21);
+        const unknownLow = bh?.daysLeft == null && s.battery <= 10;
+        chip(soon ? "error" : unknownLow ? "warn" : "ok", "battery", `${s.battery}%`);
+      }
       if (s.humidity != null) chip("", "drop", `${Math.round(s.humidity)}%`);
       if (s.temperature != null) chip("", "thermo", `${s.temperature.toFixed(1)}°C`);
       if (!s.reachable) chip("error", "alert", "offline");
       else if (s.ageMinutes != null) chip("", "clock", `${s.ageMinutes} min ago`);
+      loadSensorDays(s.key);
+      const detailed = S.moduleDays <= 7;
+      if (detailed) loadSensorReadings(s.key, S.moduleDays);
+      sensorYear(card, s, S.sensorDays?.[s.key]?.days || [], s.battery != null ? bh : null, S.moduleDays,
+        detailed ? S.sensorReadings?.[`${s.key}|${S.moduleDays}`] : null);
+    }
+  }
+
+  // A module's daily summary (/api/sensor-days), fetched once per 10 minutes.
+  function loadSensorDays(key) {
+    S.sensorDays ||= {};
+    const c = S.sensorDays[key];
+    if (c && (c.loading || Date.now() - c.at < 10 * 60_000)) return;
+    S.sensorDays[key] = { ...(c || {}), loading: true, at: Date.now() };
+    api(`/api/sensor-days?key=${encodeURIComponent(key)}`)
+      .then((r) => { S.sensorDays[key] = { days: r.days, at: Date.now() }; render(); })
+      .catch(() => { S.sensorDays[key] = { days: c?.days || [], at: Date.now() }; });
+  }
+  // The detailed readings for the short ranges (/api/sensor-history), fetched once per 5 minutes.
+  function loadSensorReadings(key, days) {
+    S.sensorReadings ||= {};
+    const id = `${key}|${days}`, c = S.sensorReadings[id];
+    if (c && (c.loading || Date.now() - c.at < 5 * 60_000)) return;
+    S.sensorReadings[id] = { ...(c || {}), loading: true, at: Date.now() };
+    api(`/api/sensor-history?key=${encodeURIComponent(key)}&hours=${days * 24}`)
+      .then((r) => { S.sensorReadings[id] = { temps: r.temperatures || [], hum: r.humidity || [], at: Date.now() }; render(); })
+      .catch(() => { S.sensorReadings[id] = { ...(c || {}), at: Date.now() }; });
+  }
+
+  async function loadBatteries() {
+    if (S.batteries && Date.now() - S.batteriesAt < 10 * 60_000) return;
+    S.batteriesAt = Date.now();
+    try { S.batteries = await api("/api/batteries"); render(); } catch { /* optional */ }
+  }
+
+  // One module's charts for the chosen range: up to three small charts, each with its own axis, on one
+  // time axis. Short ranges (2 or 7 days) draw the detailed readings, longer ones the daily summaries.
+  // A quarter of the range is left ahead of today for the battery's projection.
+  function sensorYear(card, s, allDays, battery, rangeDays, readings) {
+    const host = el("div", { class: "module-year" }, card);
+    const W = Math.max(260, card.clientWidth - 28), m = { l: 34, r: 6 };
+    const now = Date.now() / 1000;
+    const t0 = now - rangeDays * 86400, t1 = now + Math.max(rangeDays / 4, 1) * 86400;
+    const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
+    const days = allDays.filter((d) => d[0] + 86400 > t0);
+    // Ticks: every 6 h (2 days), every day (7), every week (30), every month (3 months, 1 year).
+    const ticks = [];
+    const fmtTick = rangeDays <= 2 ? (t) => (new Date(t * 1000).getHours() === 0 ? new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(t * 1000) : `${String(new Date(t * 1000).getHours()).padStart(2, "0")}:00`)
+      : rangeDays <= 30 ? (t) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(t * 1000)
+      : (t) => new Intl.DateTimeFormat("en-GB", { month: "short" }).format(t * 1000);
+    if (rangeDays <= 2) {
+      for (let d = new Date(t0 * 1000); d.getTime() / 1000 < t1; d.setHours(d.getHours() + 1)) {
+        d.setMinutes(0, 0, 0);
+        if (d.getHours() % 6 === 0 && d.getTime() / 1000 >= t0) ticks.push(d.getTime() / 1000);
+      }
+    } else if (rangeDays <= 30) {
+      const step = rangeDays <= 7 ? 1 : 7;
+      const d = new Date(t0 * 1000); d.setHours(0, 0, 0, 0);
+      if (step === 7) d.setDate(d.getDate() + ((8 - d.getDay()) % 7));  // Mondays
+      for (; d.getTime() / 1000 < t1; d.setDate(d.getDate() + step)) if (d.getTime() / 1000 >= t0) ticks.push(d.getTime() / 1000);
+    } else {
+      for (let d = new Date(t0 * 1000); d.getTime() / 1000 < t1; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
+        const first = new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000;
+        if (first >= t0) ticks.push(first);
+      }
+    }
+    const labelEvery = rangeDays >= 365 ? 2 : 1;
+    const panel = (title, h, yLo, yHi, yFmt, draw, note) => {
+      const svg = el("svg", { viewBox: `0 0 ${W} ${h + 30}`, width: W, height: h + 30, role: "img", "aria-label": `${s.name}: ${title}` }, host);
+      const top = 16;
+      el("text", { class: "panel-label", x: m.l, y: 11 }, svg, title);
+      if (note) el("text", { class: "panel-note", x: W - m.r, y: 11, "text-anchor": "end" }, svg, note);
+      const y = (v) => top + (1 - (v - yLo) / (yHi - yLo)) * h;
+      for (const v of [yLo, yHi]) {
+        el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }, svg);
+        el("text", { x: m.l - 5, y: y(v) + 4, "text-anchor": "end" }, svg, yFmt(v));
+      }
+      ticks.forEach((t, i) => {
+        el("line", { class: "grid", x1: x(t), x2: x(t), y1: top, y2: top + h, opacity: 0.5 }, svg);
+        if (i % labelEvery === 0) el("text", { x: x(t), y: top + h + 12, "text-anchor": "middle" }, svg, fmtTick(t));
+      });
+      el("line", { class: "now", x1: x(now), x2: x(now), y1: top, y2: top + h }, svg);
+      draw(svg, y);
+    };
+    const span = (vals, pad, floor, ceil) => {
+      let lo = Math.min(...vals), hi = Math.max(...vals);
+      if (!isFinite(lo)) { lo = floor; hi = ceil; }
+      if (hi - lo < pad) { const c = (hi + lo) / 2; lo = c - pad / 2; hi = c + pad / 2; }
+      return [Math.floor(lo), Math.ceil(hi)];
+    };
+    const path = (pts, y) => pts.map(([t, v], i) => `${i ? "L" : "M"}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    // Readings: the line breaks where they stop for over 30 min (a Wi-Fi-off night), like the room chart.
+    const readingPath = (pts, y) => pts.map(([t, v], i) => `${i && t - pts[i - 1][0] <= 1800 ? "L" : "M"}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join("");
+
+    if (readings) {
+      // Short range: the readings themselves.
+      // A thermostat's own probe settles for a while after a gap (see settledReadings).
+      const thermostat = (s.key || "").startsWith("devi:");
+      const temps = (thermostat ? settledReadings(readings.temps || []) : readings.temps || []).filter((p) => p[0] >= t0);
+      const hum = (readings.hum || []).filter((p) => p[0] >= t0 && p[1] != null);
+      if (temps.length) {
+        const [lo, hi] = span(temps.map((p) => p[1]), 4, 0, 25);
+        panel("Temperature °C", 64, lo, hi, (v) => v.toFixed(0), (svg, y) => el("path", { d: readingPath(temps, y), class: "yr-temp" }, svg));
+      }
+      if (hum.length) {
+        const [hlo, hhi] = span(hum.map((p) => p[1]), 10, 30, 70);
+        panel("Humidity %", 48, Math.max(0, hlo), Math.min(100, hhi), (v) => `${v.toFixed(0)}`, (svg, y) => el("path", { d: readingPath(hum, y), class: "yr-hum" }, svg));
+      }
+      if (!temps.length && !hum.length) el("div", { class: "muted", style: "font-size:12.5px;margin:6px 0" }, host, readings.temps ? "No readings in this period." : "Loading…");
+    } else if (days.length) {
+      const [lo, hi] = span(days.flatMap((d) => [d[1], d[3]]), 6, 0, 25);
+      panel("Temperature °C · daily range and average", 64, lo, hi, (v) => v.toFixed(0), (svg, y) => {
+        const band = days.map((d) => [d[0] + 43200, d[3]]).concat([...days].reverse().map((d) => [d[0] + 43200, d[1]]));
+        el("path", { d: `${path(band, y)}Z`, class: "yr-band" }, svg);
+        el("path", { d: path(days.map((d) => [d[0] + 43200, d[2]]), y), class: "yr-temp" }, svg);
+      });
+      const hum = days.filter((d) => d[4] != null);
+      if (hum.length) {
+        const [hlo, hhi] = span(hum.map((d) => d[4]), 20, 30, 70);
+        panel("Humidity % · daily average", 48, Math.max(0, hlo), Math.min(100, hhi), (v) => `${v.toFixed(0)}`, (svg, y) => {
+          el("path", { d: path(hum.map((d) => [d[0] + 43200, d[4]]), y), class: "yr-hum" }, svg);
+        });
+      }
+    } else {
+      el("div", { class: "muted", style: "font-size:12.5px;margin:6px 0" }, host, "Builds up from today: a point per day (choose 2 or 7 days for the readings themselves).");
+    }
+    if (battery !== null) {
+      const samples = battery?.samples || [];
+      const left = battery?.daysLeft;
+      const note = left == null ? (samples.length < 10 ? "projection after about 10 days" : "drain not known yet")
+        : left <= 21 ? `empty in about ${Math.max(1, Math.round(left))} days`
+        : `empty ≈ ${new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric" }).format(new Date((samples[samples.length - 1][0] + left * 86400) * 1000))}`;
+      panel("Battery %", 40, 0, 100, (v) => `${v}`, (svg, y) => {
+        el("line", { x1: m.l, x2: W - m.r, y1: y(5), y2: y(5), class: "batt-empty" }, svg);
+        if (samples.length) el("path", { d: path(samples.map(([t, p]) => [t + 43200, p]), y), class: "batt-line" }, svg);
+        if (samples.length === 1) el("circle", { cx: x(samples[0][0] + 43200), cy: y(samples[0][1]), r: 2.5, class: "batt-dot" }, svg);
+        if (left != null && samples.length) {
+          // Dotted from the last level to 5 %, as far as the axis goes.
+          const [lt, lp] = samples[samples.length - 1];
+          const tEmpty = lt + left * 86400;
+          const tEnd = Math.min(tEmpty, t1), pEnd = lp - (lp - 5) * ((tEnd - lt) / (tEmpty - lt));
+          el("path", { d: `M${x(lt + 43200).toFixed(1)},${y(lp).toFixed(1)}L${x(tEnd).toFixed(1)},${y(pEnd).toFixed(1)}`, class: "batt-proj" }, svg);
+        }
+      }, note);
     }
   }
 

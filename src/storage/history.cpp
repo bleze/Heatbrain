@@ -101,6 +101,10 @@ History::History(const std::filesystem::path& dbFile) {
         CREATE INDEX IF NOT EXISTS temperatures_room_ts ON temperatures(room_id, ts);
         CREATE TABLE IF NOT EXISTS prices (slot INTEGER PRIMARY KEY, total REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS meter (start INTEGER PRIMARY KEY, seconds INTEGER NOT NULL, kwh REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS sensor_days (
+            sensor_key TEXT NOT NULL, day INTEGER NOT NULL, n INTEGER NOT NULL,
+            t_sum REAL NOT NULL, t_min REAL NOT NULL, t_max REAL NOT NULL, h_n INTEGER NOT NULL, h_sum REAL NOT NULL,
+            PRIMARY KEY (sensor_key, day));
     )");
 }
 
@@ -122,10 +126,24 @@ void History::recordDecision(const DecisionRecord& d) {
     s.step();
 }
 
+namespace {
+// Adds one reading to its sensor's day.
+void addToDay(sqlite3* db, const std::string& key, Instant day, double temp, std::optional<double> humidity) {
+    Stmt d(db, "INSERT INTO sensor_days VALUES (?,?,1,?,?,?,?,?) ON CONFLICT(sensor_key, day) DO UPDATE SET "
+               "n=n+1, t_sum=t_sum+excluded.t_sum, t_min=min(t_min, excluded.t_min), t_max=max(t_max, excluded.t_max), "
+               "h_n=h_n+excluded.h_n, h_sum=h_sum+excluded.h_sum");
+    d.bind(1, key).bind(2, day).bind(3, temp).bind(4, temp).bind(5, temp)
+        .bind(6, static_cast<long long>(humidity ? 1 : 0)).bind(7, humidity.value_or(0.0));
+    d.step();
+}
+}  // namespace
+
 void History::recordTemperature(const TemperatureRecord& t) {
     Stmt s(db_, "INSERT OR IGNORE INTO temperatures VALUES (?,?,?,?,?)");
     s.bind(1, t.at).bind(2, t.sensorKey).bind(3, t.roomId).bind(4, t.temperature).bind(5, t.humidity);
     s.step();
+    // A new reading (not one seen before): also into the day's summary.
+    if (t.day && sqlite3_changes(db_) > 0) addToDay(db_, t.sensorKey, *t.day, t.temperature, t.humidity);
 }
 
 void History::recordPrices(const PriceTable& table) {
@@ -190,6 +208,41 @@ std::vector<TemperatureRecord> History::sensorTemperatures(const std::string& se
         out.push_back(std::move(t));
     }
     return out;
+}
+
+std::vector<SensorDay> History::sensorDays(const std::string& sensorKey, Instant from, Instant to) const {
+    Stmt s(db_, "SELECT day, n, t_sum, t_min, t_max, h_n, h_sum FROM sensor_days WHERE sensor_key=? AND day>=? AND day<? ORDER BY day");
+    s.bind(1, sensorKey).bind(2, from).bind(3, to);
+    std::vector<SensorDay> out;
+    while (s.step()) {
+        SensorDay d{s.instant(0), static_cast<int>(s.i64(1))};
+        d.avgTemp = d.readings ? s.dbl(2) / d.readings : 0;
+        d.minTemp = s.dbl(3);
+        d.maxTemp = s.dbl(4);
+        if (const auto hn = s.i64(5); hn > 0) d.avgHumidity = s.dbl(6) / static_cast<double>(hn);
+        out.push_back(d);
+    }
+    return out;
+}
+
+void History::fillSensorDays(const std::function<Instant(Instant)>& dayOf) {
+    {
+        Stmt c(db_, "SELECT count(*) FROM sensor_days");
+        if (c.step() && c.i64(0) > 0) return;  // done before
+    }
+    exec("BEGIN");
+    try {
+        Stmt s(db_, "SELECT ts, sensor_key, temperature, humidity FROM temperatures ORDER BY ts");
+        while (s.step()) {
+            std::optional<double> h;
+            if (!s.isNull(3)) h = s.dbl(3);
+            addToDay(db_, s.text(1), dayOf(s.instant(0)), s.dbl(2), h);
+        }
+        exec("COMMIT");
+    } catch (...) {
+        exec("ROLLBACK");
+        throw;
+    }
 }
 
 void History::recordMeter(const std::vector<MeterReading>& readings) {
@@ -259,7 +312,7 @@ void History::replaceFrom(const std::filesystem::path& file) {
     try {
         exec("BEGIN");
         try {
-            for (const char* table : {"decisions", "temperatures", "prices", "meter"}) {
+            for (const char* table : {"decisions", "temperatures", "prices", "meter", "sensor_days"}) {
                 // Older exports have no meter table: keep what is here then.
                 Stmt has(db_, "SELECT count(*) FROM src.sqlite_master WHERE type='table' AND name=?");
                 has.bind(1, std::string(table));

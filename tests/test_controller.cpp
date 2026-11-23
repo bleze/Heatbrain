@@ -407,3 +407,32 @@ TEST_CASE("A booking can be changed in place; overlaps are refused, a moved star
     CHECK_FALSE(moved->warmingSince);
     CHECK_FALSE(store.update("nope", "bedroom", Booking{20, base, base + hours{1}}));
 }
+
+TEST_CASE("Sensor days: each new reading counts once in its day; filled once from stored readings") {
+    test::TempDir dir;
+    History h{dir.path() / "history.db"};
+    const Instant day0{seconds{1'795'000'000}};
+    const Instant d = day0 - (day0.time_since_epoch() % days{1});
+    h.recordTemperature({d + hours{1}, "netatmo:a", "", 18.0, 50.0, d});
+    h.recordTemperature({d + hours{2}, "netatmo:a", "", 20.0, 60.0, d});
+    h.recordTemperature({d + hours{2}, "netatmo:a", "", 20.0, 60.0, d});  // the same reading again: ignored
+    auto days = h.sensorDays("netatmo:a", d, d + std::chrono::days{1});
+    REQUIRE(days.size() == 1);
+    CHECK(days[0].readings == 2);
+    CHECK(days[0].minTemp == 18.0);
+    CHECK(days[0].maxTemp == 20.0);
+    CHECK(days[0].avgTemp == 19.0);
+    REQUIRE(days[0].avgHumidity);
+    CHECK(*days[0].avgHumidity == 55.0);
+
+    // An older database: readings without days, summarised once.
+    History old{dir.path() / "old.db"};
+    old.recordTemperature({d + hours{1}, "netatmo:b", "", 10.0, std::nullopt});
+    old.recordTemperature({d + hours{30}, "netatmo:b", "", 12.0, std::nullopt});
+    old.fillSensorDays([&](Instant t) { return t - (t.time_since_epoch() % std::chrono::days{1}); });
+    old.fillSensorDays([&](Instant t) { return t - (t.time_since_epoch() % std::chrono::days{1}); });  // no double count
+    days = old.sensorDays("netatmo:b", d, d + std::chrono::days{3});
+    REQUIRE(days.size() == 2);
+    CHECK(days[0].readings == 1);
+    CHECK_FALSE(days[0].avgHumidity);
+}

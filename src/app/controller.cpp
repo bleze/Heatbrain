@@ -20,7 +20,7 @@ using namespace std::chrono;
 
 namespace {
 constexpr auto kFailsafeRecheck = hours{1};
-constexpr auto kHistoryRetention = days{90};
+constexpr auto kHistoryRetention = days{3 * 366};  // ~100 MB a year with four rooms: years fit easily
 constexpr int kTomorrowPricesExpectedHour = 15;  // published ~13:00; alert if still missing at 15
 
 void add(TickResult& r, std::string key, Severity sev, std::string msg, minutes debounce = minutes{0},
@@ -176,7 +176,7 @@ void Controller::checkBatteries(Instant now, const std::optional<AwayMode>& away
             log.back().percent = std::min(log.back().percent, *r.batteryPercent);  // the day's lowest
             changed = true;
         }
-        std::erase_if(log, [&](const BatterySample& s) { return today - s.day > days{120}; });
+        std::erase_if(log, [&](const BatterySample& s) { return today - s.day > days{3 * 366}; });
         if (const auto w = batteryWarning(r.name, *r.batteryPercent, log, now, away, tz_)) {
             const bool urgent = *r.batteryPercent <= kBatteryEmptyPercent || w->message.find("away") != std::string::npos;
             add(result, "sensor:" + key + ":battery", urgent ? Severity::Warning : Severity::Info, w->message, minutes{0},
@@ -499,6 +499,14 @@ TickResult Controller::tick(Instant now, bool apply) {
         rr.room = &room;
         rr.bookings = std::move(bookingPlans);
         rr.thermal = learned;
+        if (!room.priceOnly) {
+            auto& t = trend_[room.id];
+            if (std::get<0>(t) == Instant{} || now - std::get<0>(t) >= hours{24}) {
+                t = {now, fitBetween(room, now - days{7}, now), fitBetween(room, now - days{35}, now - days{7})};
+            }
+            rr.recentThermal = std::get<1>(t);
+            rr.earlierThermal = std::get<2>(t);
+        }
         rr.decision = decideRoom(room, in, prices_, tz_);
         const auto armed = armedRooms_.find(room.id);
         const bool following = armed != armedRooms_.end() && now < armed->second.until && !networkBack;
@@ -577,10 +585,15 @@ TickResult Controller::tick(Instant now, bool apply) {
                         roomId = room.id;
                     }
                 }
-                history_->recordTemperature({*r.measuredAt, key, roomId, *r.temperature, r.humidity});
+                history_->recordTemperature(
+                    {*r.measuredAt, key, roomId, *r.temperature, r.humidity, startOfLocalDay(tz_, *r.measuredAt)});
             }
             history_->recordPrices(prices_);
             backfillPrices(now);
+            if (!sensorDaysFilled_) {
+                sensorDaysFilled_ = true;
+                history_->fillSensorDays([this](Instant t) { return startOfLocalDay(tz_, t); });
+            }
             if (!lastPrune_ || now - *lastPrune_ > hours{24}) {
                 history_->prune(now - kHistoryRetention);
                 lastPrune_ = now;
@@ -604,11 +617,17 @@ ThermalModel Controller::thermalModel(const RoomConfig& room, Instant now) {
     if (auto it = thermal_.find(room.id); it != thermal_.end() && now - it->second.first < hours{1}) {
         return it->second.second;
     }
+    const ThermalModel m = fitBetween(room, now - days{21}, now);
+    thermal_[room.id] = {now, m};
+    return m;
+}
+
+ThermalModel Controller::fitBetween(const RoomConfig& room, Instant from, Instant to) {
     ThermalModel m;
     if (history_) {
         try {
             std::vector<ThermalSample> samples;
-            for (const auto& d : history_->decisions(room.id, now - days{21}, now, false)) {
+            for (const auto& d : history_->decisions(room.id, from, to, false)) {
                 // Only real states: not limp mode or night schedules (the plug did its own thing).
                 // An open window is not how the room normally cools.
                 if (d.reason == "STALE_DATA_LIMP" || d.reason == "OFFLINE_SCHEDULE" || d.reason == "WINDOW_OPEN" ||
@@ -625,7 +644,6 @@ ThermalModel Controller::thermalModel(const RoomConfig& room, Instant now) {
             log::warn("Learning how fast {} warms up: {}", room.id, e.what());
         }
     }
-    thermal_[room.id] = {now, m};
     return m;
 }
 

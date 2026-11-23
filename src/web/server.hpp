@@ -82,6 +82,8 @@ struct WebContext {
 //   POST   /api/discover                    {"subnet": "192.168.1.0/24"}
 //   POST   /api/notify/test
 //   PUT    /api/bookings/<id>               change a booking {room, from, until, target}
+//   GET    /api/sensor-days?key=...         a sensor's last year: daily min/avg/max temperature, humidity
+//   GET    /api/batteries                   battery level per sensor per day, and days until empty
 //   GET    /api/power-mix                   the price area's power mix per hour (wind, solar, ...)
 //   GET    /api/firmware/latest             newest Tasmota release (cached 12 h)
 //   POST   /api/plugs/<id>/upgrade          background job: OTA upgrade + fail-safe test
