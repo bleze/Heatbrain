@@ -60,6 +60,9 @@ public:
     // so a single failed request (Netatmo answering 503 for a moment) does not flash up.
     std::vector<Problem> activeProblems(Instant now) const;
 
+    // Inside the quiet hours (non-critical alerts wait)?
+    bool quietAt(Instant now) const { return quiet(now); }
+
 private:
     struct State {
         Problem problem;

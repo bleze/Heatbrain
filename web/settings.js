@@ -1213,6 +1213,7 @@
         chip(soon ? "error" : unknownLow ? "warn" : "ok", "battery", `${s.battery}%`);
       }
       if (s.humidity != null) chip("", "drop", `${Math.round(s.humidity)}%`);
+      if (s.co2 != null) chip(co2Class(s.co2), "air", `CO₂ ${s.co2}`);
       if (s.temperature != null) chip("", "thermo", `${s.temperature.toFixed(1)}°C`);
       if (!s.reachable) chip("error", "alert", "offline");
       else if (s.ageMinutes != null) chip("", "clock", `${s.ageMinutes} min ago`);
@@ -1223,6 +1224,10 @@
         detailed ? S.sensorReadings?.[`${s.key}|${S.moduleDays}`] : null);
     }
   }
+
+  // The notify level (Settings -> Notifications) and a chip colour for a CO2 reading.
+  const co2Limit = () => (S.cfg?.airQuality?.co2Ppm) || 1400;
+  const co2Class = (ppm) => (ppm >= co2Limit() ? "error" : ppm >= 1000 ? "warn" : "ok");
 
   // A module's daily summary (/api/sensor-days), fetched once per 10 minutes.
   function loadSensorDays(key) {
@@ -1241,7 +1246,7 @@
     if (c && (c.loading || Date.now() - c.at < 5 * 60_000)) return;
     S.sensorReadings[id] = { ...(c || {}), loading: true, at: Date.now() };
     api(`/api/sensor-history?key=${encodeURIComponent(key)}&hours=${days * 24}`)
-      .then((r) => { S.sensorReadings[id] = { temps: r.temperatures || [], hum: r.humidity || [], at: Date.now() }; render(); })
+      .then((r) => { S.sensorReadings[id] = { temps: r.temperatures || [], hum: r.humidity || [], co2: r.co2 || [], at: Date.now() }; render(); })
       .catch(() => { S.sensorReadings[id] = { ...(c || {}), at: Date.now() }; });
   }
 
@@ -1307,6 +1312,18 @@
       return [Math.floor(lo), Math.ceil(hi)];
     };
     const path = (pts, y) => pts.map(([t, v], i) => `${i ? "L" : "M"}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    // CO2 with its guide lines: 1000 ppm (getting stuffy) and the notify level.
+    const co2Panel = (vals, draw, title) => {
+      const limit = co2Limit();
+      const lo = Math.max(300, Math.floor(Math.min(...vals) / 100) * 100);
+      const hi = Math.max(1200, Math.ceil(Math.max(...vals, limit * 0.8) / 100) * 100);
+      panel(title, 48, lo, hi, (v) => `${v}`, (svg, y) => {
+        for (const [v, cls] of [[1000, "co2-guide"], [limit, "co2-limit"]]) {
+          if (v > lo && v < hi) el("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: cls }, svg);
+        }
+        draw(svg, y);
+      });
+    };
     // Readings: the line breaks where they stop for over 30 min (a Wi-Fi-off night), like the room chart.
     const readingPath = (pts, y) => pts.map(([t, v], i) => `${i && t - pts[i - 1][0] <= 1800 ? "L" : "M"}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join("");
 
@@ -1324,6 +1341,8 @@
         const [hlo, hhi] = span(hum.map((p) => p[1]), 10, 30, 70);
         panel("Humidity %", 48, Math.max(0, hlo), Math.min(100, hhi), (v) => `${v.toFixed(0)}`, (svg, y) => el("path", { d: readingPath(hum, y), class: "yr-hum" }, svg));
       }
+      const co2 = (readings.co2 || []).filter((p) => p[0] >= t0 && p[1] != null);
+      if (co2.length) co2Panel(co2.map((p) => p[1]), (svg, y) => el("path", { d: readingPath(co2, y), class: "yr-co2" }, svg), "CO₂ ppm");
       if (!temps.length && !hum.length) el("div", { class: "muted", style: "font-size:12.5px;margin:6px 0" }, host, readings.temps ? "No readings in this period." : "Loading…");
     } else if (days.length) {
       const [lo, hi] = span(days.flatMap((d) => [d[1], d[3]]), 6, 0, 25);
@@ -1338,6 +1357,13 @@
         panel("Humidity % · daily average", 48, Math.max(0, hlo), Math.min(100, hhi), (v) => `${v.toFixed(0)}`, (svg, y) => {
           el("path", { d: path(hum.map((d) => [d[0] + 43200, d[4]]), y), class: "yr-hum" }, svg);
         });
+      }
+      const co2 = days.filter((d) => d[5] != null);
+      if (co2.length) {
+        co2Panel(co2.flatMap((d) => [d[5], d[6] ?? d[5]]), (svg, y) => {
+          el("path", { d: path(co2.map((d) => [d[0] + 43200, d[6] ?? d[5]]), y), class: "yr-co2max" }, svg);
+          el("path", { d: path(co2.map((d) => [d[0] + 43200, d[5]]), y), class: "yr-co2" }, svg);
+        }, "CO₂ ppm · daily average and highest");
       }
     } else {
       el("div", { class: "muted", style: "font-size:12.5px;margin:6px 0" }, host, "Builds up from today: a point per day (choose 2 or 7 days for the readings themselves).");
@@ -1613,6 +1639,15 @@
     const hu = el("div", { class: "field span2" }, rg);
     el("span", {}, hu, "Tomorrow's prices");
     hu.appendChild(chk(n, "priceHeadsUp", "Tell me when tomorrow is unusually expensive or cheap", true));
+    const aq = el("div", { class: "field span2" }, rg);
+    const aqLabel = el("span", {}, aq, "Air quality");
+    helpButton(aqLabel, "airQuality", rg);
+    if (!S.cfg.airQuality || typeof S.cfg.airQuality !== "object") S.cfg.airQuality = {};
+    const aqc = S.cfg.airQuality;
+    const aqRow = el("div", { class: "row", style: "gap:10px;flex-wrap:wrap" }, aq);
+    aqRow.appendChild(chk(aqc, "enabled", "Tell me when CO₂ in a room is above", true, () => render()));
+    if (aqc.enabled !== false) aqRow.appendChild(num(aqc, "co2Ppm", { step: 100, min: 600, max: 5000, placeholder: "1400", unit: "ppm" }));
+    el("div", { class: "hint" }, aq, "for 20 minutes, from the room's sensor (Netatmo, VELUX). During quiet hours it waits: a high night comes as one message in the morning.");
     const fw = el("div", { class: "field span2" }, rg);
     el("span", {}, fw, "Firmware");
     fw.appendChild(chk(n, "firmwareUpdates", "Tell me when a new Tasmota release is out for my plugs", true));

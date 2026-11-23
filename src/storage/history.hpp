@@ -34,6 +34,7 @@ struct TemperatureRecord {
     double temperature = 0;
     std::optional<double> humidity;
     std::optional<Instant> day;  // start of the local day it belongs to: then also counted in the daily summary
+    std::optional<double> co2;   // ppm, from sensors that measure it
 };
 
 // One sensor's day: temperature range and average, average humidity. Kept for years (the detailed
@@ -43,6 +44,7 @@ struct SensorDay {
     int readings = 0;
     double minTemp = 0, avgTemp = 0, maxTemp = 0;
     std::optional<double> avgHumidity;
+    std::optional<double> avgCo2, maxCo2;  // ppm
 };
 
 struct PricePoint {
@@ -89,6 +91,7 @@ public:
 
 private:
     void exec(const char* sql);
+    void addColumnIfMissing(const char* table, const char* column, const char* definition);
     sqlite3* db_ = nullptr;
 };
 

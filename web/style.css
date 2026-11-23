@@ -172,6 +172,14 @@ a { color: var(--accent); }
 .yr-band { fill: var(--flame-1); opacity: 0.18; stroke: none; }
 .yr-temp { fill: none; stroke: var(--flame-1); stroke-width: 1.6; stroke-linejoin: round; }
 .yr-hum { fill: none; stroke: var(--cat-comfort); stroke-width: 1.6; stroke-linejoin: round; }
+.yr-co2 { fill: none; stroke: var(--cat-safety); stroke-width: 1.6; stroke-linejoin: round; }
+.yr-co2max { fill: none; stroke: var(--cat-safety); stroke-width: 1.2; stroke-dasharray: 2 3; opacity: 0.7; }
+.co2-guide { stroke: var(--warning, #d9a400); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.6; }
+.co2-limit { stroke: var(--critical); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.7; }
+.hero small.co2 { margin-left: 10px; }
+.hero small.co2-stuffy, .hero small.co2-stuffy .icon { color: var(--warning, #d9a400); }
+.hero small.co2-high, .hero small.co2-high .icon { color: var(--critical); }
+.chip .icon[data-icon="air"] { color: var(--cat-safety); }
 .batt-line { fill: none; stroke: var(--good); stroke-width: 1.8; stroke-linejoin: round; }
 .batt-dot { fill: var(--good); }
 .batt-proj { fill: none; stroke: var(--good); stroke-width: 1.5; stroke-dasharray: 2 3; opacity: 0.8; }

@@ -106,6 +106,18 @@ History::History(const std::filesystem::path& dbFile) {
             t_sum REAL NOT NULL, t_min REAL NOT NULL, t_max REAL NOT NULL, h_n INTEGER NOT NULL, h_sum REAL NOT NULL,
             PRIMARY KEY (sensor_key, day));
     )");
+    // Added later (older databases get them on start-up): CO2 per reading, and per day.
+    addColumnIfMissing("temperatures", "co2", "REAL");
+    addColumnIfMissing("sensor_days", "c_n", "INTEGER NOT NULL DEFAULT 0");
+    addColumnIfMissing("sensor_days", "c_sum", "REAL NOT NULL DEFAULT 0");
+    addColumnIfMissing("sensor_days", "c_max", "REAL");
+}
+
+void History::addColumnIfMissing(const char* table, const char* column, const char* definition) {
+    Stmt s(db_, (std::string("SELECT count(*) FROM pragma_table_info('") + table + "') WHERE name=?").c_str());
+    s.bind(1, std::string(column));
+    if (s.step() && s.i64(0) > 0) return;
+    exec((std::string("ALTER TABLE ") + table + " ADD COLUMN " + column + " " + definition).c_str());
 }
 
 History::~History() { sqlite3_close(db_); }
@@ -128,22 +140,27 @@ void History::recordDecision(const DecisionRecord& d) {
 
 namespace {
 // Adds one reading to its sensor's day.
-void addToDay(sqlite3* db, const std::string& key, Instant day, double temp, std::optional<double> humidity) {
-    Stmt d(db, "INSERT INTO sensor_days VALUES (?,?,1,?,?,?,?,?) ON CONFLICT(sensor_key, day) DO UPDATE SET "
+void addToDay(sqlite3* db, const std::string& key, Instant day, double temp, std::optional<double> humidity,
+              std::optional<double> co2) {
+    Stmt d(db, "INSERT INTO sensor_days (sensor_key, day, n, t_sum, t_min, t_max, h_n, h_sum, c_n, c_sum, c_max) "
+               "VALUES (?,?,1,?,?,?,?,?,?,?,?) ON CONFLICT(sensor_key, day) DO UPDATE SET "
                "n=n+1, t_sum=t_sum+excluded.t_sum, t_min=min(t_min, excluded.t_min), t_max=max(t_max, excluded.t_max), "
-               "h_n=h_n+excluded.h_n, h_sum=h_sum+excluded.h_sum");
+               "h_n=h_n+excluded.h_n, h_sum=h_sum+excluded.h_sum, c_n=c_n+excluded.c_n, c_sum=c_sum+excluded.c_sum, "
+               "c_max=CASE WHEN excluded.c_max IS NULL THEN c_max WHEN c_max IS NULL THEN excluded.c_max "
+               "ELSE max(c_max, excluded.c_max) END");
     d.bind(1, key).bind(2, day).bind(3, temp).bind(4, temp).bind(5, temp)
-        .bind(6, static_cast<long long>(humidity ? 1 : 0)).bind(7, humidity.value_or(0.0));
+        .bind(6, static_cast<long long>(humidity ? 1 : 0)).bind(7, humidity.value_or(0.0))
+        .bind(8, static_cast<long long>(co2 ? 1 : 0)).bind(9, co2.value_or(0.0)).bind(10, co2);
     d.step();
 }
 }  // namespace
 
 void History::recordTemperature(const TemperatureRecord& t) {
-    Stmt s(db_, "INSERT OR IGNORE INTO temperatures VALUES (?,?,?,?,?)");
-    s.bind(1, t.at).bind(2, t.sensorKey).bind(3, t.roomId).bind(4, t.temperature).bind(5, t.humidity);
+    Stmt s(db_, "INSERT OR IGNORE INTO temperatures (ts, sensor_key, room_id, temperature, humidity, co2) VALUES (?,?,?,?,?,?)");
+    s.bind(1, t.at).bind(2, t.sensorKey).bind(3, t.roomId).bind(4, t.temperature).bind(5, t.humidity).bind(6, t.co2);
     s.step();
     // A new reading (not one seen before): also into the day's summary.
-    if (t.day && sqlite3_changes(db_) > 0) addToDay(db_, t.sensorKey, *t.day, t.temperature, t.humidity);
+    if (t.day && sqlite3_changes(db_) > 0) addToDay(db_, t.sensorKey, *t.day, t.temperature, t.humidity, t.co2);
 }
 
 void History::recordPrices(const PriceTable& table) {
@@ -185,33 +202,36 @@ std::optional<DecisionRecord> History::lastDecision(const std::string& roomId) c
 }
 
 std::vector<TemperatureRecord> History::temperatures(const std::string& roomId, Instant from, Instant to) const {
-    Stmt s(db_, "SELECT ts, sensor_key, room_id, temperature, humidity FROM temperatures "
+    Stmt s(db_, "SELECT ts, sensor_key, room_id, temperature, humidity, co2 FROM temperatures "
                 "WHERE room_id=? AND ts>=? AND ts<? ORDER BY ts");
     s.bind(1, roomId).bind(2, from).bind(3, to);
     std::vector<TemperatureRecord> out;
     while (s.step()) {
         TemperatureRecord t{s.instant(0), s.text(1), s.text(2), s.dbl(3), std::nullopt};
         if (!s.isNull(4)) t.humidity = s.dbl(4);
+        if (!s.isNull(5)) t.co2 = s.dbl(5);
         out.push_back(std::move(t));
     }
     return out;
 }
 
 std::vector<TemperatureRecord> History::sensorTemperatures(const std::string& sensorKey, Instant from, Instant to) const {
-    Stmt s(db_, "SELECT ts, sensor_key, room_id, temperature, humidity FROM temperatures "
+    Stmt s(db_, "SELECT ts, sensor_key, room_id, temperature, humidity, co2 FROM temperatures "
                 "WHERE sensor_key=? AND ts>=? AND ts<? ORDER BY ts");
     s.bind(1, sensorKey).bind(2, from).bind(3, to);
     std::vector<TemperatureRecord> out;
     while (s.step()) {
         TemperatureRecord t{s.instant(0), s.text(1), s.text(2), s.dbl(3), std::nullopt};
         if (!s.isNull(4)) t.humidity = s.dbl(4);
+        if (!s.isNull(5)) t.co2 = s.dbl(5);
         out.push_back(std::move(t));
     }
     return out;
 }
 
 std::vector<SensorDay> History::sensorDays(const std::string& sensorKey, Instant from, Instant to) const {
-    Stmt s(db_, "SELECT day, n, t_sum, t_min, t_max, h_n, h_sum FROM sensor_days WHERE sensor_key=? AND day>=? AND day<? ORDER BY day");
+    Stmt s(db_, "SELECT day, n, t_sum, t_min, t_max, h_n, h_sum, c_n, c_sum, c_max FROM sensor_days "
+                "WHERE sensor_key=? AND day>=? AND day<? ORDER BY day");
     s.bind(1, sensorKey).bind(2, from).bind(3, to);
     std::vector<SensorDay> out;
     while (s.step()) {
@@ -220,6 +240,8 @@ std::vector<SensorDay> History::sensorDays(const std::string& sensorKey, Instant
         d.minTemp = s.dbl(3);
         d.maxTemp = s.dbl(4);
         if (const auto hn = s.i64(5); hn > 0) d.avgHumidity = s.dbl(6) / static_cast<double>(hn);
+        if (const auto cn = s.i64(7); cn > 0) d.avgCo2 = s.dbl(8) / static_cast<double>(cn);
+        if (!s.isNull(9)) d.maxCo2 = s.dbl(9);
         out.push_back(d);
     }
     return out;
@@ -232,11 +254,12 @@ void History::fillSensorDays(const std::function<Instant(Instant)>& dayOf) {
     }
     exec("BEGIN");
     try {
-        Stmt s(db_, "SELECT ts, sensor_key, temperature, humidity FROM temperatures ORDER BY ts");
+        Stmt s(db_, "SELECT ts, sensor_key, temperature, humidity, co2 FROM temperatures ORDER BY ts");
         while (s.step()) {
-            std::optional<double> h;
+            std::optional<double> h, c;
             if (!s.isNull(3)) h = s.dbl(3);
-            addToDay(db_, s.text(1), dayOf(s.instant(0)), s.dbl(2), h);
+            if (!s.isNull(4)) c = s.dbl(4);
+            addToDay(db_, s.text(1), dayOf(s.instant(0)), s.dbl(2), h, c);
         }
         exec("COMMIT");
     } catch (...) {
@@ -317,8 +340,14 @@ void History::replaceFrom(const std::filesystem::path& file) {
                 Stmt has(db_, "SELECT count(*) FROM src.sqlite_master WHERE type='table' AND name=?");
                 has.bind(1, std::string(table));
                 if (!has.step() || has.i64(0) == 0) continue;
+                std::string cols;
+                {
+                    Stmt c(db_, (std::string("SELECT name FROM pragma_table_info('") + table + "', 'main') WHERE name IN "
+                                 "(SELECT name FROM pragma_table_info('" + table + "', 'src'))").c_str());
+                    while (c.step()) cols += (cols.empty() ? "" : ", ") + c.text(0);
+                }
                 exec((std::string("DELETE FROM main.") + table).c_str());
-                exec((std::string("INSERT INTO main.") + table + " SELECT * FROM src." + table).c_str());
+                exec((std::string("INSERT INTO main.") + table + " (" + cols + ") SELECT " + cols + " FROM src." + table).c_str());
             }
             exec("COMMIT");
         } catch (...) {

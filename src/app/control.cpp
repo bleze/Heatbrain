@@ -19,6 +19,7 @@
 #include "app/meter_sync.hpp"
 #include "app/power_mix_sync.hpp"
 #include "core/insulation.hpp"
+#include "core/air_quality.hpp"
 #include "app/rooms.hpp"
 #include "core/log.hpp"
 #include "notify/notifier.hpp"
@@ -198,6 +199,28 @@ std::vector<fs::path> webRootCandidates() {
     return c;
 }
 
+// "airQuality": {"enabled": true, "co2Ppm": 1400}
+hb::AirQualityConfig parseAirQuality(const nlohmann::json& cfg) {
+    hb::AirQualityConfig c;
+    if (cfg.contains("airQuality") && cfg["airQuality"].is_object()) {
+        const auto& a = cfg["airQuality"];
+        c.enabled = a.value("enabled", true);
+        if (a.contains("co2Ppm") && a["co2Ppm"].is_number()) c.highPpm = std::clamp(a["co2Ppm"].get<int>(), 600, 5000);
+    }
+    return c;
+}
+
+// The current reading of a room's chosen sensor ("netatmo:Bedroom" by name, or a full key).
+const hb::SensorReading* roomReading(const ControlEnv& env, const hb::RoomConfig& room) {
+    const auto& ref = room.sensor;
+    if (ref.empty()) return nullptr;
+    const std::string source = ref.substr(0, ref.find(':')), key = ref.substr(ref.find(':') + 1);
+    for (const auto& [k, reading] : env.controller->readings()) {
+        if (k == ref || (k.starts_with(source + ":") && reading.name == key)) return &reading;
+    }
+    return nullptr;
+}
+
 // How well each room keeps its heat (from its learned model and heater power): W/K, per m2 floor
 // when set, and the heat it needs for a month at today's outdoor temperature and prices.
 struct RoomInsulation {
@@ -295,12 +318,9 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                   {"plugs", r.plugs},
                   {"priceOnly", r.room->priceOnly.has_value()},
                   {"override", nullptr}};
-        if (const auto& ref = r.room->sensor; !ref.empty()) {
-            const std::string source = ref.substr(0, ref.find(':')), key = ref.substr(ref.find(':') + 1);
-            for (const auto& [k, reading] : env.controller->readings()) {
-                const bool match = k == ref || (k.starts_with(source + ":") && reading.name == key);
-                if (match && reading.humidity) room["humidity"] = *reading.humidity;
-            }
+        if (const auto* reading = roomReading(env, *r.room)) {
+            if (reading->humidity) room["humidity"] = *reading->humidity;
+            if (reading->co2) room["co2"] = *reading->co2;
         }
         json plan = json::array();
         for (const auto& s : r.plan) {
@@ -347,6 +367,7 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
         json j{{"key", key}, {"name", r.name}, {"kind", r.kind}, {"station", r.station}, {"reachable", r.reachable}};
         if (r.temperature) j["temperature"] = *r.temperature;
         if (r.humidity) j["humidity"] = *r.humidity;
+        if (r.co2) j["co2"] = *r.co2;
         if (r.batteryPercent) j["battery"] = *r.batteryPercent;
         if (r.measuredAt) j["ageMinutes"] = duration_cast<minutes>(now - *r.measuredAt).count();
         sensors.push_back(std::move(j));
@@ -398,6 +419,7 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                 {"dashboard", env.cfg.raw.contains("dashboard") && env.cfg.raw["dashboard"].is_object() ? env.cfg.raw["dashboard"]
                                                                                                      : nlohmann::json::object()},
                 {"configError", nullptr},
+                {"airQuality", {{"enabled", parseAirQuality(env.cfg.raw).enabled}, {"co2Ppm", parseAirQuality(env.cfg.raw).highPpm}}},
                 {"rooms", rooms},
                 {"problems", problems},
                 {"prices", prices},
@@ -491,6 +513,7 @@ void controlLoop(ControlEnv& env, hb::StatusBoard& board, std::unique_ptr<hb::Al
     if (!alertsPtr) alertsPtr = std::make_unique<hb::AlertManager>(notifications.policy, *env.tz);
     else alertsPtr->reconfigure(notifications.policy, *env.tz);
     hb::AlertManager& alerts = *alertsPtr;
+    static hb::AirQualityTracker air;  // across settings reloads, like the alerts' memory
     hb::log::info("  notifications: {} channel(s)", notifications.channels.size());
     // The start message goes out after the first control step, so it can tell what is happening.
     bool announcePending = announce && notifications.notifyOnStart;
@@ -543,6 +566,24 @@ void controlLoop(ControlEnv& env, hb::StatusBoard& board, std::unique_ptr<hb::Al
             insulationProblems(env, result, now);
         } catch (const std::exception& e) {
             hb::log::warn("Insulation: {}", e.what());
+        }
+        // Air quality: CO2 high in a room (held during quiet hours; what happened in them comes in the morning).
+        const auto airCfg = parseAirQuality(env.cfg.raw);
+        const bool quietNow = alerts.quietAt(now);
+        for (const auto& r : result.rooms) {
+            const auto* reading = roomReading(env, *r.room);
+            const bool fresh = reading && reading->co2 && reading->reachable && reading->measuredAt && now - *reading->measuredAt < minutes{30};
+            air.update(r.room->id, r.room->name, fresh ? reading->co2 : std::nullopt, now, quietNow, *env.tz, airCfg, result.problems);
+        }
+        if (const auto m = air.morningSummary(quietNow, *env.tz, airCfg)) {
+            hb::log::info("{}: {}", m->first, m->second);
+            for (auto& ch : notifications.channels) {
+                try {
+                    ch->sendText(m->first, m->second);
+                } catch (const std::exception& e) {
+                    hb::log::warn("{}: {}", ch->name(), e.what());
+                }
+            }
         }
         alerts.update(now, result.problems, deliver);
         if (announcePending) {

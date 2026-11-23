@@ -74,6 +74,7 @@ add_library(heatbrain_core STATIC
   src/core/forecast.cpp
   src/core/battery.cpp
   src/core/insulation.cpp
+  src/core/air_quality.cpp
 )
 target_include_directories(heatbrain_core PUBLIC src)
 target_compile_definitions(heatbrain_core PRIVATE HEATBRAIN_REVISION="${HEATBRAIN_REVISION}")
@@ -151,6 +152,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_power_mix.cpp
     tests/test_battery.cpp
     tests/test_insulation.cpp
+    tests/test_air_quality.cpp
     tests/test_sdg_incoming.cpp
     tests/test_controller.cpp
     tests/test_alerts.cpp

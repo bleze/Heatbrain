@@ -221,6 +221,7 @@ void Controller::readSensors(TickResult& result) {
                     if (auto it = readings_.find(key); it != readings_.end() && it->second.temperature) {
                         r.temperature = it->second.temperature;
                         r.humidity = it->second.humidity;
+                        r.co2 = it->second.co2;
                         r.measuredAt = it->second.measuredAt;
                     }
                 }
@@ -588,7 +589,8 @@ TickResult Controller::tick(Instant now, bool apply) {
                     }
                 }
                 history_->recordTemperature(
-                    {*r.measuredAt, key, roomId, *r.temperature, r.humidity, startOfLocalDay(tz_, *r.measuredAt)});
+                    {*r.measuredAt, key, roomId, *r.temperature, r.humidity, startOfLocalDay(tz_, *r.measuredAt),
+                     r.co2 ? std::optional<double>(*r.co2) : std::nullopt});
             }
             history_->recordPrices(prices_);
             backfillPrices(now);
@@ -910,6 +912,7 @@ void Controller::loadReadings() {
             s.kind = r.value("kind", "");
             if (r.contains("temperature")) s.temperature = r["temperature"].get<double>();
             if (r.contains("humidity")) s.humidity = r["humidity"].get<double>();
+            if (r.contains("co2")) s.co2 = r["co2"].get<int>();
             if (r.contains("measuredAt")) s.measuredAt = Instant{seconds{r["measuredAt"].get<long long>()}};
             s.reachable = r.value("reachable", true);
             if (r.contains("battery")) s.batteryPercent = r["battery"].get<int>();
@@ -927,6 +930,7 @@ void Controller::saveReadings() const {
         json j{{"sensorId", r.sensorId}, {"name", r.name}, {"station", r.station}, {"kind", r.kind}, {"reachable", r.reachable}};
         if (r.temperature) j["temperature"] = *r.temperature;
         if (r.humidity) j["humidity"] = *r.humidity;
+        if (r.co2) j["co2"] = *r.co2;
         if (r.measuredAt) j["measuredAt"] = r.measuredAt->time_since_epoch().count();
         if (r.batteryPercent) j["battery"] = *r.batteryPercent;
         items[key] = std::move(j);

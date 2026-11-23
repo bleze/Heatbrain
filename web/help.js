@@ -100,6 +100,14 @@ const HELP = {
       "Mount the wall switch away from heaters, direct sun and electronics - it is a room thermometer like any other.",
     ],
   },
+  airQuality: {
+    title: "Air quality (CO₂)",
+    body: [
+      "Netatmo indoor modules and the VELUX sensors measure CO₂, the gas we breathe out. It is the best everyday measure of how fresh the air in a room is: outdoors is about 420 ppm, below 1000 is fine, from 1000 it gets stuffy, and above 1400 most people sleep worse, get headaches or tire - time to air the room.",
+      "heatbrain keeps the CO₂ with the other readings (Settings -> Sensors shows it per module, with the 1000 and notify levels as dashed lines), shows it on a room's card from 1000 ppm, and tells you when it has been above the level you choose for 20 minutes. During quiet hours it waits; a high night comes as one message in the morning, with when it was high and how high.",
+      "Bedrooms with the door and vents closed often reach 1500-2500 ppm by morning. A vent or a window slightly open usually fixes it - airing costs some heat, but a short, wide airing (5-10 minutes) loses much less than a window on the latch all day.",
+    ],
+  },
   insulation: {
     title: "How well a room keeps its heat",
     body: [
@@ -291,7 +299,7 @@ function renderManual(host) {
     "heatbrain switches your radiators' plugs on and off from the price of electricity, the temperature in each room and the program you set. Everything here is also available as '?' next to the settings.");
   const toc = el("nav", { class: "toc" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "thermostats", "sensors", "velux", "forecast", "openWindow", "insulation", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
+                 "thermostats", "sensors", "velux", "forecast", "openWindow", "insulation", "airQuality", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, card);
     el("h3", {}, sec, HELP[key].title);

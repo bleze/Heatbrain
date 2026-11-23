@@ -629,6 +629,12 @@ let renderRooms = function () {
       hum.appendChild(icon("drop"));
       hum.appendChild(document.createTextNode(`${Math.round(r.humidity)} %`));
     }
+    if (!r.priceOnly && r.co2 != null && r.co2 >= 1000) {
+      const limit = state.status?.airQuality?.co2Ppm || 1400;
+      const c = el("small", { class: `hum co2 ${r.co2 >= limit ? "co2-high" : "co2-stuffy"}`, title: r.co2 >= limit ? "CO₂: poor air - time to air the room" : "CO₂: getting stuffy" }, hero);
+      c.appendChild(icon("air"));
+      c.appendChild(document.createTextNode(`${r.co2} ppm`));
+    }
 
     const reason = el("div", { class: "reason" }, card);
     if (cat) el("span", { class: "swatch", style: `background:${catColor(cat)}` }, reason);

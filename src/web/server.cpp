@@ -196,7 +196,11 @@ void WebServer::routes() {
         const Instant from = to - hours{hoursBack};
 
         json temps = json::array();
-        for (const auto& t : history.temperatures(id, from, to)) temps.push_back({epoch(t.at), t.temperature});
+        json co2 = json::array();
+        for (const auto& t : history.temperatures(id, from, to)) {
+            temps.push_back({epoch(t.at), t.temperature});
+            if (t.co2) co2.push_back({epoch(t.at), *t.co2});
+        }
         json decisions = json::array();
         json events = json::array();
         for (const auto& d : history.decisions(id, from, to, false)) {
@@ -219,6 +223,7 @@ void WebServer::routes() {
                            {"from", epoch(from)},
                            {"to", epoch(to)},
                            {"temperatures", temps},
+                           {"co2", co2},
                            {"decisions", decisions},
                            {"events", events},
                            {"prices", prices},
@@ -236,14 +241,16 @@ void WebServer::routes() {
         const Instant from = to - hours{hoursBack};
         json temps = json::array();
         json humidity = json::array();
+        json co2 = json::array();
         for (const auto& t : history.sensorTemperatures(key, from, to)) {
             temps.push_back({epoch(t.at), t.temperature});
             if (t.humidity) humidity.push_back({epoch(t.at), *t.humidity});
+            if (t.co2) co2.push_back({epoch(t.at), *t.co2});
         }
         json prices = json::array();
         for (const auto& p : history.prices(from, to + hours{36})) prices.push_back({epoch(p.slot), p.total});
         sendJson(res, json{{"key", key}, {"from", epoch(from)}, {"to", epoch(to)}, {"temperatures", temps},
-                           {"humidity", humidity}, {"prices", prices},
+                           {"humidity", humidity}, {"co2", co2}, {"prices", prices},
                            {"wifi", wifiLane(history, readConfigFile(ctx_.configFile), from, to)}});
     });
 
@@ -450,7 +457,7 @@ void WebServer::routes() {
         sendJson(res, out);
     });
 
-    // A sensor's last year, a point per day: [[day, minTemp, avgTemp, maxTemp, avgHumidity|null], ...] - for the
+    // A sensor's last year, a point per day: [[day, minTemp, avgTemp, maxTemp, avgHumidity|null, avgCo2|null, maxCo2|null], ...] - for the
     // charts in Settings -> Sensors (with /api/batteries for the battery).
     s.Get("/api/sensor-days", [this](const httplib::Request& req, httplib::Response& res) {
         if (!req.has_param("key")) return sendError(res, 400, "key missing");
@@ -458,7 +465,8 @@ void WebServer::routes() {
         const Instant to = floor<seconds>(system_clock::now()) + days{1};
         json days = json::array();
         for (const auto& d : history.sensorDays(req.get_param_value("key"), to - std::chrono::days{400}, to)) {
-            days.push_back({epoch(d.day), d.minTemp, d.avgTemp, d.maxTemp, d.avgHumidity ? json(*d.avgHumidity) : json(nullptr)});
+            days.push_back({epoch(d.day), d.minTemp, d.avgTemp, d.maxTemp, d.avgHumidity ? json(*d.avgHumidity) : json(nullptr),
+                            d.avgCo2 ? json(*d.avgCo2) : json(nullptr), d.maxCo2 ? json(*d.maxCo2) : json(nullptr)});
         }
         sendJson(res, json{{"days", days}});
     });
