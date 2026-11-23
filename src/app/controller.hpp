@@ -16,6 +16,7 @@
 #include "core/window.hpp"
 #include "net/http.hpp"
 #include "core/alerts.hpp"
+#include "core/battery.hpp"
 #include "core/offline.hpp"
 #include "core/planner.hpp"
 #include "plugs/plugs.hpp"
@@ -119,6 +120,11 @@ private:
     // Past prices the history doesn't have yet (it only records from when heatbrain ran): the last
     // 8 days, like the power mix, so the price chart reaches back too. Tried once a day.
     void backfillPrices(Instant now);
+    // Battery levels once a day per sensor (<dataDir>/battery.json, 120 days), and the warnings
+    // timed by when each battery will run out (or before a planned away period).
+    void checkBatteries(Instant now, const std::optional<AwayMode>& away, TickResult& result);
+    std::map<std::string, std::vector<BatterySample>> battery_;
+    bool batteryLoaded_ = false;
     std::optional<Instant> backfillTried_;
     std::optional<Instant> firstTick_;  // the backfill waits until the start-up requests are done
     void readSensors(TickResult& result);

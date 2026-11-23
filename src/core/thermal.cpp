@@ -10,6 +10,10 @@ using namespace std::chrono;
 namespace {
 
 constexpr auto kMaxGap = minutes{20};
+// After a gap in the readings (a Wi-Fi-off night) a sensor needs a while to settle: a thermostat's
+// built-in sensor reads low while its radio was idle and catches up within minutes - which would
+// look like the room warming by itself. The first hour after a gap is left out.
+constexpr auto kSettle = minutes{60};
 constexpr auto kWindow = minutes{90};
 constexpr double kMinIndoorOutdoorGap = 3.0;  // below this, cooling says little about the loss
 constexpr auto kCap = hours{48};
@@ -52,8 +56,15 @@ std::vector<Window> windows(const std::vector<ThermalSample>& s) {
 
 }  // namespace
 
-ThermalModel fitThermalModel(const std::vector<ThermalSample>& samples) {
+ThermalModel fitThermalModel(const std::vector<ThermalSample>& all) {
     ThermalModel m;
+    std::vector<ThermalSample> samples;
+    std::optional<Instant> settledAt;
+    for (std::size_t i = 0; i < all.size(); ++i) {
+        if (i > 0 && all[i].at - all[i - 1].at > kMaxGap) settledAt = all[i].at + kSettle;
+        if (settledAt && all[i].at < *settledAt) continue;
+        samples.push_back(all[i]);
+    }
     const auto ws = windows(samples);
     std::vector<double> losses;
     for (const auto& w : ws) {

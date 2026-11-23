@@ -61,3 +61,24 @@ TEST_CASE("Warm-up estimates: radiators take hours, a concrete floor a day, the 
     CHECK_FALSE(cold.reachable);
     CHECK(cold.duration == hours{48});
 }
+
+TEST_CASE("Thermal model: the hour after a gap in the readings is left out (sensors settle)") {
+    // Cooling 0.3 deg/h, steady; a 6 h gap, then a sensor that reads 2 deg low and catches up within
+    // 15 min (as a thermostat's built-in sensor does after a Wi-Fi-off night).
+    std::vector<ThermalSample> s;
+    const Instant t0{std::chrono::seconds{1'790'000'000}};
+    using std::chrono::minutes;
+    double temp = 18.0;
+    for (int m = 0; m <= 6 * 60; m += 5) { s.push_back({t0 + minutes{m}, temp, 5.0, false}); temp -= 0.3 / 12; }
+    const Instant back = t0 + minutes{12 * 60};
+    temp -= 1.8;  // cooled during the gap
+    for (int m = 0; m <= 4 * 60; m += 5) {
+        const double artefact = m < 15 ? -2.0 * (15 - m) / 15.0 : 0.0;
+        s.push_back({back + minutes{m}, temp + artefact, 5.0, false});
+        temp -= 0.3 / 12;
+    }
+    const auto m = fitThermalModel(s);
+    // Every cooling window says the same: about 0.3 / (indoor - outdoor); none sees the jump.
+    CHECK(m.coolingStretches >= 3);
+    CHECK(m.loss > 0.02);
+}

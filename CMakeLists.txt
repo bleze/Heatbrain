@@ -72,6 +72,7 @@ add_library(heatbrain_core STATIC
   src/core/thermal.cpp
   src/core/window.cpp
   src/core/forecast.cpp
+  src/core/battery.cpp
 )
 target_include_directories(heatbrain_core PUBLIC src)
 target_compile_definitions(heatbrain_core PRIVATE HEATBRAIN_REVISION="${HEATBRAIN_REVISION}")
@@ -145,6 +146,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_window.cpp
     tests/test_forecast.cpp
     tests/test_power_mix.cpp
+    tests/test_battery.cpp
     tests/test_sdg_incoming.cpp
     tests/test_controller.cpp
     tests/test_alerts.cpp

@@ -15,12 +15,12 @@
 namespace hb {
 
 using nlohmann::json;
+namespace fs = std::filesystem;
 using namespace std::chrono;
 
 namespace {
 constexpr auto kFailsafeRecheck = hours{1};
 constexpr auto kHistoryRetention = days{90};
-constexpr int kLowBatteryPercent = 20;
 constexpr int kTomorrowPricesExpectedHour = 15;  // published ~13:00; alert if still missing at 15
 
 void add(TickResult& r, std::string key, Severity sev, std::string msg, minutes debounce = minutes{0},
@@ -147,6 +147,59 @@ void Controller::backfillPrices(Instant now) {
     }
 }
 
+void Controller::checkBatteries(Instant now, const std::optional<AwayMode>& away, TickResult& result) {
+    const fs::path file = dataDir_.empty() ? fs::path() : dataDir_ / "battery.json";
+    if (!batteryLoaded_ && !file.empty()) {
+        batteryLoaded_ = true;
+        try {
+            if (std::ifstream in(file); in) {
+                const json saved = json::parse(in);  // kept alive: items() only refers to it
+                for (const auto& [key, arr] : saved.items()) {
+                    for (const auto& p : arr) battery_[key].push_back({Instant{seconds{p.at(0).get<long long>()}}, p.at(1).get<int>()});
+                }
+            }
+        } catch (const std::exception& e) {
+            log::warn("Battery history: {}", e.what());
+        }
+    }
+    const Instant today = startOfLocalDay(tz_, now);
+    bool changed = false;
+    for (const auto& [key, r] : readings_) {
+        if (!r.batteryPercent) continue;
+        auto& log = battery_[key];
+        // A new battery: the level jumps up - start the history afresh.
+        if (!log.empty() && *r.batteryPercent >= log.back().percent + 15) log.clear();
+        if (log.empty() || log.back().day != today) {
+            log.push_back({today, *r.batteryPercent});
+            changed = true;
+        } else if (log.back().percent != *r.batteryPercent) {
+            log.back().percent = std::min(log.back().percent, *r.batteryPercent);  // the day's lowest
+            changed = true;
+        }
+        std::erase_if(log, [&](const BatterySample& s) { return today - s.day > days{120}; });
+        if (const auto w = batteryWarning(r.name, *r.batteryPercent, log, now, away, tz_)) {
+            const bool urgent = *r.batteryPercent <= kBatteryEmptyPercent || w->message.find("away") != std::string::npos;
+            add(result, "sensor:" + key + ":battery", urgent ? Severity::Warning : Severity::Info, w->message, minutes{0},
+                hours{24});
+        }
+    }
+    if (changed && !file.empty()) {
+        try {
+            json j = json::object();
+            for (const auto& [key, log] : battery_) {
+                json arr = json::array();
+                for (const auto& s : log) arr.push_back({s.day.time_since_epoch().count(), s.percent});
+                j[key] = arr;
+            }
+            const fs::path tmp = fs::path(file) += ".tmp";
+            std::ofstream(tmp) << j.dump();
+            fs::rename(tmp, file);
+        } catch (const std::exception& e) {
+            log::warn("Battery history: {}", e.what());
+        }
+    }
+}
+
 void Controller::readSensors(TickResult& result) {
     sourcesAnswered_.clear();
     for (auto& src : sources_) {
@@ -158,11 +211,6 @@ void Controller::readSensors(TickResult& result) {
                 if (!r.reachable) {
                     add(result, "sensor:" + key + ":offline", Severity::Warning,
                         std::format("Sensor '{}' is offline (no contact with the station)", r.name), minutes{30});
-                }
-                if (r.batteryPercent && *r.batteryPercent <= kLowBatteryPercent) {
-                    add(result, "sensor:" + key + ":battery", Severity::Info,
-                        std::format("Sensor '{}' battery is at {}% - replace soon", r.name, *r.batteryPercent),
-                        minutes{0}, hours{24});
                 }
                 // An offline module reports no temperature at all. Keep the last good one
                 // with its measurement time: the planner's age check (stale after 30 min)
@@ -324,6 +372,7 @@ TickResult Controller::tick(Instant now, bool apply) {
 
     const auto overrides = overrides_ ? overrides_->load() : std::map<std::string, ManualOverride>{};
     const auto away = away_ ? away_->load() : std::nullopt;
+    checkBatteries(now, away, result);
 
     // Outdoor temperature: the configured sensor, else the first outdoor one; only if recent.
     std::optional<double> outdoor;
