@@ -225,7 +225,7 @@
   function sectionHead(parent, title, iconName, tone, desc, helpKey) {
     const head = el("div", { class: "card-head" }, parent);
     const h = el("h2", {}, head);
-    h.appendChild(badge(iconName, tone));
+    h.appendChild(tone === "src" ? srcBadge(iconName) : badge(iconName, tone));
     h.appendChild(document.createTextNode(title));
     const d = desc ? el("div", { class: "hint", style: "margin:6px 0 0" }, parent, desc) : null;
     if (helpKey) helpButton(h, helpKey, d || head);
@@ -261,22 +261,106 @@
 
   // Netatmo modules first (by name, as configs always had it), then the thermostats' own probes (by
   // id: devi:<id> and devi:<id>-floor) - also before the first reading, as soon as one is set up.
-  function sensorOptions() {
-    const out = [["", "— choose a sensor —"]];
+  // Where a sensor's readings come from: its group in the sensor dropdown, its icon and colour.
+  const SOURCES = {
+    netatmo: { label: "Netatmo", icon: "netatmo" },
+    velux: { label: "VELUX ACTIVE", icon: "velux" },
+    devi: { label: "DEVI thermostat", icon: "devi" },
+  };
+  const sourceOf = (key) => (key || "").split(":")[0];
+  const sourceInfo = (src) => SOURCES[src] || { label: src, icon: "thermo" };
+  function srcBadge(src) {
+    const b = el("span", { class: `badge src-badge src-${src}` });
+    b.appendChild(icon(sourceInfo(src).icon));
+    return b;
+  }
+  function sourceIcon(src) {
+    const i = icon(sourceInfo(src).icon, "icon src-icon");
+    i.classList.add(`src-${src}`);
+    return i;
+  }
+
+  // The indoor sensors a room can use, grouped by source: [{ source, items: [{ value, label, temp }] }].
+  function sensorGroups() {
     const readings = state.status?.sensors || [];
-    const temp = (r) => (r?.temperature != null ? ` · ${r.temperature.toFixed(1)}°` : "");
+    const groups = new Map();
+    const add = (source, item) => { if (!groups.has(source)) groups.set(source, []); groups.get(source).push(item); };
     for (const s of readings) {
-      const source = s.key.split(":")[0];
+      const source = sourceOf(s.key);
       if (s.kind !== "indoor" || source === "devi") continue;
-      out.push([`${source}:${s.name}`, `${s.name}${temp(s)}`]);
+      add(source, { value: `${source}:${s.name}`, label: s.name, temp: s.temperature });
     }
     for (const t of S.cfg.thermostats || []) {
       const name = t.name || t.id;
-      for (const [key, what] of [[`devi:${t.id}`, "thermostat room sensor"], [`devi:${t.id}-floor`, "thermostat floor probe"]]) {
-        out.push([key, `${name} · ${what}${temp(readings.find((r) => r.key === key))}`]);
+      for (const [key, what] of [[`devi:${t.id}`, "room sensor"], [`devi:${t.id}-floor`, "floor probe"]]) {
+        add("devi", { value: key, label: `${name} · ${what}`, temp: readings.find((r) => r.key === key)?.temperature });
       }
     }
-    return out;
+    const order = Object.keys(SOURCES);
+    const rank = (s) => (order.includes(s) ? order.indexOf(s) : 99);
+    return [...groups].map(([source, items]) => ({ source, items })).sort((a, b) => rank(a.source) - rank(b.source));
+  }
+
+  // A dropdown that can show icons (a native select cannot): plain choices first, then a heading
+  // per source. Keyboard: arrows open it and move, Enter or Space picks, Esc closes.
+  function sensorPicker({ value, plain, groups, onPick }) {
+    const wrap = el("div", { class: "picker" });
+    const all = [...plain.map((p) => ({ ...p, source: null })), ...groups.flatMap((g) => g.items.map((it) => ({ ...it, source: g.source })))];
+    const cur = all.find((o) => o.value === value);
+    const b = el("button", { type: "button", class: "picker-btn", "aria-haspopup": "listbox", "aria-expanded": "false" }, wrap);
+    if (cur?.source) b.appendChild(sourceIcon(cur.source));
+    el("span", { class: "lbl" }, b, cur ? `${cur.label}${cur.temp != null ? ` · ${cur.temp.toFixed(1)}°` : ""}` : value ? `${value} (not found)` : "— choose a sensor —");
+    if (cur?.source) el("span", { class: "src-tag" }, b, sourceInfo(cur.source).label);
+    let pop = null, active = -1, opts = [];
+    const outside = (e) => { if (!wrap.contains(e.target)) close(false); };
+    function close(focus) {
+      if (!pop) return;
+      pop.remove(); pop = null; wrap.classList.remove("open"); b.setAttribute("aria-expanded", "false");
+      document.removeEventListener("pointerdown", outside, true);
+      if (focus) b.focus();
+    }
+    const setActive = (i) => {
+      opts.forEach((o, k) => o.classList.toggle("active", k === i));
+      active = i;
+      opts[i]?.scrollIntoView({ block: "nearest" });
+    };
+    const pick = (o) => { close(true); if (o.value !== value) onPick(o.value); };
+    const open = () => {
+      pop = el("div", { class: "picker-pop", role: "listbox" }, wrap);
+      opts = [];
+      const option = (o) => {
+        const d = el("div", { class: `picker-opt${o.source ? "" : " plain"}`, role: "option", "aria-selected": String(o.value === value) }, pop);
+        el("span", {}, d, o.label);
+        if (o.temp != null) el("span", { class: "temp" }, d, `${o.temp.toFixed(1)}°`);
+        d.addEventListener("pointerdown", (e) => e.preventDefault());  // keep the focus on the button
+        d.addEventListener("click", () => pick(o));
+        d.addEventListener("pointermove", () => setActive(opts.indexOf(d)));
+        opts.push(d);
+      };
+      plain.forEach((p) => option({ ...p, source: null }));
+      for (const g of groups) {
+        const h = el("div", { class: `picker-group src-${g.source}` }, pop);
+        h.appendChild(sourceIcon(g.source));
+        h.appendChild(document.createTextNode(sourceInfo(g.source).label));
+        g.items.forEach((it) => option({ ...it, source: g.source }));
+      }
+      wrap.classList.add("open"); b.setAttribute("aria-expanded", "true");
+      setActive(Math.max(0, all.findIndex((o) => o.value === value)));
+      document.addEventListener("pointerdown", outside, true);
+    };
+    b.addEventListener("click", () => (pop ? close(true) : open()));
+    b.addEventListener("keydown", (e) => {
+      if (!pop) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); open(); }
+        return;
+      }
+      if (e.key === "Escape") { e.preventDefault(); close(true); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); setActive(Math.min(opts.length - 1, active + 1)); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); setActive(Math.max(0, active - 1)); }
+      else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (active >= 0) pick(all[active]); }
+      else if (e.key === "Tab") close(false);
+    });
+    return wrap;
   }
 
   function renderRooms(body) {
@@ -304,25 +388,22 @@
   // to / keep above / off); with "no sensor" it runs the cheapest hours of each day.
   const NO_SENSOR = "__none__";
   function sensorField(g, room) {
-    const s = el("select");
-    const opts = sensorOptions().filter(([v]) => v !== "");
     const current = room.priceOnly ? NO_SENSOR : room.sensor || "";
-    const list = [...(current === "" ? [["", "— choose a sensor —"]] : []), [NO_SENSOR, "No sensor (cheapest hours)"], ...opts];
-    if (current && current !== NO_SENSOR && !opts.some(([v]) => v === current)) list.splice(1, 0, [current, `${current} (not found)`]);
-    for (const [v, label] of list) {
-      const o = el("option", { value: v }, s, label);
-      if (v === current) o.selected = true;
-    }
-    s.addEventListener("change", () => {
-      if (s.value === NO_SENSOR) {
-        room.priceOnly ||= { hoursPerDay: 12, avoid: [{ from: "17:00", to: "21:00" }] };
-        room.sensor = "";
-      } else {
-        delete room.priceOnly;
-        room.program ||= [{ at: "00:00", mode: "heat", target: 20 }];
-        room.sensor = s.value;
-      }
-      changed(); render();
+    const s = sensorPicker({
+      value: current,
+      plain: [{ value: NO_SENSOR, label: "No sensor (cheapest hours)" }],
+      groups: sensorGroups(),
+      onPick: (v) => {
+        if (v === NO_SENSOR) {
+          room.priceOnly ||= { hoursPerDay: 12, avoid: [{ from: "17:00", to: "21:00" }] };
+          room.sensor = "";
+        } else {
+          delete room.priceOnly;
+          room.program ||= [{ at: "00:00", mode: "heat", target: 20 }];
+          room.sensor = v;
+        }
+        changed(); render();
+      },
     });
     field(g, "Temperature sensor", s, { hint: room.priceOnly ? "without one, the room runs the cheapest hours of each day"
       : (state.status?.sensors || []).length ? "" : "No sensors yet: set up Netatmo on the Sensors tab" });
@@ -659,7 +740,7 @@
     loadDevi();
     const d = S.devi || {};
     const card = el("section", { class: "card" }, body);
-    sectionHead(card, "Thermostats", "thermo", "violet",
+    sectionHead(card, "Thermostats", "devi", "src",
       "DEVIreg Smart floor heating: heatbrain sets the thermostat's temperature by price and program, and it regulates by itself.", "thermostats");
     const list = el("div", { class: "list" }, card);
     const cfgT = arr(S.cfg, "thermostats");
@@ -933,7 +1014,7 @@
   // --- Sensors ------------------------------------------------------------------------
   function renderSensors(body) {
     const card = el("section", { class: "card" }, body);
-    sectionHead(card, "Netatmo weather station", "thermo", "warm", "Indoor modules give each room its temperature.", "sensors");
+    sectionHead(card, "Netatmo weather station", "netatmo", "src", "Indoor modules give each room its temperature.", "sensors");
     const sources = arr(S.cfg, "temperatureSources");
     let n = sources.find((s) => s.type === "netatmo");
     if (!n) {
@@ -956,7 +1037,7 @@
 
     // VELUX ACTIVE: the room climate its wall switch / sensors measure (read only).
     const vx = el("section", { class: "card" }, body);
-    sectionHead(vx, "VELUX ACTIVE", "thermo", "warm", "Temperature, humidity and CO₂ from the VELUX wall switch or climate sensors, per VELUX room.", "velux");
+    sectionHead(vx, "VELUX ACTIVE", "velux", "src", "Temperature, humidity and CO₂ from the VELUX wall switch or climate sensors, per VELUX room.", "velux");
     const vIdx = sources.findIndex((s) => s.type === "velux");
     const vRead = (state.status?.sensors || []).filter((s) => s.key.startsWith("velux:"));
     if (vIdx >= 0) {
@@ -1068,7 +1149,7 @@
         } catch (e) { results.textContent = `Search failed: ${e.message}`; }
       };
       q.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); find(); } });
-      btn(srow, "Search", "search", find);
+      btn(srow, "Search", "search", find, "primary");  // like Connect / Pair: the action for the field beside it
 
       const info = el("div", { class: "hint", style: "grid-column: 1 / -1" }, fg);
       if (!st) info.textContent = "No position known yet: search for your town, or wait for the Netatmo station.";
@@ -1080,7 +1161,7 @@
 
     // Open-window detection: a fast fall in temperature pauses the room's heating.
     const ow = el("section", { class: "card" }, body);
-    sectionHead(ow, "Open windows", "thermo", "warm",
+    sectionHead(ow, "Open windows", "window", "cool",
       "When a room's temperature falls fast, a window or door is probably open: heating pauses for a while.", "openWindow");
     if (!S.cfg.openWindow || typeof S.cfg.openWindow !== "object") S.cfg.openWindow = {};
     const owc = S.cfg.openWindow;
@@ -1089,8 +1170,8 @@
     el("span", {}, won, "Detection");
     won.appendChild(chk(owc, "enabled", "Pause heating when the temperature falls fast", true, () => render()));
     if (owc.enabled !== false) {
-      field(wg, "Fall within 30 min (°C)", num(owc, "drop", { step: 0.1, min: 0.3, max: 5, placeholder: "1.0" }));
-      field(wg, "Pause (min)", num(owc, "pauseMinutes", { step: 5, min: 5, max: 240, placeholder: "30" }));
+      field(wg, "Fall within 30 min", num(owc, "drop", { step: 0.1, min: 0.3, max: 5, placeholder: "1.0", unit: "°C" }));
+      field(wg, "Pause", num(owc, "pauseMinutes", { step: 5, min: 5, max: 240, placeholder: "30", unit: "min" }));
     }
 
     const mods = el("section", { class: "card" }, body);
@@ -1114,12 +1195,13 @@
       const card = el("div", { class: "module-card" }, cards);
       const r = el("div", { class: "item-head" }, card);
       const left = el("div", { class: "row" }, r);
-      left.appendChild(badge(s.kind === "outdoor" ? "snow" : "thermo", s.kind === "outdoor" ? "cool" : "warm"));
+      // Where the reading comes from: its source's icon and name (several sensors can share a room's name).
+      const src = sourceOf(s.key);
+      left.appendChild(srcBadge(src));
       const nm = el("div", {}, left);
       el("b", {}, nm, s.name);
-      // Where the reading comes from: a Netatmo module, or a thermostat's own probe (set up under Heating).
-      const from = (s.key || "").startsWith("devi:") ? `thermostat · ${s.key.endsWith("-floor") ? "floor probe" : "room sensor"}`
-        : [s.station, s.kind].filter(Boolean).join(" · ");
+      const from = src === "devi" ? `${sourceInfo(src).label} · ${s.key.endsWith("-floor") ? "floor probe" : "room sensor"}`
+        : [sourceInfo(src).label, s.kind === "outdoor" ? "outdoor" : ""].filter(Boolean).join(" · ");
       el("div", { class: "muted", style: "font-size:12px" }, nm, from);
       const chips = el("div", { class: "plugs" }, r);
       const chip = (cls, iconName, text) => { const ch = el("span", { class: `chip ${cls}` }, chips); ch.appendChild(icon(iconName)); ch.appendChild(document.createTextNode(text)); };

@@ -47,8 +47,17 @@ std::string tasmotaVariant(std::string_view firmware) {
 }
 
 std::string tasmotaOtaUrl(std::string_view firmware, std::string_view hardware) {
-    const std::string variant = tasmotaVariant(firmware);
-    if (hardware.starts_with("ESP32")) return "http://ota.tasmota.com/tasmota32/release/" + variant + ".bin";
+    std::string variant = tasmotaVariant(firmware);
+    if (hardware.starts_with("ESP32")) {
+        // The newer chips need their own image (a Sonoff Basic R4 is an ESP32-C3): never the
+        // classic ESP32 one, even if the plug reports the generic name.
+        for (const auto& [chip, suffix] : {std::pair{"ESP32-C3", "c3"}, {"ESP32-C6", "c6"}, {"ESP32-S2", "s2"}, {"ESP32-S3", "s3"}}) {
+            if (hardware.starts_with(chip) && variant.starts_with("tasmota32") && !variant.starts_with(std::string("tasmota32") + suffix)) {
+                variant = std::string("tasmota32") + suffix + variant.substr(9);
+            }
+        }
+        return "http://ota.tasmota.com/tasmota32/release/" + variant + ".bin";
+    }
     return "http://ota.tasmota.com/tasmota/release/" + variant + ".bin.gz";
 }
 

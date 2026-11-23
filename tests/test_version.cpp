@@ -23,6 +23,13 @@ TEST_CASE("Tasmota variant and OTA URL") {
 
     CHECK(tasmotaOtaUrl("14.6.0(release-tasmota)", "ESP8285N08") ==
           "http://ota.tasmota.com/tasmota/release/tasmota.bin.gz");
+    // A Sonoff Basic R4 (ESP32-C3) gets the C3 image, whatever name it reports.
     CHECK(tasmotaOtaUrl("15.1.0(release-tasmota32)", "ESP32-C3") ==
+          "http://ota.tasmota.com/tasmota32/release/tasmota32c3.bin");
+    CHECK(tasmotaOtaUrl("15.1.0(release-tasmota32c3)", "ESP32-C3") ==
+          "http://ota.tasmota.com/tasmota32/release/tasmota32c3.bin");
+    CHECK(tasmotaOtaUrl("15.1.0(release-tasmota32)", "ESP32-D0WD-V3") ==
           "http://ota.tasmota.com/tasmota32/release/tasmota32.bin");
+    CHECK(tasmotaOtaUrl("15.1.0(release-tasmota32-lvgl)", "ESP32-S3") ==
+          "http://ota.tasmota.com/tasmota32/release/tasmota32s3-lvgl.bin");
 }
