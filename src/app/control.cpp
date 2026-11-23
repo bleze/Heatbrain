@@ -337,7 +337,10 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
     }
     json prices = json::array();
     for (const auto& s : env.controller->prices().slots) {
-        if (s.total) prices.push_back({s.start.time_since_epoch().count(), *s.total});
+        // From this hour on (the table also holds today's past hours, for the cheapest-hours rooms).
+        if (s.total && s.start >= std::chrono::floor<std::chrono::hours>(now)) {
+            prices.push_back({s.start.time_since_epoch().count(), *s.total});
+        }
     }
     json sensors = json::array();
     for (const auto& [key, r] : env.controller->readings()) {

@@ -106,9 +106,11 @@ Controller::Controller(const TimeZone& tz, PriceModel& prices, std::vector<std::
 }
 
 void Controller::refreshPrices(Instant now, TickResult& result) {
-    // From the start of the current hour to the end of tomorrow. Providers cache, so this
+    // From the start of today to the end of tomorrow. Today's past hours matter: a room without a
+    // sensor runs "the N cheapest hours of the day", and picking them only among the hours still
+    // left would put almost every remaining hour on by the morning. Providers cache, so this
     // rarely touches the network.
-    PriceTable fresh = priceModel_.build(floor<hours>(now), startOfLocalDay(tz_, now + hours{50}));
+    PriceTable fresh = priceModel_.build(startOfLocalDay(tz_, now), startOfLocalDay(tz_, now + hours{50}));
     for (const auto& e : fresh.errors) {
         add(result, "prices:error", Severity::Warning, "Price data problem: " + e, minutes{30});
     }

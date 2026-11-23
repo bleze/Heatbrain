@@ -119,6 +119,15 @@ TEST_CASE("A plug that misses the firmware question is 'unknown', not 'firmware 
     CHECK(f.plugOn("bedroom"));
 }
 
+TEST_CASE("The price table covers all of today, so 'cheapest hours of the day' sees the past hours too") {
+    Fixture f;
+    f.controller->tick(f.now, true);  // 12:00 local
+    const auto& slots = f.controller->prices().slots;
+    REQUIRE_FALSE(slots.empty());
+    CHECK(slots.front().start == startOfLocalDay(f.tz, f.now));
+    CHECK(slots.back().start >= startOfLocalDay(f.tz, f.now + hours{24}) + hours{23});
+}
+
 TEST_CASE("Dry-run plugs are decided and logged but never touched") {
     Fixture f;
     const auto r = f.controller->tick(f.now, true);
