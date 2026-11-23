@@ -463,10 +463,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 .src-netatmo { --src: var(--cat-comfort); }
 .src-velux { --src: var(--accent); }
 .src-devi { --src: var(--flame-1); }
+.src-shelly { --src: #479dd8; }
 .src-icon { color: var(--src, var(--ink-2)); flex: none; }
 .badge.src-badge { background: var(--surface-2); border: 1px solid var(--border); color: var(--src, var(--ink-2)); }
 /* The logos keep their own colours: no stroke; VELUX's is a 3:1 box */
-.icon[data-icon="netatmo"], .icon[data-icon="velux"], .icon[data-icon="devi"] { stroke: none; }
+.icon[data-icon="netatmo"], .icon[data-icon="velux"], .icon[data-icon="devi"], .icon[data-icon="shelly"] { stroke: none; }
 .icon[data-icon="velux"] { width: 30px !important; height: 11px !important; }
 .icon[data-icon="devi"] { width: 27px !important; height: 17px !important; }
 .badge.src-badge.src-velux .icon { width: 26px !important; height: 9.5px !important; }

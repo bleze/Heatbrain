@@ -266,7 +266,7 @@
     netatmo: { label: "Netatmo", icon: "netatmo" },
     velux: { label: "VELUX ACTIVE", icon: "velux" },
     devi: { label: "DEVI thermostat", icon: "devi" },
-    shelly: { label: "Shelly", icon: "thermo" },
+    shelly: { label: "Shelly", icon: "shelly" },
   };
   const sourceOf = (key) => (key || "").split(":")[0];
   const sourceInfo = (src) => SOURCES[src] || { label: src, icon: "thermo" };
@@ -1084,7 +1084,7 @@
 
     // Shelly H&T (battery, sleeps between readings): it sends its readings to heatbrain.
     const sh = el("section", { class: "card" }, body);
-    sectionHead(sh, "Shelly H&T", "thermo", "warm", "A battery sensor that sends its temperature and humidity to heatbrain whenever they change.", "shelly");
+    sectionHead(sh, "Shelly H&T", "shelly", "src", "A battery sensor that sends its temperature and humidity to heatbrain whenever they change.", "shelly");
     const shRead = (state.status?.sensors || []).filter((s) => s.key.startsWith("shelly:"));
     if (shRead.length) {
       const chips = el("div", { class: "row", style: "margin-top:10px;flex-wrap:wrap;gap:6px" }, sh);
