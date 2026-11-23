@@ -138,7 +138,7 @@ countdown:
    the last-resort cap.
 5. `PowerOnState 0`: after a power cut, plugs start OFF until heatbrain takes over.
 
-### Firmware and fail-safe test (Settings → Heating)
+### Firmware and fail-safe test (Settings → Heaters)
 
 - **Test fail-safe**: switches the relay on with a 20 s auto-off, refreshes it once (the
   countdown must restart) and checks the relay turns itself off; then restores the plug's
@@ -209,7 +209,7 @@ least three cooling and three heating stretches. It also gives bookings their wa
 (×1.25 + 30 min, at most 48 h) and the "Next 24 h" plan its "warm enough, no heat" periods.
 
 **Weather forecast.** Hourly temperatures for two days from Open-Meteo, for the position of the
-Netatmo station or a place searched in Settings → Sensors (only the position, rounded to about
+Netatmo station or a place searched in Settings → Climate (only the position, rounded to about
 1 km, is sent). It is corrected to the outdoor sensor: the difference measured now fades out
 over six hours.
 
@@ -276,7 +276,7 @@ straight from the source folder, so edits only need a browser refresh.
 ## Heating cost and meter data
 
 The dashboard shows what each room's heating costs: for plugs, on-time from the decision log ×
-the heating power (Settings → Heating) × the actual price in each 15-minute slot; for
+the heating power (Settings → Heaters) × the actual price in each 15-minute slot; for
 thermostats, the heating time the thermostat itself reports × its power. It shows cost, energy,
 the average price paid against each day's average price, and what the timing saved. Dry-run
 plugs show what they *would* have cost. The Sonoff Basic has no power metering, so plug
@@ -330,7 +330,7 @@ Docker build) and publishes `ghcr.io/bleze/heatbrain:latest` (plus a `sha-…` t
    switch the plugs.
 6. Other commands run inside the container, e.g.
    `sudo docker exec heatbrain /app/bin/heatbrain plugs`.
-7. **Going live, one plug at a time:** Settings → Heating → *Install fail-safe*, *Test
+7. **Going live, one plug at a time:** Settings → Heaters → *Install fail-safe*, *Test
    fail-safe*, then switch the plug to Live and save. *Remove fail-safe* undoes it.
 
 **Updating.** Container Manager does not check ghcr.io images for updates (and *Build* reuses

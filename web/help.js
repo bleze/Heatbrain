@@ -5,7 +5,7 @@ const HELP = {
   start: {
     title: "Getting started",
     list: [
-      "Settings → Heating: scan your network, add your Tasmota plugs and enter each radiator's power (W).",
+      "Settings → Heaters: scan your network, add your Tasmota plugs and enter each radiator's power (W).",
       "Settings → Sensors: connect Netatmo so rooms get their temperature.",
       "Settings → Rooms: add a room, pick its plug(s) and sensor, and set its daily program.",
       "Leave plugs in dry-run for a day or two and watch what heatbrain would do on the dashboard.",
@@ -112,7 +112,7 @@ const HELP = {
     title: "Air quality (CO₂)",
     body: [
       "Netatmo indoor modules and the VELUX sensors measure CO₂, the gas we breathe out. It is the best everyday measure of how fresh the air in a room is: outdoors is about 420 ppm, below 1000 is fine, from 1000 it gets stuffy, and above 1400 most people sleep worse, get headaches or tire - time to air the room.",
-      "heatbrain keeps the CO₂ with the other readings (Settings -> Sensors shows it per module, with the 1000 and notify levels as dashed lines), shows it on a room's card from 1000 ppm, and tells you when it has been above the level you choose for 20 minutes. During quiet hours it waits; a high night comes as one message in the morning, with when it was high and how high.",
+      "heatbrain keeps the CO₂ with the other readings (Settings -> Sensors shows it per module, with the 1000 and notify levels as dashed lines), shows it on a room's card from 1000 ppm, and tells you when it has been above the level you choose (Settings -> Climate) for 20 minutes. During quiet hours it waits; a high night comes as one message in the morning, with when it was high and how high.",
       "Bedrooms with the door and vents closed often reach 1500-2500 ppm by morning. A vent or a window slightly open usually fixes it - airing costs some heat, but a short, wide airing (5-10 minutes) loses much less than a window on the latch all day.",
     ],
   },
@@ -187,7 +187,7 @@ const HELP = {
     title: "Your meter (Eloverblik)",
     body: [
       "Eloverblik (Energinet's DataHub) has your electricity meter's readings, whatever your supplier. Log in on eloverblik.dk with MitID, go to Data sharing and create a token, then paste it here and save. heatbrain fetches the readings every 6 hours (or with 'Fetch now'); they arrive about a day late, so the dashboard shows the past, not today.",
-      "The dashboard's 'Electricity use' card shows the household's measured use per quarter or hour, with the part heatbrain's radiators drew in the same intervals (live plugs that were on × their power) at the bottom. If the radiators ever look bigger than the measured total, a radiator's power is probably set too high under Settings → Heating.",
+      "The dashboard's 'Electricity use' card shows the household's measured use per quarter or hour, with the part heatbrain's radiators drew in the same intervals (live plugs that were on × their power) at the bottom. If the radiators ever look bigger than the measured total, a radiator's power is probably set too high under Settings → Heaters.",
     ],
   },
   phone: {
@@ -216,7 +216,7 @@ const HELP = {
   costs: {
     title: "Heating cost",
     body: [
-      "Plugs: estimated as the heating power × the time the plug was on × the real price in each 15-minute slot. The Sonoff Basic cannot measure power, and a radiator's own thermostat may cut out now and then, so the real figure can be a little lower. Rooms without a temperature sensor (price-only) are left out: their radiator's own thermostat decides when it really heats, so plug-on time would overstate it a lot. Once the room has a sensor it is counted. Thermostats (DEVIreg Smart) report how long they actually heat, so their energy is that time × the power set for the thermostat under Settings -> Heating. 'Saved by timing' is what the same energy would have cost at each day's average price, minus what it actually cost. It assumes the same amount of heat with and without heatbrain, spread evenly over the day - a plain thermostat - so it is a guide to whether the timing pays off, not an exact amount: pre-heating uses a little more energy, coasting a little less, and the heat a room needs varies through the day.",
+      "Plugs: estimated as the heating power × the time the plug was on × the real price in each 15-minute slot. The Sonoff Basic cannot measure power, and a radiator's own thermostat may cut out now and then, so the real figure can be a little lower. Rooms without a temperature sensor (price-only) are left out: their radiator's own thermostat decides when it really heats, so plug-on time would overstate it a lot. Once the room has a sensor it is counted. Thermostats (DEVIreg Smart) report how long they actually heat, so their energy is that time × the power set for the thermostat under Settings -> Heaters. 'Saved by timing' is what the same energy would have cost at each day's average price, minus what it actually cost. It assumes the same amount of heat with and without heatbrain, spread evenly over the day - a plain thermostat - so it is a guide to whether the timing pays off, not an exact amount: pre-heating uses a little more energy, coasting a little less, and the heat a room needs varies through the day.",
     ],
   },
 };

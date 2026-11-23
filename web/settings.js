@@ -6,8 +6,9 @@
   const MASK = "********";
   const TABS = [
     ["rooms", "Rooms", "home"],
-    ["plugs", "Heating", "flame"],
+    ["plugs", "Heaters", "flame"],
     ["sensors", "Sensors", "thermo"],
+    ["climate", "Climate", "snow"],
     ["prices", "Prices", "bolt"],
     ["notifications", "Notifications", "bell"],
     ["system", "System", "cpu"],
@@ -251,7 +252,7 @@
       const ul = el("ul", { style: "margin:0;padding-left:18px" }, box);
       for (const e of S.errors) el("li", {}, ul, e);
     }
-    ({ rooms: renderRooms, plugs: renderPlugs, sensors: renderSensors, prices: renderPrices,
+    ({ rooms: renderRooms, plugs: renderPlugs, sensors: renderSensors, climate: renderClimate, prices: renderPrices,
        notifications: renderNotifications, system: renderSystem })[S.tab](body);
     changed();
   }
@@ -731,7 +732,7 @@
       if (changedData && !typing) render();
     } catch { /* optional */ }
   }
-  // Live thermostat state while the Heating tab is open: every 5 s while one is connecting, else 20 s.
+  // Live thermostat state while the Heaters tab is open: every 5 s while one is connecting, else 20 s.
   setInterval(() => {
     if ($("view-settings").hidden || S.tab !== "plugs" || document.visibilityState !== "visible" || !S.devi) return;
     const connecting = (S.devi.rooms || []).some((r) => !r.connected || r.roomTemp == null);
@@ -1096,30 +1097,95 @@
     if (shRead.length) el("summary", {}, shSetup, "Add another / set up again");
     const sg = el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:8px" }, shSetup);
     el("span", { class: "muted" }, sg, "Name in heatbrain");
-    const shName = el("input", { type: "text", value: S.shellyName ?? "Shed", style: "width:180px", autocomplete: "off" }, sg);
-    shName.addEventListener("change", () => { S.shellyName = shName.value; render(); });  // on leaving the field: typing keeps its focus
-    const nm = (S.shellyName ?? "Shed").trim() || "Shed";
-    const id = nm.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "sensor";
-    const base = `${location.protocol}//${location.host}/api/push/shelly?id=${id}&name=${encodeURIComponent(nm)}`;
-    const urlRow = (label, url) => {
+    const shName = el("input", { type: "text", value: S.shellyName || "", placeholder: "e.g. Shed", style: "width:180px", autocomplete: "off" }, sg);
+    // The two addresses carry the name: they follow it as you type (no re-render, so the field keeps its focus).
+    const urls = [];
+    const urlFor = (suffix) => {
+      const nm = (S.shellyName || "").trim();
+      const id = nm.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "sensor";
+      return `${location.protocol}//${location.host}/api/push/shelly?id=${id}&name=${encodeURIComponent(nm)}${suffix}`;
+    };
+    const urlRow = (label, suffix) => {
       const r = el("div", { class: "field", style: "margin-top:8px" }, shSetup);
       el("span", {}, r, label);
       const row = el("div", { class: "row", style: "gap:8px" }, r);
-      const i = el("input", { type: "text", readonly: "", value: url, style: "flex:1;min-width:0;font-family:ui-monospace,Consolas,monospace;font-size:12px" }, row);
+      const i = el("input", { type: "text", readonly: "", style: "flex:1;min-width:0;font-family:ui-monospace,Consolas,monospace;font-size:12px" }, row);
       i.addEventListener("focus", () => i.select());
-      btn(row, "Copy", "check", async (b) => {
-        try { await navigator.clipboard.writeText(url); toast("Copied"); } catch { i.select(); }
+      btn(row, "Copy", "check", async () => {
+        try { await navigator.clipboard.writeText(i.value); toast("Copied"); } catch { i.select(); }
       });
+      urls.push({ r, i, suffix });
     };
     const ol = el("ol", { class: "phone-steps", style: "margin-top:10px" }, shSetup);
     el("li", {}, ol, "Set up the Shelly in its app (or its own web page) and connect it to your Wi-Fi.");
     el("li", {}, ol, "In the Shelly app: the device → Actions → add one: When Temperature changes (Any), Then call a URL - paste the first address below.");
     el("li", {}, ol, "Add a second action: When Humidity changes (Any), with the second address.");
     el("li", {}, ol, "Change the temperature a little (hold it in your hand): it appears above within a few minutes. Then choose it as a room's sensor on the Rooms tab.");
-    urlRow("When temperature changes", `${base}&temp=\${ev.tC}`);
-    urlRow("When humidity changes", `${base}&hum=\${ev.rh}`);
+    urlRow("When temperature changes", "&temp=${ev.tC}");
+    urlRow("When humidity changes", "&hum=${ev.rh}");
+    const noName = el("div", { class: "hint", style: "margin-top:8px" }, shSetup, "Type a name above (where the sensor is, e.g. Shed) to get its two addresses.");
+    const refresh = () => {
+      const has = !!(S.shellyName || "").trim();
+      for (const u of urls) { u.i.value = urlFor(u.suffix); u.r.hidden = !has; }
+      noName.hidden = has;
+    };
+    shName.addEventListener("input", () => { S.shellyName = shName.value; refresh(); });
+    refresh();
     el("div", { class: "hint", style: "margin-top:6px" }, shSetup, "It reports only when a value changes (by the threshold you set in the action, e.g. 0.5°), so heatbrain treats no news as no change for up to 3 hours. During Wi-Fi-off periods nothing arrives.");
 
+    const mods = el("section", { class: "card" }, body);
+    const mh = sectionHead(mods, "Modules", "wifi", "violet");
+    // One time range for all module charts, like the room chart's (remembered in this browser).
+    if (!S.moduleDays) { try { S.moduleDays = Number(localStorage.getItem("hb.moduleDays")) || 30; } catch { S.moduleDays = 30; } }
+    const rg = el("div", { class: "range", role: "group", "aria-label": "Module chart range" }, mh);
+    for (const [d, label] of [[2, "2 days"], [7, "7 days"], [30, "30 days"], [91, "3 months"], [365, "1 year"]]) {
+      const b = el("button", { type: "button", class: S.moduleDays === d ? "active" : "" }, rg, label);
+      b.addEventListener("click", () => { S.moduleDays = d; try { localStorage.setItem("hb.moduleDays", String(d)); } catch { /* private mode */ } render(); });
+    }
+    loadBatteries();
+    // Indoor modules by name (Netatmo first, then the thermostats' own probes), the outdoor ones last.
+    const rank = (s) => (s.kind === "outdoor" ? 2 : s.key.startsWith("devi:") ? 1 : 0);
+    const sensors = [...(state.status?.sensors || [])].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+    if (!sensors.length) el("div", { class: "muted", style: "margin-top:12px" }, mods, "No readings yet.");
+    // A card per module: its readings now, and its year - temperature, humidity and battery, a point
+    // per day - on one time axis (12 months back, 3 ahead for the battery's projection).
+    const cards = el("div", { class: "module-cards" }, mods);
+    for (const s of sensors) {
+      const card = el("div", { class: "module-card" }, cards);
+      const r = el("div", { class: "item-head" }, card);
+      const left = el("div", { class: "row" }, r);
+      // Where the reading comes from: its source's icon and name (several sensors can share a room's name).
+      const src = sourceOf(s.key);
+      left.appendChild(srcBadge(src));
+      const nm = el("div", {}, left);
+      el("b", {}, nm, s.name);
+      const from = src === "devi" ? `${sourceInfo(src).label} · ${s.key.endsWith("-floor") ? "floor probe" : "room sensor"}`
+        : [sourceInfo(src).label, s.kind === "outdoor" ? "outdoor" : ""].filter(Boolean).join(" · ");
+      el("div", { class: "muted", style: "font-size:12px" }, nm, from);
+      const chips = el("div", { class: "plugs" }, r);
+      const chip = (cls, iconName, text) => { const ch = el("span", { class: `chip ${cls}` }, chips); ch.appendChild(icon(iconName)); ch.appendChild(document.createTextNode(text)); };
+      // The battery chip's colour follows when it runs out, not a fixed level (see the chart).
+      const bh = S.batteries?.[s.key];
+      if (s.battery != null) {
+        const soon = s.battery <= 5 || (bh?.daysLeft != null && bh.daysLeft <= 21);
+        const unknownLow = bh?.daysLeft == null && s.battery <= 10;
+        chip(soon ? "error" : unknownLow ? "warn" : "ok", "battery", `${s.battery}%`);
+      }
+      if (s.humidity != null) chip("", "drop", `${Math.round(s.humidity)}%`);
+      if (s.co2 != null) chip(co2Class(s.co2), "air", `CO₂ ${s.co2}`);
+      if (s.temperature != null) chip("", "thermo", `${s.temperature.toFixed(1)}°C`);
+      if (!s.reachable) chip("error", "alert", "offline");
+      else if (s.ageMinutes != null) chip("", "clock", `${s.ageMinutes} min ago`);
+      loadSensorDays(s.key);
+      const detailed = S.moduleDays <= 7;
+      if (detailed) loadSensorReadings(s.key, S.moduleDays);
+      sensorYear(card, s, S.sensorDays?.[s.key]?.days || [], s.battery != null ? bh : null, S.moduleDays,
+        detailed ? S.sensorReadings?.[`${s.key}|${S.moduleDays}`] : null);
+    }
+  }
+
+  // --- Climate: what heatbrain does with the weather and the indoor air ---------------
+  function renderClimate(body) {
     const out = el("section", { class: "card" }, body);
     sectionHead(out, "Outdoor temperature", "snow", "cool",
       "Used to pre-heat more before expensive or off periods when it is cold outside, and less when it is mild.");
@@ -1213,58 +1279,22 @@
       field(wg, "Pause", num(owc, "pauseMinutes", { step: 5, min: 5, max: 240, placeholder: "30", unit: "min" }));
     }
 
-    const mods = el("section", { class: "card" }, body);
-    const mh = sectionHead(mods, "Modules", "wifi", "violet");
-    // One time range for all module charts, like the room chart's (remembered in this browser).
-    if (!S.moduleDays) { try { S.moduleDays = Number(localStorage.getItem("hb.moduleDays")) || 30; } catch { S.moduleDays = 30; } }
-    const rg = el("div", { class: "range", role: "group", "aria-label": "Module chart range" }, mh);
-    for (const [d, label] of [[2, "2 days"], [7, "7 days"], [30, "30 days"], [91, "3 months"], [365, "1 year"]]) {
-      const b = el("button", { type: "button", class: S.moduleDays === d ? "active" : "" }, rg, label);
-      b.addEventListener("click", () => { S.moduleDays = d; try { localStorage.setItem("hb.moduleDays", String(d)); } catch { /* private mode */ } render(); });
-    }
-    loadBatteries();
-    // Indoor modules by name (Netatmo first, then the thermostats' own probes), the outdoor ones last.
-    const rank = (s) => (s.kind === "outdoor" ? 2 : s.key.startsWith("devi:") ? 1 : 0);
-    const sensors = [...(state.status?.sensors || [])].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-    if (!sensors.length) el("div", { class: "muted", style: "margin-top:12px" }, mods, "No readings yet.");
-    // A card per module: its readings now, and its year - temperature, humidity and battery, a point
-    // per day - on one time axis (12 months back, 3 ahead for the battery's projection).
-    const cards = el("div", { class: "module-cards" }, mods);
-    for (const s of sensors) {
-      const card = el("div", { class: "module-card" }, cards);
-      const r = el("div", { class: "item-head" }, card);
-      const left = el("div", { class: "row" }, r);
-      // Where the reading comes from: its source's icon and name (several sensors can share a room's name).
-      const src = sourceOf(s.key);
-      left.appendChild(srcBadge(src));
-      const nm = el("div", {}, left);
-      el("b", {}, nm, s.name);
-      const from = src === "devi" ? `${sourceInfo(src).label} · ${s.key.endsWith("-floor") ? "floor probe" : "room sensor"}`
-        : [sourceInfo(src).label, s.kind === "outdoor" ? "outdoor" : ""].filter(Boolean).join(" · ");
-      el("div", { class: "muted", style: "font-size:12px" }, nm, from);
-      const chips = el("div", { class: "plugs" }, r);
-      const chip = (cls, iconName, text) => { const ch = el("span", { class: `chip ${cls}` }, chips); ch.appendChild(icon(iconName)); ch.appendChild(document.createTextNode(text)); };
-      // The battery chip's colour follows when it runs out, not a fixed level (see the chart).
-      const bh = S.batteries?.[s.key];
-      if (s.battery != null) {
-        const soon = s.battery <= 5 || (bh?.daysLeft != null && bh.daysLeft <= 21);
-        const unknownLow = bh?.daysLeft == null && s.battery <= 10;
-        chip(soon ? "error" : unknownLow ? "warn" : "ok", "battery", `${s.battery}%`);
-      }
-      if (s.humidity != null) chip("", "drop", `${Math.round(s.humidity)}%`);
-      if (s.co2 != null) chip(co2Class(s.co2), "air", `CO₂ ${s.co2}`);
-      if (s.temperature != null) chip("", "thermo", `${s.temperature.toFixed(1)}°C`);
-      if (!s.reachable) chip("error", "alert", "offline");
-      else if (s.ageMinutes != null) chip("", "clock", `${s.ageMinutes} min ago`);
-      loadSensorDays(s.key);
-      const detailed = S.moduleDays <= 7;
-      if (detailed) loadSensorReadings(s.key, S.moduleDays);
-      sensorYear(card, s, S.sensorDays?.[s.key]?.days || [], s.battery != null ? bh : null, S.moduleDays,
-        detailed ? S.sensorReadings?.[`${s.key}|${S.moduleDays}`] : null);
-    }
+
+    // Air quality: when a room's CO2 counts as poor (and a notification goes out).
+    const air = el("section", { class: "card" }, body);
+    sectionHead(air, "Air quality", "air", "cool", "From the CO₂ that Netatmo indoor modules and VELUX sensors measure.", "airQuality");
+    const rg = el("div", { class: "form-grid" }, air);
+    const aq = el("div", { class: "field span2" }, rg);
+    el("span", {}, aq, "Notify");
+    if (!S.cfg.airQuality || typeof S.cfg.airQuality !== "object") S.cfg.airQuality = {};
+    const aqc = S.cfg.airQuality;
+    const aqRow = el("div", { class: "row", style: "gap:10px;flex-wrap:wrap" }, aq);
+    aqRow.appendChild(chk(aqc, "enabled", "Tell me when CO₂ in a room is above", true, () => render()));
+    if (aqc.enabled !== false) aqRow.appendChild(num(aqc, "co2Ppm", { step: 100, min: 600, max: 5000, placeholder: "1400", unit: "ppm" }));
+    el("div", { class: "hint" }, aq, "for 20 minutes, from the room's sensor (Netatmo, VELUX). During quiet hours it waits: a high night comes as one message in the morning.");
   }
 
-  // The notify level (Settings -> Notifications) and a chip colour for a CO2 reading.
+  // The notify level (Settings -> Climate) and a chip colour for a CO2 reading.
   const co2Limit = () => (S.cfg?.airQuality?.co2Ppm) || 1400;
   const co2Class = (ppm) => (ppm >= co2Limit() ? "error" : ppm >= 1000 ? "warn" : "ok");
 
@@ -1678,15 +1708,6 @@
     const hu = el("div", { class: "field span2" }, rg);
     el("span", {}, hu, "Tomorrow's prices");
     hu.appendChild(chk(n, "priceHeadsUp", "Tell me when tomorrow is unusually expensive or cheap", true));
-    const aq = el("div", { class: "field span2" }, rg);
-    const aqLabel = el("span", {}, aq, "Air quality");
-    helpButton(aqLabel, "airQuality", rg);
-    if (!S.cfg.airQuality || typeof S.cfg.airQuality !== "object") S.cfg.airQuality = {};
-    const aqc = S.cfg.airQuality;
-    const aqRow = el("div", { class: "row", style: "gap:10px;flex-wrap:wrap" }, aq);
-    aqRow.appendChild(chk(aqc, "enabled", "Tell me when CO₂ in a room is above", true, () => render()));
-    if (aqc.enabled !== false) aqRow.appendChild(num(aqc, "co2Ppm", { step: 100, min: 600, max: 5000, placeholder: "1400", unit: "ppm" }));
-    el("div", { class: "hint" }, aq, "for 20 minutes, from the room's sensor (Netatmo, VELUX). During quiet hours it waits: a high night comes as one message in the morning.");
     const fw = el("div", { class: "field span2" }, rg);
     el("span", {}, fw, "Firmware");
     fw.appendChild(chk(n, "firmwareUpdates", "Tell me when a new Tasmota release is out for my plugs", true));

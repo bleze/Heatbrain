@@ -75,7 +75,7 @@
       const td = el("td", { colspan: 6, class: "muted" }, tr, "Set the heating power for ");
       td.appendChild(document.createTextNode(r.missingWatts.join(", ") || (r.thermostat ? "its thermostat" : "its plugs")));
       td.appendChild(document.createTextNode(" in "));
-      el("a", { href: "#settings" }, td, "Settings → Heating");
+      el("a", { href: "#settings" }, td, "Settings → Heaters");
     }
     for (const r of excluded) {
       const tr = el("tr", {}, body);
