@@ -1052,7 +1052,7 @@
       btn(el("div", { style: "margin-top:10px" }, vx), "Disconnect", "trash", async () => {
         try { await api("/api/velux/disconnect", { method: "POST" }); } catch { /* the file may already be gone */ }
         sources.splice(vIdx, 1); S.veluxResult = null; changed(); render();
-      });
+      }, "icon-danger");
     }
     // Log in (again): the password goes to heatbrain once, which keeps only the login tokens.
     const vlog = vIdx >= 0 ? section(vx, "velux-login") : el("div", { style: "margin-top:12px" }, vx);
@@ -1393,8 +1393,16 @@
         draw(svg, y);
       });
     };
-    // Readings: the line breaks where they stop for over 30 min (a Wi-Fi-off night), like the room chart.
+    // Readings: the line breaks where they stop for over 30 min (a Wi-Fi-off night), like the room chart,
+    // and each gap is bridged by a dotted straight line: an estimate, not data.
     const readingPath = (pts, y) => pts.map(([t, v], i) => `${i && t - pts[i - 1][0] <= 1800 ? "L" : "M"}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    const estimatePath = (pts, y) => pts.map(([t, v], i) => i && t - pts[i - 1][0] > 1800
+      ? `M${x(pts[i - 1][0]).toFixed(1)},${y(pts[i - 1][1]).toFixed(1)}L${x(t).toFixed(1)},${y(v).toFixed(1)}` : "").join("");
+    const readingLine = (pts, cls) => (svg, y) => {
+      const est = estimatePath(pts, y);
+      if (est) el("path", { d: est, class: `${cls} yr-est` }, svg);
+      el("path", { d: readingPath(pts, y), class: cls }, svg);
+    };
 
     if (readings) {
       // Short range: the readings themselves.
@@ -1404,14 +1412,14 @@
       const hum = (readings.hum || []).filter((p) => p[0] >= t0 && p[1] != null);
       if (temps.length) {
         const [lo, hi] = span(temps.map((p) => p[1]), 4, 0, 25);
-        panel("Temperature °C", 64, lo, hi, (v) => v.toFixed(0), (svg, y) => el("path", { d: readingPath(temps, y), class: "yr-temp" }, svg));
+        panel("Temperature °C", 64, lo, hi, (v) => v.toFixed(0), readingLine(temps, "yr-temp"));
       }
       if (hum.length) {
         const [hlo, hhi] = span(hum.map((p) => p[1]), 10, 30, 70);
-        panel("Humidity %", 48, Math.max(0, hlo), Math.min(100, hhi), (v) => `${v.toFixed(0)}`, (svg, y) => el("path", { d: readingPath(hum, y), class: "yr-hum" }, svg));
+        panel("Humidity %", 48, Math.max(0, hlo), Math.min(100, hhi), (v) => `${v.toFixed(0)}`, readingLine(hum, "yr-hum"));
       }
       const co2 = (readings.co2 || []).filter((p) => p[0] >= t0 && p[1] != null);
-      if (co2.length) co2Panel(co2.map((p) => p[1]), (svg, y) => el("path", { d: readingPath(co2, y), class: "yr-co2" }, svg), "CO₂ ppm");
+      if (co2.length) co2Panel(co2.map((p) => p[1]), readingLine(co2, "yr-co2"), "CO₂ ppm");
       if (!temps.length && !hum.length) el("div", { class: "muted", style: "font-size:12.5px;margin:6px 0" }, host, readings.temps ? "No readings in this period." : "Loading…");
     } else if (days.length) {
       const [lo, hi] = span(days.flatMap((d) => [d[1], d[3]]), 6, 0, 25);
@@ -1519,7 +1527,7 @@
         // The fetch runs in the background; look again shortly.
         setTimeout(() => loadMeterStatus(true), 6000);
         setTimeout(() => loadMeterStatus(true), 20000);
-      }, "ghost");
+      }, "ghost icon-accent");
     }
   }
 
