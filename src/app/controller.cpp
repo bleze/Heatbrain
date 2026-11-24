@@ -58,21 +58,21 @@ std::string spansText(const std::vector<OnSpan>& spans, const TimeZone& tz) {
 std::vector<PlanSegment> overlayNight(const std::vector<PlanSegment>& plan, const OfflinePeriod& p,
                                       const std::vector<OnSpan>& spans) {
     std::vector<PlanSegment> out;
-    const auto push = [&](Instant from, Instant to, const std::string& kind, std::optional<double> target, bool warmup) {
+    const auto push = [&](Instant from, Instant to, const std::string& kind, const PlanSegment& seg) {
         if (from >= to) return;
-        if (!out.empty() && out.back().kind == kind && out.back().target == target && out.back().warmup == warmup &&
-            out.back().to == from) {
+        if (!out.empty() && out.back().kind == kind && out.back().target == seg.target && out.back().warmup == seg.warmup &&
+            out.back().booked == seg.booked && out.back().to == from) {
             out.back().to = to;
         } else {
-            out.push_back({from, to, kind, target, warmup});
+            out.push_back({from, to, kind, seg.target, seg.warmup, seg.booked});
         }
     };
     for (const auto& seg : plan) {
         for (Instant t = seg.from; t < seg.to; t += kSlotLength) {
             const Instant e = std::min(t + kSlotLength, seg.to);
             // The target stays, so the chart's target line (a warm-up curve too) runs on through the night.
-            if (p.contains(t)) push(t, e, scheduleOnAt(spans, t) ? "night" : "nightoff", seg.target, seg.warmup);
-            else push(t, e, seg.kind, seg.target, seg.warmup);
+            if (p.contains(t)) push(t, e, scheduleOnAt(spans, t) ? "night" : "nightoff", seg);
+            else push(t, e, seg.kind, seg);
         }
     }
     return out;

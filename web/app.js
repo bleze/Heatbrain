@@ -922,7 +922,7 @@ function priceSummary() {
   return pieces.join(" · ");
 }
 
-function renderLegend(room, segs, wifi) {
+function renderLegend(room, segs, wifi, booked) {
   const host = $("legend");
   host.replaceChildren();
   if (wifi) {
@@ -937,6 +937,9 @@ function renderLegend(room, segs, wifi) {
     }
     if (room.sensorOnly) return;  // a sensor: no target, no heating
     const b = el("span", {}, host); el("i", { class: "key-dash" }, b); b.appendChild(document.createTextNode("Target"));
+    if (booked) {
+      const k = el("span", {}, host); el("i", { class: "key-dash key-dash-booked" }, k); k.appendChild(document.createTextNode("Target: booking"));
+    }
   }
   for (const [cat, label] of Object.entries(CATEGORIES)) {
     const s = el("span", {}, host);
@@ -968,7 +971,8 @@ function renderDetail() {
   const temps = isThermostatRoom ? settledReadings(h.temperatures) : h.temperatures;
   const decisions = h.decisions;
   const prices = h.prices.filter((p) => p[0] >= t0 - 900 && p[0] <= t1);
-  const targets = decisions.map((d) => [d[0], d[3], !!d[4]]);
+  // [time, target, on a warm-up curve, set by a booking]
+  const targets = decisions.map((d) => [d[0], d[3], !!d[4], !!d[5]]);
   // Ahead of now the target comes from the room's plan, so the line doesn't seem to stop at the last
   // decision (an off period has no target: a gap, then the line where heating resumes).
   const roomPlan = state.status?.rooms?.find((r) => r.id === room.id)?.plan || [];
@@ -978,12 +982,14 @@ function renderDetail() {
     // A warm-up curve comes as one segment per 15 minutes, its value at the start: one point each,
     // joined by straight lines.
     for (let t = Math.max(seg.from, lastDecision + step); t < seg.to && t <= t1; t += seg.warmup ? seg.to : step) {
-      targets.push([t, seg.kind === "off" ? null : seg.target ?? null, !!seg.warmup]);
+      targets.push([t, seg.kind === "off" ? null : seg.target ?? null, !!seg.warmup, !!seg.booked]);
     }
   }
   const segs = heatingSegments(decisions, tick, h.to);
   const wifi = h.wifi && (h.wifi.seen.length || h.wifi.planned.length) ? h.wifi : null;
-  renderLegend(room, segs, wifi);
+  // Bookings still known to the server (coming or under way), for the band and the tooltip.
+  const bookings = (state.status?.rooms?.find((r) => r.id === room.id)?.bookings || []).filter((b) => b.until > t0 && b.warmupFrom < t1);
+  renderLegend(room, segs, wifi, targets.some((p) => p[3] && p[1] != null));
 
   const W = host.clientWidth, m = { l: 40, r: 8 };
   const showTemp = !room.priceOnly;
@@ -1022,7 +1028,22 @@ function renderDetail() {
       el("text", { x: m.l - 6, y: yT(v) + 4, "text-anchor": "end" }, svg, v.toFixed(v % 1 ? 1 : 0));
     }
     drawTimeAxis(svg, x, ticks, tempTop, tempTop + tempH, null);
-    el("path", { class: "target", d: stepPath(targets, x, yT, t1, 3 * tick) }, svg);
+    // Bookings: a violet band from warm-up to end (the booking itself a little stronger), labelled.
+    for (const b of bookings) {
+      const a = Math.max(b.warmupFrom, t0), s = Math.max(b.from, t0), e = Math.min(b.until, t1);
+      if (s > a) el("rect", { class: "booking-band warm", x: x(a), y: tempTop, width: x(s) - x(a), height: tempH }, svg);
+      if (e > s) el("rect", { class: "booking-band", x: x(s), y: tempTop, width: x(e) - x(s), height: tempH }, svg);
+      if (x(e) - x(s) > 60) el("text", { class: "booking-label", x: x(s) + 4, y: tempTop + 11 }, svg, `booked ${temp(b.target)}`);
+    }
+    // The target line; where a booking sets it, in the booking colour (the program is overridden).
+    // Each colour gets the other's points as gaps; the step into a booking is drawn in its colour.
+    const own = (booked) => targets.map((p, i) => {
+      if (p[3] === booked) return p;
+      const next = targets[i + 1];
+      return booked && next && next[3] && p[1] != null ? [next[0], p[1]] : [p[0], null];
+    });
+    el("path", { class: "target", d: stepPath(own(false), x, yT, t1, 3 * tick) }, svg);
+    el("path", { class: "target target-booked", d: stepPath(own(true), x, yT, t1, 3 * tick) }, svg);
     // Temperature line, broken where readings are missing for > 30 min. Each gap is bridged by a
     // dashed straight line from the last reading before to the first after: an estimate, not data
     // (e.g. a Wi-Fi off night, when the station can't upload).
@@ -1110,7 +1131,14 @@ function renderDetail() {
         rows.push({ label: "Temperature", value: temp(near), color: "var(--ink)" });
       }
       const di = lastAtOrBefore(targets, t);
-      rows.push({ label: "Target", value: temp(di >= 0 ? targets[di][1] : null), color: "var(--target)" });
+      const byBooking = di >= 0 && targets[di][3];
+      rows.push({ label: byBooking ? "Target (booking)" : "Target", value: temp(di >= 0 ? targets[di][1] : null),
+                  color: byBooking ? "var(--accent)" : "var(--target)" });
+      const b = bookings.find((k) => t >= k.warmupFrom && t < k.until);
+      if (b) {
+        rows.push({ label: t < b.from ? "Warming up for booking" : "Booked", color: "var(--accent)", box: true,
+                    value: `${temp(b.target)} ${hm(b.from)}–${hm(b.until)}` });
+      }
     }
     const si = lastAtOrBefore(decisions, t);
     if (si >= 0 && t - decisions[si][0] <= 3 * tick) {

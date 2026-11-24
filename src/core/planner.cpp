@@ -86,7 +86,7 @@ double smoothMin(double a, double b, double w) { return -smoothMax(-a, -b, w); }
 }  // namespace
 
 double warmupCurve(const RoomConfig& room, const ProgramStep& step, Instant t, const std::optional<ThermalModel>& m,
-                   double outdoor) {
+                   double outdoor, std::optional<minutes> ramp) {
     constexpr double kEarlyHours = 0.5;  // at the target this long before the step
     constexpr double kGainMargin = 0.8;  // heat as if a little weaker than learned
     const double lo = step.from, hi = step.target;
@@ -103,9 +103,10 @@ double warmupCurve(const RoomConfig& room, const ProgramStep& step, Instant t, c
         }
     }
     if (!need) {  // not learned, or out of reach by the model: a straight ramp over the warm-up setting
-        const double len = std::max(0.25, duration<double, std::ratio<3600>>(room.warmup).count() - kEarlyHours);
+        const double len = std::max(0.25, duration<double, std::ratio<3600>>(ramp.value_or(room.warmup)).count() - kEarlyHours);
         need = hi - (hi - lo) * tau / len;
     }
+    if (hi <= lo + 0.05) return std::max(lo, hi);
     const double w = std::min(0.4, (hi - lo) / 4);
     return smoothMin(smoothMax(*need, lo, w), hi, w);
 }
@@ -285,20 +286,33 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         inputs.targetLabel = "away until " + formatLocalDate(tz.toLocal(in.away->until)).substr(5) + " " +
                              formatLocalHm(tz.toLocal(in.away->until));
     }
-    // A booking wins over both: heat to its target, starting `warmup` early.
+    // A booking wins over both: heat to its target, starting `warmup` early - along the warm-up
+    // curve from what the room would have had otherwise, regardless of price.
+    bool warming = false;
+    bool warmingAnyPrice = false;  // towards a keep-above period or a booking: regardless of price
+    Instant warmupAt{};            // when the warmer period or the booking begins
     const bool booked = in.booking && in.booking->coversAt(in.now);
     if (booked) {
+        const double base = mode == ProgramMode::Off ? room.minTemp : target;
         mode = ProgramMode::Heat;
         target = in.booking->target;
         const auto hm = [&](Instant i) { return formatLocalHm(tz.toLocal(i)); };
         inputs.targetLabel = in.booking->warmingAt(in.now)
                                  ? std::format("warming up for the booking {}-{}", hm(in.booking->from), hm(in.booking->until))
                                  : std::format("booked until {}", hm(in.booking->until));
+        if (in.booking->warmingAt(in.now) && base < target - 0.05) {
+            const double outside = (in.forecast ? in.forecast->meanOver(in.now, in.booking->from) : std::nullopt)
+                                       .value_or(in.outdoorTemp.value_or(5.0));
+            const ProgramStep step{in.booking->from, base, in.booking->target, ProgramMode::Keep};
+            warming = true;
+            warmingAnyPrice = true;
+            warmupAt = in.booking->from;
+            target = std::max(base, warmupCurve(room, step, in.now, in.thermal, outside, in.booking->warmup));
+            inputs.warmupTo = in.booking->target;
+        }
     }
     // A warmer period ahead: the target follows the warm-up curve towards it, so the room is warm
     // when the period begins (not while booked or away: those replace the program).
-    bool warming = false;
-    bool warmingAnyPrice = false;  // towards a keep-above period: like it, regardless of price
     if (!booked && !away && mode != ProgramMode::Off && room.warmup > minutes{0}) {  // 0: no early start
         if (const auto step = nextStepUp(room, tz, in.now)) {
             const double outside = (in.forecast ? in.forecast->meanOver(in.now, step->at) : std::nullopt)
@@ -307,6 +321,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
             if (curve > target + 0.05) {
                 warming = true;
                 warmingAnyPrice = step->mode == ProgramMode::Keep;
+                warmupAt = step->at;
                 mode = ProgramMode::Heat;
                 target = curve;
                 inputs.warmupTo = step->target;
@@ -453,17 +468,18 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         }
     }
 
-    // 9b. Warming up for the next period: the curve instead of the plain thermostat. Towards a heat
-    //     period, expensive slots still coast and pre-heating still stores heat before them (both
-    //     against the curve), so a warm-up does not run through the peak; towards a keep-above
-    //     period price does not matter. Heats below the curve, stops a little above it.
+    // 9b. Warming up for the next period or a booking: the curve instead of the plain thermostat.
+    //     Towards a heat period, expensive slots still coast and pre-heating still stores heat before
+    //     them (both against the curve), so a warm-up does not run through the peak; towards a
+    //     keep-above period or a booking price does not matter. Heats below the curve, stops a little above it.
     if (warming) {
+        const std::string what = booked ? "the booking" : "the next period";
         const std::string where = std::format("{} (curve {} now, {} at {})", temp(t), temp(target), temp(*inputs.warmupTo),
-                                              inputs.targetLabel.substr(inputs.targetLabel.rfind(' ') + 1));
+                                              formatLocalHm(tz.toLocal(warmupAt)));
         if (t < target || (in.currentlyOn && t < target + h)) {
-            return make(true, Reason::WarmUp, "Warming up for the next period: " + where, inputs);
+            return make(true, Reason::WarmUp, "Warming up for " + what + ": " + where, inputs);
         }
-        return make(false, Reason::WarmUpOnTrack, "Warm enough for now, on track for the next period: " + where, inputs);
+        return make(false, Reason::WarmUpOnTrack, "Warm enough for now, on track for " + what + ": " + where, inputs);
     }
 
     // 10. Plain thermostat with hysteresis.
@@ -563,10 +579,12 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
         }
         const std::optional<double> target = (kind == "off") ? std::nullopt : d.inputs.target;
         const bool warmup = d.inputs.warmupTo.has_value();
-        if (!out.empty() && out.back().kind == kind && out.back().target == target && out.back().warmup == warmup) {
+        const bool booked = d.inputs.mode == "booked";
+        if (!out.empty() && out.back().kind == kind && out.back().target == target && out.back().warmup == warmup &&
+            out.back().booked == booked) {
             out.back().to = t + kSlotLength;
         } else {
-            out.push_back({t, t + kSlotLength, kind, target, warmup});
+            out.push_back({t, t + kSlotLength, kind, target, warmup, booked});
         }
     }
     return out;

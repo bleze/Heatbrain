@@ -394,9 +394,19 @@ TEST_CASE("A booking warms the room up early, holds the target through the peak,
     in.booking = bookingAt({b}, in.now);
     auto d = decide(in, room);
     CHECK(d.on);
+    CHECK(d.reason == Reason::WarmUp);
     CHECK(d.inputs.mode == "booked");
-    CHECK(d.inputs.target == 22.0);
+    REQUIRE(d.inputs.target);
+    CHECK(*d.inputs.target > 8.0);    // on the warm-up curve from 5 (keep above) to 22
+    CHECK(*d.inputs.target < 22.0);
+    CHECK(d.inputs.warmupTo == 22.0);
     CHECK_THAT(d.inputs.targetLabel, ContainsSubstring("warming up"));
+    CHECK_THAT(d.detail, ContainsSubstring("the booking"));
+
+    // Warmer than the curve: waits, even in the cheap hours.
+    in = input(at(13, 30), 15.0);
+    in.booking = bookingAt({b}, in.now);
+    CHECK(decide(in, room).reason == Reason::WarmUpOnTrack);
 
     // 18:00 is in the expensive peak; a heat period would coast, the booking does not.
     in = input(at(18), 21.0);
@@ -425,9 +435,18 @@ TEST_CASE("A booking wins over away mode, and the plan shows it") {
     const auto booked = std::ranges::find_if(plan, [](const PlanSegment& s) { return s.kind == "booked"; });
     REQUIRE(booked != plan.end());
     CHECK(booked->from == at(13));
-    CHECK(booked->to == at(20));
-    CHECK(booked->target == 22.0);
+    CHECK(booked->warmup);
+    CHECK(booked->booked);
+    double last = 0;
+    for (auto it = booked; it != plan.end() && it->kind == "booked"; ++it) {  // up the curve, then flat
+        REQUIRE(it->target);
+        CHECK(*it->target >= last);
+        last = *it->target;
+        if (it->from >= at(16)) CHECK_FALSE(it->warmup);
+        if (it->to == at(20)) CHECK(*it->target == 22.0);
+    }
     CHECK(plan.back().kind == "keep");
+    CHECK_FALSE(plan.back().booked);
 }
 
 TEST_CASE("Plan: a warm room in a keep-above period shows as idle until it would cool to the floor") {

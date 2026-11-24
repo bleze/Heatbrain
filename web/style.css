@@ -664,6 +664,7 @@ a.chip { text-decoration: none; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend .key-line { width: 16px; height: 2px; background: var(--ink); display: inline-block; }
 .legend .key-dash { width: 16px; border-top: 2px dashed var(--target); display: inline-block; }
+.legend .key-dash-booked { border-top-color: var(--accent); }
 .legend .key-estimate { width: 16px; border-top: 2px dotted var(--ink-2); display: inline-block; }
 /* Wi-Fi off lane: planned = hatched outline band, seen = solid neutral bar (status-neutral, not a series colour) */
 .chart .wifi-on { fill: var(--ink-2); opacity: 0.45; }
@@ -685,6 +686,10 @@ a.chip { text-decoration: none; }
 .chart .line-estimate { fill: none; stroke: var(--ink-2); stroke-width: 2; stroke-dasharray: 0 4; stroke-linecap: round; opacity: 0.8; }  /* dotted: the target is dashed */
 .chart .panel-note { fill: var(--muted); font-size: 11.5px; }
 .chart .target { fill: none; stroke: var(--target); stroke-width: 1.5; stroke-dasharray: 5 3; opacity: 0.9; }
+.chart .target-booked { stroke: var(--accent); stroke-width: 1.8; }
+.chart .booking-band { fill: var(--accent); fill-opacity: 0.08; }
+.chart .booking-band.warm { fill-opacity: 0.04; }
+.chart .booking-label { fill: var(--accent); font-size: 10.5px; font-weight: 600; }
 .chart .now { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 3; }
 .chart .now-label { fill: var(--accent); font-weight: 600; }
 .chart .future-label { fill: var(--muted); font-style: italic; }

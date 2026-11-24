@@ -331,6 +331,7 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
             json seg{{"from", s.from.time_since_epoch().count()}, {"to", s.to.time_since_epoch().count()}, {"kind", s.kind}};
             if (s.target) seg["target"] = *s.target;
             if (s.warmup) seg["warmup"] = true;
+            if (s.booked) seg["booked"] = true;
             plan.push_back(seg);
         }
         room["plan"] = plan;
