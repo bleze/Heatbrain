@@ -383,5 +383,9 @@ Debug builds keep their data in `./data` (git-ignored): `heatbrain.json` is crea
 
 heatbrain is free software under the **GNU General Public License v3.0** (see `LICENSE`).
 It includes [OpenSDG](https://github.com/Sonic-Amiga/opensdg) (GPL-3.0, `third_party/opensdg`)
+
+https://github.com/user-attachments/assets/9845e588-631f-49b3-be1a-e6ed30a5e829
+
+
 to talk to Danfoss DEVIreg Smart thermostats over Trifork's SecureDeviceGrid, a proprietary
 protocol; that support is meant for controlling your own thermostats, not for commercial use.
