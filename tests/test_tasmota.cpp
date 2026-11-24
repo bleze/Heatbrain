@@ -371,3 +371,10 @@ TEST_CASE("Reinstalling the fail-safe replaces an earlier heatbrain rule, not so
     f.device.rules = "ON Button1#State DO Power1 2 ENDON";
     CHECK_THROWS_WITH(again.provision(false), Catch::Matchers::ContainsSubstring("not heatbrain's"));
 }
+
+TEST_CASE("Tasmota module: the device model in any of its reply shapes") {
+    CHECK(parseTasmotaModule(json::parse(R"({"Module":{"1":"Sonoff Basic"}})")) == "Sonoff Basic");
+    CHECK(parseTasmotaModule(json::parse(R"({"Module":{"0":"Sonoff Basic R4"}})")) == "Sonoff Basic R4");
+    CHECK(parseTasmotaModule(json::parse(R"x({"Module":"1 (Sonoff Basic)"})x")) == "Sonoff Basic");
+    CHECK(parseTasmotaModule(json::parse(R"({"Command":"Unknown"})")).empty());
+}

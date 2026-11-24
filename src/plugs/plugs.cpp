@@ -165,6 +165,7 @@ std::vector<DiscoveredPlug> discoverTasmota(std::string_view subnet, HttpClient&
             d.firmware = j["StatusFWR"].value("Version", "");
             d.hardware = j["StatusFWR"].value("Hardware", "");
             if (j.contains("StatusSTS")) d.on = parseTasmotaPower(j["StatusSTS"]);
+            d.model = tasmotaModel(http, host);
             return d;
         } catch (const std::exception&) {
             return std::nullopt;

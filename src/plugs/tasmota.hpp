@@ -75,4 +75,11 @@ inline HttpRequest tasmotaRequest(const std::string& host, std::string url) {
 // Parses a reply to "Power" / "Power1": {"POWER":"ON"} or {"POWER1":"OFF"}.
 std::optional<bool> parseTasmotaPower(const nlohmann::json& reply);
 
+// The device model from a reply to "Module": {"Module":{"1":"Sonoff Basic"}} (ESP32 templates:
+// {"Module":{"0":"Sonoff Basic R4"}}), or the older {"Module":"1 (Sonoff Basic)"}. Empty if neither.
+std::string parseTasmotaModule(const nlohmann::json& reply);
+
+// Asks a Tasmota device for its model ("Module", read-only); empty when it does not answer.
+std::string tasmotaModel(HttpClient& http, const std::string& host);
+
 }  // namespace hb

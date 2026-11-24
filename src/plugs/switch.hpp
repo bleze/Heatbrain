@@ -21,6 +21,7 @@ struct PlugStatus {
     std::optional<int> rssi;  // WiFi signal, percent
     std::string uptime;
     std::string error;        // when unreachable
+    std::string model;        // "Sonoff Basic R4" (Tasmota's Module), when known
 };
 
 struct FailsafeStatus {

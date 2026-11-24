@@ -66,6 +66,7 @@ struct DiscoveredPlug {
     std::string deviceName;
     std::string firmware;
     std::string hardware;
+    std::string model;  // "Sonoff Basic" (Tasmota's Module), when known
     std::optional<bool> on;
 };
 

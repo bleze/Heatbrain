@@ -61,6 +61,28 @@ std::optional<bool> parseTasmotaPower(const json& reply) {
     return std::nullopt;
 }
 
+std::string parseTasmotaModule(const json& reply) {
+    if (!reply.contains("Module")) return {};
+    const auto& m = reply["Module"];
+    if (m.is_object() && !m.empty() && m.begin()->is_string()) return m.begin()->get<std::string>();
+    if (m.is_string()) {
+        const auto s = m.get<std::string>();
+        const auto open = s.find('('), close = s.rfind(')');
+        return open != std::string::npos && close > open ? s.substr(open + 1, close - open - 1) : s;
+    }
+    return {};
+}
+
+std::string tasmotaModel(HttpClient& http, const std::string& host) {
+    try {
+        const auto res = http.send(tasmotaRequest(host, "http://" + host + "/cm?cmnd=Module"));
+        if (res.status != 200) return {};
+        return parseTasmotaModule(json::parse(res.body));
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 PlugStatus TasmotaSwitch::status() {
     PlugStatus s;
     try {
@@ -76,6 +98,11 @@ PlugStatus TasmotaSwitch::status() {
         if (j.contains("StatusFWR")) {
             s.firmware = j["StatusFWR"].value("Version", "");
             s.hardware = j["StatusFWR"].value("Hardware", "");
+        }
+        try {
+            s.model = parseTasmotaModule(command("Module"));  // not part of Status 0
+        } catch (const std::exception&) {
+            // reachable all the same: just no model
         }
     } catch (const std::exception& e) {
         s.reachable = false;

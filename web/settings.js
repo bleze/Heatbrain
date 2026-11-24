@@ -690,16 +690,16 @@
       for (const d of S.discovered) {
         const r = el("div", { class: "item-head" }, list);
         const info = el("div", { class: "row" }, r);
-        info.appendChild(badge("plug", "gray"));
+        info.appendChild(plugBadge(d, "gray"));
         el("b", {}, info, d.deviceName || d.host);
-        el("span", { class: "muted" }, info, `${d.host} · ${d.hardware} · Tasmota ${d.firmware.split("(")[0]}`);
+        el("span", { class: "muted" }, info, `${d.host} · ${d.model ? `${d.model} · ` : ""}${d.hardware} · Tasmota ${d.firmware.split("(")[0]}`);
         const plugs = arr(S.cfg, "plugs");
         if (plugs.some((p) => p.host === d.host)) {
           const ok = el("span", { class: "chip ok" }, r); ok.appendChild(icon("check")); ok.appendChild(document.createTextNode("added"));
         } else {
           btn(r, "Add", "plus", () => {
             const id = slug((d.deviceName || d.host).replace(/^sonoff\s*/i, ""), new Set(plugs.map((p) => p.id)));
-            plugs.push({ id, name: d.deviceName || id, type: "tasmota", host: d.host, mode: "dryrun" });
+            plugs.push({ id, name: d.deviceName || id, type: "tasmota", host: d.host, mode: "dryrun", ...(d.model ? { model: d.model } : {}) });
             changed(); render();
           });
         }
@@ -751,7 +751,11 @@
       const c = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, list);
       const head = el("div", { class: "item-head" }, c);
       const left = el("div", { class: "row" }, head);
-      left.appendChild(badge("thermo", room.heating ? "warm" : "gray"));
+      // The DEVI mark, as for its sensors; a flame-coloured ring while it heats.
+      const tb = srcBadge("devi");
+      tb.classList.toggle("heating", !!room.heating);
+      tb.title = room.heating ? "DEVIreg Smart · heating" : "DEVIreg Smart";
+      left.appendChild(tb);
       el("b", {}, left, t ? t.name || t.id : room.name);
       el("span", { class: "muted" }, left, d.houseName ? `DEVI · ${d.houseName}` : "DEVI");
       const right = el("div", { class: "row" }, head);
@@ -869,12 +873,30 @@
     btn(row, "Dismiss", null, () => { dismissJob(jobId); render(); }, "ghost");
   }
 
+  // A plug's badge: the Sonoff mark for Sonoff devices (by Tasmota's module, else the device name),
+  // boxed like the other brand marks, with a flame-coloured ring while on; a plug icon otherwise,
+  // whose tone says whether it is on.
+  function plugBadge(info, tone, saved) {
+    const model = info?.model || saved?.model || "";
+    if (!/sonoff/i.test(model || info?.deviceName || saved?.name || "")) {
+      const plain = badge("plug", tone);
+      plain.title = [info?.model, info?.hardware].filter(Boolean).join(" · ");
+      return plain;
+    }
+    const b = el("span", { class: "badge src-badge src-sonoff" });
+    b.appendChild(icon("sonoff"));
+    b.classList.toggle("heating", tone === "warm");
+    // "Sonoff Basic R4 · ESP32-C3 v0.4 · relay on"
+    b.title = [model || "Sonoff", info?.hardware, tone === "warm" ? "relay on" : ""].filter(Boolean).join(" · ");
+    return b;
+  }
+
   function renderPlug(list, p, idx) {
     const st = (S.plugStatus || []).find((x) => x.id === p.id);
     const c = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, list);
     const head = el("div", { class: "item-head" }, c);
     const left = el("div", { class: "row" }, head);
-    left.appendChild(badge("plug", st?.on ? "warm" : "gray"));
+    left.appendChild(plugBadge(st, st?.on ? "warm" : "gray", p));
     const name = txt(p, "name"); name.style.fontWeight = "600"; left.appendChild(name);
     el("span", { class: "muted" }, left, `id: ${p.id}`);
 
@@ -941,6 +963,9 @@
     } else {
       chip(st.on ? "warn" : "", "power", st.on ? "relay on" : "relay off");
       if (st.rssi != null) chip("", "wifi", `wifi ${st.rssi}%`);
+      // The device: Tasmota's model and the chip ("Sonoff Basic R4 · ESP32-C3 v0.4").
+      const device = [st.model, st.hardware].filter(Boolean).join(" · ");
+      if (device) chip("", "plug", device);
       chip("", "cpu", `Tasmota ${st.firmware.split("(")[0]}`);
       if (st.updateAvailable) {
         const a = el("a", { class: "chip warn", href: st.latest.url, target: "_blank", rel: "noopener" }, chips);
@@ -1189,17 +1214,28 @@
     const out = el("section", { class: "card" }, body);
     sectionHead(out, "Outdoor temperature", "snow", "cool",
       "Used to pre-heat more before expensive or off periods when it is cold outside, and less when it is mild.");
-    const outdoorOptions = [["", "Automatic"]];
+    // The outdoor modules by source, with the source's icon (Netatmo, Shelly, ...).
+    const outdoorGroups = new Map();
+    const addOutdoor = (source, item) => { if (!outdoorGroups.has(source)) outdoorGroups.set(source, []); outdoorGroups.get(source).push(item); };
     for (const sns of state.status?.sensors || []) {
-      if (sns.kind === "outdoor") outdoorOptions.push([`${sns.key.split(":")[0]}:${sns.name}`, `${sns.name}${sns.temperature != null ? ` · ${sns.temperature.toFixed(1)}°` : ""}`]);
+      const source = sourceOf(sns.key);
+      if (sns.kind === "outdoor") addOutdoor(source, { value: `${source}:${sns.name}`, label: sns.name, temp: sns.temperature });
     }
     if (!S.cfg.outdoorSensor) S.cfg.outdoorSensor = undefined;
     // No status yet (heatbrain just restarted): the chosen sensor is not "not found", just not read yet.
     if (!state.status && S.cfg.outdoorSensor) {
-      outdoorOptions.push([S.cfg.outdoorSensor, `${S.cfg.outdoorSensor.split(":").slice(1).join(":")} (waiting for readings)`]);
+      addOutdoor(sourceOf(S.cfg.outdoorSensor), { value: S.cfg.outdoorSensor,
+        label: `${S.cfg.outdoorSensor.split(":").slice(1).join(":")} (waiting for readings)` });
     }
+    const order = Object.keys(SOURCES);
+    const rank = (s) => (order.includes(s) ? order.indexOf(s) : 99);
     const og = el("div", { class: "form-grid" }, out);
-    field(og, "Outdoor sensor", sel(S.cfg, "outdoorSensor", outdoorOptions), { span2: true, hint: "automatic = the first outdoor module" });
+    field(og, "Outdoor sensor", sensorPicker({
+      value: S.cfg.outdoorSensor || "",
+      plain: [{ value: "", label: "Automatic" }],
+      groups: [...outdoorGroups].map(([source, items]) => ({ source, items })).sort((a, b) => rank(a.source) - rank(b.source)),
+      onPick: (v) => { S.cfg.outdoorSensor = v || undefined; changed(); render(); },
+    }), { span2: true, hint: "automatic = the first outdoor module" });
 
     // Weather forecast (Open-Meteo): pre-heating is sized for the weather during the expensive hours.
     const fc = el("section", { class: "card" }, body);

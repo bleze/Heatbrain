@@ -656,7 +656,7 @@ void WebServer::routes() {
             futures.push_back(std::async(std::launch::async, [&p, &latest, this] {
                 const auto st = p.sw->status();
                 json j{{"id", p.id}, {"reachable", st.reachable}, {"firmware", st.firmware}, {"hardware", st.hardware},
-                       {"deviceName", st.deviceName}, {"error", st.error}};
+                       {"deviceName", st.deviceName}, {"model", st.model}, {"error", st.error}};
                 if (st.on) j["on"] = *st.on;
                 if (st.rssi) j["rssi"] = *st.rssi;
                 j["failsafe"] = st.reachable ? failsafeJson(p) : json{{"installed", false}, {"problems", json::array()}};
@@ -728,7 +728,7 @@ void WebServer::routes() {
         HttplibClient probe(milliseconds{1500}, milliseconds{2000});
         json out = json::array();
         for (const auto& d : discoverTasmota(body.value("subnet", std::string()), probe)) {
-            json j{{"host", d.host}, {"deviceName", d.deviceName}, {"firmware", d.firmware}, {"hardware", d.hardware}};
+            json j{{"host", d.host}, {"deviceName", d.deviceName}, {"model", d.model}, {"firmware", d.firmware}, {"hardware", d.hardware}};
             if (d.on) j["on"] = *d.on;
             out.push_back(j);
         }
