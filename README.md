@@ -20,6 +20,10 @@ a NAS or on a PC.
   the outdoor temperature and how fast it warms when heated. Pre-heating is then calculated:
   just enough to coast through the whole expensive stretch, and started as late as possible,
   because stored heat leaks away. On a mild evening that can mean no pre-heating at all.
+- **Warm when you need it.** When the program steps up (16° at night, 21.5° from 07:00), the
+  room starts early: the target rises along a curve, worked out backwards from the room's own
+  heating speed and the forecast, so it is warm when the period begins instead of starting to
+  heat then. Bookings warm up the same way.
 - **Looks at the weather ahead.** An hourly forecast from Open-Meteo (free, no account),
   corrected to your own outdoor sensor, sizes the pre-heating for the weather *during* the
   expensive hours.
@@ -28,8 +32,8 @@ a NAS or on a PC.
   be a day ahead for a concrete floor. Afterwards the room goes back to its program.
 - **Away mode, Wi-Fi-off nights, open windows.** A planned away period keeps every room
   just above a floor. For a network that is switched off at night, a schedule is loaded onto
-  each plug beforehand. A room whose temperature falls fast (a window open) pauses its heating
-  for a while.
+  each plug beforehand, and the plugs switch their own Wi-Fi off for the night too. A room whose
+  temperature falls fast (a window open) pauses its heating for a while.
 - **Watches the rooms themselves.** How well each room keeps its heat (heat loss in W/°C, per
   m² floor and per month in kroner), with a note when a room loses clearly more than the others
   or suddenly faster than its own normal. CO₂ from the room sensors, with a notification when the
@@ -48,15 +52,25 @@ a NAS or on a PC.
 
 <table>
 <tr>
-<td width="60%"><img src="docs/images/room-chart.png" alt="Room chart: temperature, target, heating periods coloured by reason, Wi-Fi off periods and the price, with the planned hours ahead"></td>
-<td><img src="docs/images/booking.png" alt="Booking dialog: day, from, until and temperature"><br><sub>Book a room: heatbrain starts heating early enough by itself.</sub></td>
+<td colspan="2"><img src="docs/images/room-chart.png" alt="Room chart: temperature, target, heating periods coloured by reason, Wi-Fi off periods, with the planned hours ahead"><br><sub>Every decision on one time axis: temperature, target, Wi-Fi and the heating, coloured by why.</sub></td>
+</tr>
+<tr>
+<td width="62%"><img src="docs/images/warmup.png" alt="Room chart of the office: overnight the target is 16 degrees, then it rises as a ramp to 21.5 degrees before the period starts"><br><sub>Warming up: the target rises ahead of the 21.5° period, so the room is ready on time.</sub></td>
+<td><img src="docs/images/phone.png" alt="The dashboard on a phone"><br><sub>Works on the phone too.</sub></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/images/booking.png" alt="Booking dialog: room, day, from, until and temperature"><br><sub>Book a room: heatbrain starts heating early enough by itself.</sub></td>
 </tr>
 <tr>
 <td colspan="2"><img src="docs/images/electricity.png" alt="Electricity card: the price with the hours ahead, and the power mix per hour - wind, solar, power plants and imports"></td>
 </tr>
 <tr>
-<td><img src="docs/images/settings-program.png" alt="Room settings: plugs, sensor, limits and the daily program of switch points"></td>
+<td><img src="docs/images/settings-program.png" alt="Room settings: Sonoff plugs, sensor, limits, warm-up time, floor area and the daily program of switch points"></td>
 <td><img src="docs/images/costs.png" alt="Heating cost: spent, energy, average price paid and saved by timing, per day and per room"></td>
+</tr>
+<tr>
+<td><img src="docs/images/settings-heaters.png" alt="A plug in Settings: Sonoff mark, address, heating power, model and chip, Tasmota version and a tested fail-safe"></td>
+<td><img src="docs/images/usage.png" alt="Electricity use from the meter: household, radiators and everything else per hour"></td>
 </tr>
 </table>
 
@@ -66,7 +80,7 @@ https://github.com/user-attachments/assets/9845e588-631f-49b3-be1a-e6ed30a5e829
 
 | What | Supported | Notes |
 |---|---|---|
-| Heaters on smart plugs | Tasmota (e.g. Sonoff Basic R2, Basic R4) | heatbrain installs a fail-safe on each plug and tests it per firmware version; upgrades pick the image for the plug's chip (ESP8266, ESP32-C3, ...) |
+| Heaters on smart plugs | Tasmota (e.g. Sonoff Basic R2, Basic R4), up to Tasmota 16 | heatbrain installs a fail-safe on each plug and tests it per firmware version; upgrades pick the image for the plug's chip (ESP8266, ESP32-C3, ...). The model is read from the plug and shown with its chip; Sonoff plugs carry the Sonoff mark |
 | Floor heating | Danfoss DEVIreg Smart | paired from the DEVI app with a one-time code; heatbrain sets the setpoint and reads the floor temperature and real heating time |
 | Room temperatures | Netatmo Weather Station (indoor modules), VELUX ACTIVE (wall switch / climate sensors), Shelly H&T Gen3, DEVIreg Smart's own sensors | VELUX: read from the VELUX app's cloud (unofficial; log in once, only the token is kept). Shelly: battery sensors send their readings to heatbrain (no cloud) |
 | CO₂ | Netatmo indoor modules, VELUX ACTIVE | kept with the readings; notification above a chosen level |
@@ -249,18 +263,25 @@ plug (Tasmota Rule2/Rule3, `Time#Minute` triggers on the plug's own clock) and s
 fail-safe to match: auto-off just longer than the longest planned ON, watchdog until the end
 of the schedule plus 30 min. The schedule reaches 3 h past the planned end (a late Wi-Fi is not
 limp mode); fresh sensor readings mean the network is back and heatbrain takes over at once.
-Optional `"weekend": {"from", "to"}` for the nights ending Saturday/Sunday. Settings shows the
+Optional `"weekend": {"from", "to"}` for the nights ending Saturday/Sunday. On Tasmota 15.4.0 or
+newer the plugs also switch their own Wi-Fi off: `Wifi 0` one minute after the period starts and
+`Wifi 1` two minutes before it ends, as part of the night schedule (`"plugWifi": false` to keep
+it on). Settings shows the
 real off times of the last week from gaps in the Netatmo readings, and suggests a period. Without Wi-Fi there are no temperatures either, so heat/keep periods heat the
 share of time the room actually heated in such periods over the last 7 days (25 % until there
 is enough history), in the cheapest quarters; price-only rooms get their cheapest hours.
 Expected plug/sensor outages are not reported during the period and 20 minutes after.
 
 **Plan preview:** each room card shows the next 24 h worked out from the program, the known
-prices, bookings and the forecast (heat / pre-heat / coast / boost / keep / booked / away / off,
-and "warm enough, no heat" where the room is predicted to stay above what the period asks).
+prices, bookings and the forecast (heat / pre-heat / coast / boost / warm up / keep / booked /
+away / off, and "warm enough, no heat" where the room is predicted to stay above what the period
+asks); a warm-up blends from the period before into the one after.
 
 **Bookings** (the dashboard's Book button, stored in `data/bookings.json`): a target
-temperature from – until. Warming up starts by itself as early as the room needs.
+temperature from – until. Warming up starts by itself as early as the room needs, along the same
+curve as a program step, from what the program would have had - regardless of price, and a room
+already warmer than the curve waits. In the room chart the target line is violet wherever a
+booking sets it, with a band over the warm-up and the booking.
 
 ### Decision log
 
@@ -281,7 +302,8 @@ heatbrain override bedroom clear
 
 `heatbrain run` serves a web UI on port 8080 (`web` in config; no login, keep it on your
 home network): problems banner, a card per room (temperature, decision and reason, the next
-24 h, "Heat 1 h" / "Off 2 h" / "Book"), per room a chart of temperature + target, heating
+24 h, "Heat 1 h" / "Off 2 h" / "Book"), per room a chart of temperature + target (a warm-up drawn
+as a curve, a booking in violet), heating
 periods coloured by reason category (comfort / price-driven / safety-manual), Wi-Fi off
 periods, with the planned hours ahead, plus the switch events; under it, on the same time axis,
 the electricity price (every known price ahead) and the power mix of the price area (wind, solar,

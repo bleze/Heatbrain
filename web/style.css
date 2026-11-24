@@ -482,7 +482,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 .badge.src-badge.heating { border-color: var(--flame-1); box-shadow: inset 0 0 0 1px var(--flame-1); }
 /* Sonoff: a white wordmark used as a mask, so it takes the badge's colour (grey, or white when on) */
 .icon[data-icon="sonoff"] { stroke: none; }
-.badge.src-badge .icon[data-icon="sonoff"] { width: 24px !important; height: 6.8px !important; }
+/* A wordmark: a wider badge, so its letters stay readable */
+.badge.src-badge.src-sonoff { width: 50px; }
+.badge.src-badge .icon[data-icon="sonoff"] { width: 40px !important; height: 11.3px !important; }
 
 /* A dropdown that can show icons (a native <select> cannot): the room's sensor */
 .picker { position: relative; width: 300px; max-width: 100%; }
@@ -543,7 +545,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 /* Selectable pills: choose several (e.g. a room's plugs) */
 .pick { border-radius: 999px; padding: 3px 11px 3px 9px; font-size: 13px; color: var(--ink-2); }
 .pick .icon { width: 14px; height: 14px; }
-.pick .icon[data-icon="sonoff"] { width: 26px !important; height: 7.4px !important; }
+.pick .icon[data-icon="sonoff"] { width: 34px !important; height: 9.6px !important; }
 .pick .icon[data-icon="devi"] { width: 21px !important; height: 13px !important; }
 .pick.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .switch input { opacity: 0; width: 0; height: 0; }
