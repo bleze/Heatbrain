@@ -240,6 +240,13 @@ const PLAN = {
   night: () => "Wi-Fi off - heating by night schedule",
   nightoff: () => "Wi-Fi off - off",
 };
+// The solid plan segments' colours as in style.css (colour at its opacity), for a warm-up's blend.
+const shade = (color, pct) => `color-mix(in srgb, var(${color}) ${pct}%, transparent)`;
+const PLAN_SHADE = {
+  heat: shade("--cat-comfort", 55), booked: shade("--cat-comfort", 90), keep: shade("--cat-comfort", 28),
+  idle: shade("--grid", 50), preheat: shade("--cat-price", 80), boost: shade("--cat-price", 80),
+  night: shade("--cat-price", 55), away: shade("--accent", 35),
+};
 const planLabel = (s) => (PLAN[s.kind] || (() => s.kind))(s.target);
 
 function planStrip(parent, all) {
@@ -257,7 +264,14 @@ function planStrip(parent, all) {
   if (typeof helpButton === "function") helpButton(head, "plan", wrap);
   const bar = el("div", { class: "planbar" }, wrap);
   for (const s of plan) {
-    el("div", { class: `pl-${s.kind}`, style: `flex:${s.to - s.from}`, title: `${hm(s.from)}-${hm(s.to)}: ${planLabel(s)}` }, bar);
+    // A warm-up blends from the segment before it into the one after it, ending in exactly its shade.
+    let blend = "";
+    if (s.kind === "warmup") {
+      const i = plan.indexOf(s);
+      const from = PLAN_SHADE[plan[i - 1]?.kind] || PLAN_SHADE.idle, to = PLAN_SHADE[plan[i + 1]?.kind] || PLAN_SHADE.heat;
+      blend = `;--warm-from:${from};--warm-to:${to}`;
+    }
+    el("div", { class: `pl-${s.kind}`, style: `flex:${s.to - s.from}${blend}`, title: `${hm(s.from)}-${hm(s.to)}: ${planLabel(s)}` }, bar);
   }
   const axis = el("div", { class: "plan-axis" }, wrap);
   el("span", {}, axis, "now");

@@ -617,7 +617,8 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 .planbar .pl-heat { background: var(--cat-comfort); opacity: 0.55; }
 .planbar .pl-booked { background: var(--cat-comfort); opacity: 0.9; }
 .planbar .pl-keep { background: var(--cat-comfort); opacity: 0.28; }
-.planbar .pl-warmup { background: linear-gradient(90deg, var(--grid), var(--cat-comfort)); opacity: 0.55; }
+/* From the segment before to the one after (--warm-from / --warm-to, set per segment in app.js) */
+.planbar .pl-warmup { background: linear-gradient(90deg, var(--warm-from), var(--warm-to)); }
 .planbar .pl-idle { background: var(--grid); opacity: 0.5; }
 .planbar .pl-preheat, .planbar .pl-boost { background: var(--cat-price); opacity: 0.8; }
 .planbar .pl-coast { background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--grid) 4px 8px); }
