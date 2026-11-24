@@ -543,6 +543,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 /* Selectable pills: choose several (e.g. a room's plugs) */
 .pick { border-radius: 999px; padding: 3px 11px 3px 9px; font-size: 13px; color: var(--ink-2); }
 .pick .icon { width: 14px; height: 14px; }
+.pick .icon[data-icon="sonoff"] { width: 26px !important; height: 7.4px !important; }
+.pick .icon[data-icon="devi"] { width: 21px !important; height: 13px !important; }
 .pick.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .switch span { position: absolute; inset: 0; background: var(--axis); border-radius: 999px; transition: 0.15s; cursor: pointer; }

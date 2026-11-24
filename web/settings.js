@@ -374,7 +374,27 @@
     return wrap;
   }
 
+  // A Sonoff plug: by Tasmota's model (live status, else saved with the plug) or the device name.
+  function isSonoff(p) {
+    const st = (S.plugStatus || []).find((x) => x.id === p.id);
+    return /sonoff/i.test(st?.model || p.model || st?.deviceName || p.name || "");
+  }
+  // Once the plugs' status is in: the Sonoff mark on the room's plug pills, in place (a full redraw
+  // would take the focus from a field being typed in).
+  function markSonoffPills() {
+    for (const pill of document.querySelectorAll(".pick[data-plug]")) {
+      const p = (S.cfg.plugs || []).find((x) => x.id === pill.dataset.plug);
+      if (!p || !isSonoff(p) || pill.querySelector('[data-icon="sonoff"]')) continue;
+      const mark = icon("sonoff");
+      mark.classList.add("plug-mark");
+      const old = pill.querySelector(".plug-mark");
+      if (old) old.replaceWith(mark);
+      else pill.insertBefore(mark, pill.lastChild);  // after the check mark, before the name
+    }
+  }
+
   function renderRooms(body) {
+    if ((S.cfg.plugs || []).length && S.plugStatus == null && !plugStatusLoading) refreshPlugStatus().then(markSonoffPills);
     const card = el("section", { class: "card" }, body);
     const head = sectionHead(card, "Rooms", "home", "violet",
       "Each room has plugs, a temperature sensor and target temperatures through the day. A room without a sensor runs the cheapest hours of each day.",
@@ -490,7 +510,8 @@
       const on = room.thermostat === t.id;
       if (!on && room.plugs?.length) continue;  // plugs chosen: no thermostat pills
       const pill = el("button", { type: "button", class: `pick${on ? " on" : ""}`, "aria-pressed": on }, plugsRow);
-      pill.appendChild(icon(on ? "check" : "thermo"));
+      if (on) pill.appendChild(icon("check"));
+      pill.appendChild(icon("devi"));  // thermostats are DEVIreg Smart: their mark, as on the Heaters tab
       pill.appendChild(document.createTextNode(t.name || t.id));
       pill.addEventListener("click", (e) => {
         e.preventDefault();
@@ -500,10 +521,13 @@
       });
     }
     for (const p of plugs) {
-      // Pick several from a list: selectable pills (on/off settings use switches).
+      // Pick several from a list: selectable pills (on/off settings use switches). Sonoff plugs carry
+      // the Sonoff mark (from the saved model or name now, from the plug's status once it arrives).
       const on = (room.plugs || []).includes(p.id);
-      const pill = el("button", { type: "button", class: `pick${on ? " on" : ""}`, "aria-pressed": on }, plugsRow);
-      pill.appendChild(icon(on ? "check" : "plug"));
+      const pill = el("button", { type: "button", class: `pick${on ? " on" : ""}`, "aria-pressed": on, "data-plug": p.id }, plugsRow);
+      if (on) pill.appendChild(icon("check"));
+      const mark = isSonoff(p) ? icon("sonoff") : on ? null : icon("plug");
+      if (mark) { mark.classList.add("plug-mark"); pill.appendChild(mark); }
       pill.appendChild(document.createTextNode(p.name || p.id));
       pill.addEventListener("click", (e) => {
         e.preventDefault();
