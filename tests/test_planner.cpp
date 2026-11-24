@@ -663,20 +663,20 @@ RoomConfig peakOffRoom(std::optional<double> floor) {
 TEST_CASE("Coast: the level an off period with a floor needs, from cooling towards outdoors") {
     const auto room = peakOffRoom(19.0);
     // 4 hours at 5 %/h towards 5 deg outside: 5 + 14 e^0.2 = 22.1 when the period starts.
-    const auto c = nextCoast(room, tz(), at(15), learnedRoom(0.05), nullptr, 5.0);
+    const auto c = nextCoast(room, tz(), at(15), 0.05, nullptr, 5.0);
     REQUIRE(c);
     CHECK(c->at == at(17));
     CHECK(c->until == at(21));
     CHECK(c->floor == 19.0);
     CHECK(c->level == Catch::Approx(5 + 14 * std::exp(0.2)).epsilon(1e-6));
     // Never above max - hysteresis.
-    const auto cold = nextCoast(room, tz(), at(15), learnedRoom(0.2), nullptr, -5.0);
+    const auto cold = nextCoast(room, tz(), at(15), 0.2, nullptr, -5.0);
     REQUIRE(cold);
     CHECK(cold->level == Catch::Approx(room.maxTemp - room.strategy.hysteresis));
     // Not from inside the off period, not for a plain off, not further ahead than asked.
-    CHECK_FALSE(nextCoast(room, tz(), at(18), learnedRoom(), nullptr, 5.0));
-    CHECK_FALSE(nextCoast(peakOffRoom(std::nullopt), tz(), at(15), learnedRoom(), nullptr, 5.0));
-    CHECK_FALSE(nextCoast(room, tz(), at(8), learnedRoom(), nullptr, 5.0, hours{3}));
+    CHECK_FALSE(nextCoast(room, tz(), at(18), 0.05, nullptr, 5.0));
+    CHECK_FALSE(nextCoast(peakOffRoom(std::nullopt), tz(), at(15), 0.05, nullptr, 5.0));
+    CHECK_FALSE(nextCoast(room, tz(), at(8), 0.05, nullptr, 5.0, hours{3}));
 }
 
 TEST_CASE("Coast: heat is stored before an off period with a floor, whatever the price") {
@@ -751,13 +751,13 @@ TEST_CASE("Coast: when max caps the stored heat, the period stays off and the sh
     auto room = peakOffRoom(20.0);
     room.maxTemp = 22;
     // At 0 outside, 4 h at 5 %/h: 24.4 needed, but at most 21.7 can be stored.
-    const auto c = nextCoast(room, tz(), at(15), learnedRoom(0.05), nullptr, 0.0);
+    const auto c = nextCoast(room, tz(), at(15), 0.05, nullptr, 0.0);
     REQUIRE(c);
     CHECK(c->level == Catch::Approx(21.7));
     CHECK(c->fallsShort());
     CHECK(c->atEnd == Catch::Approx(21.7 * std::exp(-0.2)));
     room.maxTemp = 25;
-    CHECK_FALSE(nextCoast(room, tz(), at(15), learnedRoom(0.05), nullptr, 0.0)->fallsShort());
+    CHECK_FALSE(nextCoast(room, tz(), at(15), 0.05, nullptr, 0.0)->fallsShort());
 
     room.maxTemp = 22;
     auto in = input(at(16, 45), 21.0);
@@ -766,4 +766,13 @@ TEST_CASE("Coast: when max caps the stored heat, the period stays off and the sh
     CHECK(d.reason == Reason::WarmUp);
     CHECK_THAT(d.detail, ContainsSubstring("only lasts until about"));
     CHECK_FALSE(decide(input(at(20), 17.0), room).on);  // the period itself: still off
+}
+
+TEST_CASE("Coast: the stored heat follows the learned cooling rate before the whole model is learned") {
+    const auto room = peakOffRoom(19.0);
+    auto in = input(at(16), 20.0);
+    in.outdoorTemp = 5.0;
+    CHECK(decide(in, room).inputs.storing);  // the cautious 5 %/h: 22.1 needed
+    in.coolingRate = 0.01;                    // learned: barely cools, 19.6 at the start is enough
+    CHECK_FALSE(decide(in, room).inputs.storing);
 }

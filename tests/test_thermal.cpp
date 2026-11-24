@@ -82,3 +82,14 @@ TEST_CASE("Thermal model: the hour after a gap in the readings is left out (sens
     CHECK(m.coolingStretches >= 3);
     CHECK(m.loss > 0.02);
 }
+
+TEST_CASE("Thermal model: a room that warms without heating (sun, PCs, people) does not count as not cooling") {
+    auto samples = simulate(1.5, 0.05, 2.0, 4, 6, 7);
+    const auto before = fitThermalModel(samples);
+    // After a break in the readings, a gaming evening: 5 hours unheated while it creeps up 20.6 -> 21.5.
+    const Instant evening = samples.back().at + hours{3};
+    for (int i = 0; i <= 60; ++i) samples.push_back({evening + minutes{5 * i}, std::round((20.6 + 0.015 * i) * 10) / 10, 2.0, false});
+    const auto after = fitThermalModel(samples);
+    CHECK(after.coolingStretches == before.coolingStretches);
+    CHECK(after.loss == Approx(before.loss));
+}

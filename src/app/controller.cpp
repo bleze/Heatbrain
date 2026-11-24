@@ -465,7 +465,9 @@ TickResult Controller::tick(Instant now, bool apply) {
             }
         }
         if (!room.priceOnly) {
-            if (const ThermalModel m = thermalModel(room, now); m.usable()) in.thermal = m;
+            const ThermalModel m = thermalModel(room, now);
+            if (m.usable()) in.thermal = m;
+            if (m.coolingStretches >= 3 && m.loss > 0) in.coolingRate = m.loss;  // as the plan's expected coast
         }
         // Bookings: warm up as long as the room needs - learned from its history, from the current
         // and the outdoor temperature - or the room's warm-up setting until that is known.
@@ -535,7 +537,7 @@ TickResult Controller::tick(Instant now, bool apply) {
             // From the room's current temperature, cooling at its learned rate (once it has seen enough).
             std::optional<double> current, cooling;
             if (in.temperature && in.measuredAt && now - *in.measuredAt <= room.strategy.staleAfter) current = in.temperature;
-            if (const auto m = thermalModel(room, now); m.coolingStretches >= 3 && m.loss > 0) cooling = m.loss;
+            cooling = in.coolingRate;
             rr.plan = planAhead(room, prices_, tz_, now, hours{24}, away, outdoor, bookings, current, cooling, in.thermal,
                                 forecast);
         }

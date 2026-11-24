@@ -69,7 +69,10 @@ ThermalModel fitThermalModel(const std::vector<ThermalSample>& all) {
     std::vector<double> losses;
     for (const auto& w : ws) {
         const double gap = w.indoor - w.outdoor;
-        if (!w.heating && gap >= kMinIndoorOutdoorGap) losses.push_back(std::max(0.0, -w.rate / gap));
+        // A room that warmed without heating had heat from elsewhere (sun, PCs, people, a warm room
+        // next door): it tells nothing about how fast the room loses heat, so it is left out rather
+        // than counted as "does not cool" (which would store too little heat for an off period).
+        if (!w.heating && gap >= kMinIndoorOutdoorGap && w.rate < 0) losses.push_back(-w.rate / gap);
     }
     m.coolingStretches = static_cast<int>(losses.size());
     m.loss = losses.empty() ? 0.0 : median(losses);

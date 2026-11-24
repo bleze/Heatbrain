@@ -124,10 +124,11 @@ struct CoastStep {
     bool fallsShort() const { return atEnd < floor - 0.05; }
 };
 // The next program switch after `now`, if it is an off period with a floor within `within`. The room
-// cools at its learned rate, else a cautious 5 %/h, towards the forecast (else `outdoor`, else 5).
-std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, Instant now,
-                                   const std::optional<ThermalModel>& m, const OutdoorForecast* forecast,
-                                   std::optional<double> outdoor, std::chrono::minutes within = std::chrono::hours{12});
+// cools at `loss` (its learned cooling rate, per hour), else a cautious 5 %/h, towards the forecast
+// (else `outdoor`, else 5).
+std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, Instant now, std::optional<double> loss,
+                                   const OutdoorForecast* forecast, std::optional<double> outdoor,
+                                   std::chrono::minutes within = std::chrono::hours{12});
 
 struct PlannerInput {
     Instant now;
@@ -142,6 +143,9 @@ struct PlannerInput {
     // How fast this room warms and cools, once learned well enough: pre-heating is then sized to
     // carry the room through the expensive hours, and starts only as early as needed.
     std::optional<ThermalModel> thermal;
+    // How fast it cools (per hour), as soon as that alone is learned (before the whole model is):
+    // sizes the heat stored for an off period with a floor, as the plan's expected coast does.
+    std::optional<double> coolingRate;
     std::shared_ptr<const OutdoorForecast> forecast;  // outdoor temperature ahead, if known
 };
 

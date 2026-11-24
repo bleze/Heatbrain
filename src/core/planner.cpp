@@ -72,9 +72,8 @@ std::optional<ProgramStep> nextStepUp(const RoomConfig& room, const TimeZone& tz
     return ProgramStep{at, current->point.target, next->target, next->mode};
 }
 
-std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, Instant now,
-                                   const std::optional<ThermalModel>& m, const OutdoorForecast* forecast,
-                                   std::optional<double> outdoor, minutes within) {
+std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, Instant now, std::optional<double> learnedLoss,
+                                   const OutdoorForecast* forecast, std::optional<double> outdoor, minutes within) {
     constexpr double kCautiousLoss = 0.05;  // per hour, as the plan assumes until the room is learned
     const auto& p = room.program;
     if (p.size() < 2) return std::nullopt;
@@ -99,7 +98,7 @@ std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, I
     c.until = c.at + minutes{length};
     c.floor = *off.coastAbove;
     c.outdoor = (forecast ? forecast->meanOver(c.at, c.until) : std::nullopt).value_or(outdoor.value_or(5.0));
-    const double loss = m && m->usable() && m->loss > 0 ? m->loss : kCautiousLoss;
+    const double loss = learnedLoss && *learnedLoss > 0 ? *learnedLoss : kCautiousLoss;
     // Newton cooling backwards from the floor at the end: T(h) = out + (T0 - out) e^(-loss h).
     const double hours = length / 60.0;
     c.level = c.floor <= c.outdoor ? c.floor : c.outdoor + (c.floor - c.outdoor) * std::exp(std::min(loss * hours, 50.0));
@@ -358,7 +357,10 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     // curve, up to the level the room needs to coast through (regardless of price: the floor was asked for).
     std::string shortNote;  // the floor will not hold (max caps the stored heat)
     const auto coast = !booked && !away && mode != ProgramMode::Off
-                           ? nextCoast(room, tz, in.now, in.thermal, in.forecast.get(), in.outdoorTemp)
+                           ? nextCoast(room, tz, in.now,
+                                       in.coolingRate ? in.coolingRate
+                                                      : in.thermal ? std::optional<double>(in.thermal->loss) : std::nullopt,
+                                       in.forecast.get(), in.outdoorTemp)
                            : std::nullopt;
     if (coast && coast->level > target + 0.05) {
         const double outside = (in.forecast ? in.forecast->meanOver(in.now, coast->at) : std::nullopt)
@@ -615,6 +617,7 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
         in.away = away;
         in.outdoorTemp = outdoorTemp;
         in.thermal = thermal;
+        in.coolingRate = coolingRate;
         in.forecast = forecast;
         const double outside = (forecast ? forecast->at(t) : std::nullopt).value_or(outdoorTemp.value_or(5.0));
         const auto period = periodAt(room, minuteOfDay(tz.toLocal(t)));
