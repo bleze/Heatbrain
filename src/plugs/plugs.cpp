@@ -155,7 +155,7 @@ std::vector<DiscoveredPlug> discoverTasmota(std::string_view subnet, HttpClient&
     auto probe = [&http, &prefix](int i) -> std::optional<DiscoveredPlug> {
         const std::string host = std::format("{}.{}", prefix, i);
         try {
-            const auto res = http.get("http://" + host + "/cm?cmnd=Status%200");
+            const auto res = http.send(tasmotaRequest(host, "http://" + host + "/cm?cmnd=Status%200"));
             if (res.status != 200) return std::nullopt;
             const json j = json::parse(res.body);
             if (!j.contains("StatusFWR")) return std::nullopt;

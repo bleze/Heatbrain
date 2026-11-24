@@ -66,6 +66,12 @@ std::chrono::minutes tasmotaClockOffset(const nlohmann::json& status7, Instant n
 inline constexpr const char* kTasmotaWifiOffSince = "15.4.0";
 bool tasmotaCanSwitchWifiOff(std::string_view firmware);
 
+// A GET of a Tasmota command URL with a Referer of the plug's own web UI. Tasmota 16 drops
+// /cm requests without one (empty reply), whatever SetOption128 says; older firmware ignores it.
+inline HttpRequest tasmotaRequest(const std::string& host, std::string url) {
+    return HttpRequest{"GET", std::move(url), {{"Referer", "http://" + host + "/"}}, {}, {}};
+}
+
 // Parses a reply to "Power" / "Power1": {"POWER":"ON"} or {"POWER1":"OFF"}.
 std::optional<bool> parseTasmotaPower(const nlohmann::json& reply);
 
