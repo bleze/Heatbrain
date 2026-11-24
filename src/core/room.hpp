@@ -32,6 +32,9 @@ struct ProgramPoint {
     int atMinute = 0;
     ProgramMode mode = ProgramMode::Heat;
     double target = 20.0;  // unused for Off
+    // Off only: heat is stored beforehand so the room coasts through the period without falling
+    // below this. The period itself still never heats (frost protection aside).
+    std::optional<double> coastAbove;
 };
 
 // How eagerly the planner trades comfort for price. Defaults are deliberately mild.

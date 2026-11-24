@@ -205,10 +205,13 @@ void WebServer::routes() {
         json decisions = json::array();
         json events = json::array();
         for (const auto& d : history.decisions(id, from, to, false)) {
-            // [time, on, reason, target, 1 when the target is on a warm-up curve, 1 when a booking sets it]
+            // [time, on, reason, target, 1 when the target is on a warm-up curve, 1 when a booking sets it,
+            //  an off period's "stay above" floor]
             decisions.push_back({epoch(d.at), d.on ? 1 : 0, d.reason,
                                  d.inputs.contains("target") ? d.inputs["target"] : json(nullptr),
-                                 d.inputs.contains("warmupTo") ? 1 : 0, d.inputs.value("mode", "") == "booked" ? 1 : 0});
+                                 d.inputs.contains("warmupTo") ? 1 : 0, d.inputs.value("mode", "") == "booked" ? 1 : 0,
+                                 d.inputs.value("mode", "") == "off" && d.inputs.contains("coastAbove")
+                                     ? d.inputs["coastAbove"] : json(nullptr)});
             if (d.changed) {
                 events.push_back({{"ts", epoch(d.at)}, {"on", d.on}, {"reason", d.reason}, {"detail", d.detail},
                                   {"inputs", d.inputs}, {"plugs", d.plugs}});

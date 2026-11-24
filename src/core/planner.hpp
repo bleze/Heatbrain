@@ -112,6 +112,21 @@ std::optional<ProgramStep> nextStepUp(const RoomConfig& room, const TimeZone& tz
 double warmupCurve(const RoomConfig& room, const ProgramStep& step, Instant t, const std::optional<ThermalModel>& m,
                    double outdoor, std::optional<std::chrono::minutes> ramp = {});
 
+// An off period ahead with a "stay above" floor: the room must hold `level` when it begins to coast
+// through it [at, until) without heating and still be above `floor` at the end.
+struct CoastStep {
+    Instant at;
+    Instant until;
+    double floor = 0;
+    double level = 0;   // needed at `at` (at most max - hysteresis)
+    double outdoor = 0; // assumed during the off period
+};
+// The next program switch after `now`, if it is an off period with a floor within `within`. The room
+// cools at its learned rate, else a cautious 5 %/h, towards the forecast (else `outdoor`, else 5).
+std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, Instant now,
+                                   const std::optional<ThermalModel>& m, const OutdoorForecast* forecast,
+                                   std::optional<double> outdoor, std::chrono::minutes within = std::chrono::hours{12});
+
 struct PlannerInput {
     Instant now;
     std::optional<double> temperature;
@@ -143,6 +158,8 @@ struct DecisionInputs {
     std::optional<double> outdoorTemp;
     std::optional<double> ceiling;  // pre-heat / cheap boost: heating up to this
     std::optional<double> warmupTo;  // warming up: the target of the period ahead (`target` is the curve)
+    std::optional<double> coastAbove;  // an off period with a floor (or storing heat for one: then `warmupTo` is the level)
+    bool storing = false;  // the warm-up is heat stored for an off period, not a warmer period
 };
 
 struct Decision {
@@ -173,7 +190,12 @@ struct PlanSegment {
     std::optional<double> target;
     bool warmup = false;  // the target is a point on a warm-up curve (also when "idle" or overlaid by the night)
     bool booked = false;  // a booking (or its warm-up) sets the target, also when overlaid by the night
+    // Off: the room's expected temperature at `from` and `to` as it coasts (only when the current
+    // temperature is known), and the period's "stay above" floor if it has one.
+    std::optional<double> coastFrom, coastTo, coastAbove;
 };
+// Whether `next` extends `prev` (same kind and target; off slots with an expected coast never merge).
+bool continuesSegment(const PlanSegment& prev, const PlanSegment& next);
 std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz, Instant now,
                                    std::chrono::hours horizon, std::optional<AwayMode> away,
                                    std::optional<double> outdoorTemp, const std::vector<Booking>& bookings = {},

@@ -192,7 +192,7 @@ Each room has plugs, a sensor (`"netatmo:Bedroom"`, by module name or id), `minT
 `maxTemp` and a **daily program** of switch points, each running until the next one (the
 last continues past midnight): **heat to X** (price-aware), **keep above X** (a floor only:
 no pre-heating or boosting) or **off** (only frost protection, e.g. the 17-21 peak tariff or
-the night). Older configs with `schedule` bands and `noHeat` windows are converted
+the night), optionally with **stay above X** (`"coastAbove"`, see below). Older configs with `schedule` bands and `noHeat` windows are converted
 automatically. Rooms without a sensor use `priceOnly`
 (run the N cheapest hours per day, with no-heat windows). Every tick (default 5 min) the
 planner decides each room, checking in this order:
@@ -235,6 +235,14 @@ It is eased into both ends, so the chart's target line rises as an S. Towards a 
 8-10 still apply to it (coast in expensive slots against the curve, pre-heat before them); towards
 a keep-above period, like the period itself, price does not matter. The night schedule heats
 a warm-up inside the Wi-Fi off period at full power, and thermostats get the new target at once.
+
+**Coasting through an off period.** An off point with `"coastAbove": 19` still never heats during
+the period, but heat is stored just before it: the level the room needs so that, cooling towards the
+forecast outdoor temperature at its learned rate (a cautious 5 %/h until learned) for the whole
+period, it is still above 19 when the period ends (at most `maxTemp` − hysteresis). It is reached
+along the warm-up curve, regardless of price (the floor was asked for). In the room chart the hours
+ahead show how the room is expected to coast through every off period, and the floor as a faint
+dotted line, so off periods are no longer holes in the target line.
 
 **The heating model.** `dT/dt = gain · heating − loss · (T − T_outdoor)`, fitted per room from
 the last 21 days of decisions (90-minute stretches of steady heating or not; limp mode, night

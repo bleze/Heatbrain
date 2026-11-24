@@ -212,6 +212,16 @@ TEST_CASE("Room config validation") {
                     "schedule":[{"from":"07:00","to":"23:00","target":19},{"from":"23:00","to":"07:00","target":16}]}]})"));
     CHECK_NOTHROW(rooms(R"({"rooms":[{"id":"r","plugs":["a"],"sensor":"netatmo:X",
                     "program":[{"at":"23:00","mode":"keep","target":15},{"at":"09:00","mode":"heat","target":19}]}]})"));
+    // An off period may keep a floor to coast above (between frost protection and max).
+    const auto coasting = rooms(R"({"rooms":[{"id":"r","plugs":["a"],"sensor":"netatmo:X",
+                    "program":[{"at":"07:00","mode":"heat","target":20},{"at":"17:00","mode":"off","coastAbove":19}]}]})");
+    REQUIRE(coasting.size() == 1);
+    REQUIRE(coasting[0].program[1].coastAbove);
+    CHECK(*coasting[0].program[1].coastAbove == 19.0);
+    CHECK_FALSE(coasting[0].program[0].coastAbove);
+    CHECK_THROWS_WITH(rooms(R"({"rooms":[{"id":"r","plugs":["a"],"sensor":"netatmo:X","maxTemp":22,
+                       "program":[{"at":"07:00","mode":"heat","target":20},{"at":"17:00","mode":"off","coastAbove":25}]}]})"),
+                      ContainsSubstring("stay above"));
 }
 
 TEST_CASE("Old schedules with no-heat windows become an equivalent program") {

@@ -60,12 +60,12 @@ std::vector<PlanSegment> overlayNight(const std::vector<PlanSegment>& plan, cons
     std::vector<PlanSegment> out;
     const auto push = [&](Instant from, Instant to, const std::string& kind, const PlanSegment& seg) {
         if (from >= to) return;
-        if (!out.empty() && out.back().kind == kind && out.back().target == seg.target && out.back().warmup == seg.warmup &&
-            out.back().booked == seg.booked && out.back().to == from) {
-            out.back().to = to;
-        } else {
-            out.push_back({from, to, kind, seg.target, seg.warmup, seg.booked});
-        }
+        PlanSegment piece = seg;
+        piece.from = from;
+        piece.to = to;
+        piece.kind = kind;
+        if (!out.empty() && continuesSegment(out.back(), piece)) out.back().to = to;
+        else out.push_back(std::move(piece));
     };
     for (const auto& seg : plan) {
         for (Instant t = seg.from; t < seg.to; t += kSlotLength) {
@@ -89,6 +89,7 @@ json toJson(const DecisionInputs& in) {
     if (in.outdoorTemp) j["outdoorTemp"] = *in.outdoorTemp;
     if (in.ceiling) j["ceiling"] = *in.ceiling;
     if (in.warmupTo) j["warmupTo"] = *in.warmupTo;
+    if (in.coastAbove) j["coastAbove"] = *in.coastAbove;
     return j;
 }
 

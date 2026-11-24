@@ -587,11 +587,15 @@
       r.appendChild(at);
       r.appendChild(sel(pt, "mode", [["heat", "Heat to"], ["keep", "Keep above"], ["off", "Off"]], () => {
         if (pt.mode === "off") delete pt.target;
-        else pt.target ??= pt.mode === "keep" ? 15 : 20;
+        else { pt.target ??= pt.mode === "keep" ? 15 : 20; delete pt.coastAbove; }
         render();
       }));
       if (pt.mode !== "off") {
         r.appendChild(num(pt, "target", { step: 0.5, unit: "°C", onChange: () => drawTimeline(tl, room) }));
+      } else {
+        // Optional: store heat beforehand so the room coasts through without falling below this.
+        el("span", { class: "muted", title: "Heat a little before the off period, so the room coasts through it and is still above this when it ends. Empty: just off." }, r, "stay above");
+        r.appendChild(num(pt, "coastAbove", { step: 0.5, unit: "°C", placeholder: "–", onChange: () => drawTimeline(tl, room) }));
       }
       const next = program[(i + 1) % program.length];
       el("span", { class: "muted" }, r, program.length === 1 ? "all day" : `until ${next.at}`);
@@ -663,7 +667,7 @@
     const segs = [];
     for (let m = 0; m < 1440; m += 15) {
       const st = pts.length ? stateAt(m) : null;
-      const key = st ? `${st.mode}:${st.target ?? ""}` : "none";
+      const key = st ? `${st.mode}:${st.target ?? ""}:${st.coastAbove ?? ""}` : "none";
       const last = segs[segs.length - 1];
       if (last && last.key === key) last.len += 15; else segs.push({ key, st, len: 15 });
     }
@@ -673,7 +677,10 @@
       const st = sg.st;
       if (!st) { el("div", { style: `flex:${sg.len};background:var(--grid)` }, bar, "–"); continue; }
       if (st.mode === "off") {
-        const d = el("div", { style: `flex:${sg.len}`, class: "tl-off", title: "off (frost protection only)" }, bar, "off");
+        const coastAbove = st.coastAbove;
+        el("div", { style: `flex:${sg.len}`, class: "tl-off",
+                    title: coastAbove != null ? `off, coasting on heat stored before it: stays above ${coastAbove}°C` : "off (frost protection only)" },
+           bar, coastAbove != null ? `off ≥${coastAbove}°` : "off");
         continue;
       }
       const label = st.mode === "keep" ? `≥${st.target}°` : `${st.target}°`;

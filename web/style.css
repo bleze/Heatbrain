@@ -678,6 +678,8 @@ a.chip { text-decoration: none; }
 .legend .key-dash { width: 16px; border-top: 2px dashed var(--target); display: inline-block; }
 .legend .key-dash-booked { border-top-color: var(--accent); }
 .legend .key-estimate { width: 16px; border-top: 2px dotted var(--ink-2); display: inline-block; }
+.legend .key-coast { width: 16px; border-top: 1.5px dashed var(--target); opacity: 0.55; display: inline-block; }
+.legend .key-floor { width: 16px; border-top: 1.5px dotted var(--target); opacity: 0.55; display: inline-block; }
 /* Wi-Fi off lane: planned = hatched outline band, seen = solid neutral bar (status-neutral, not a series colour) */
 .chart .wifi-on { fill: var(--ink-2); opacity: 0.45; }
 .chart .wifi-planned { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 2; }
@@ -699,6 +701,9 @@ a.chip { text-decoration: none; }
 .chart .panel-note { fill: var(--muted); font-size: 11.5px; }
 .chart .target { fill: none; stroke: var(--target); stroke-width: 1.5; stroke-dasharray: 5 3; opacity: 0.9; }
 .chart .target-booked { stroke: var(--accent); stroke-width: 1.8; }
+/* Off periods: the expected coast (thinner and fainter than the target: no promise, an estimate) and the floor. */
+.chart .coast-expected { fill: none; stroke: var(--target); stroke-width: 1.2; stroke-dasharray: 2 3; opacity: 0.55; }
+.chart .coast-floor { fill: none; stroke: var(--target); stroke-width: 1; stroke-dasharray: 1 3; stroke-linecap: round; opacity: 0.5; }
 .chart .booking-band { fill: var(--accent); fill-opacity: 0.08; }
 .chart .booking-band.warm { fill-opacity: 0.04; }
 .chart .booking-label { fill: var(--accent); font-size: 10.5px; font-weight: 600; }

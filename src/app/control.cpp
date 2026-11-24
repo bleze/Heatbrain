@@ -332,6 +332,8 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
             if (s.target) seg["target"] = *s.target;
             if (s.warmup) seg["warmup"] = true;
             if (s.booked) seg["booked"] = true;
+            if (s.coastFrom && s.coastTo) seg["coast"] = {*s.coastFrom, *s.coastTo};
+            if (s.coastAbove) seg["coastAbove"] = *s.coastAbove;
             plan.push_back(seg);
         }
         room["plan"] = plan;

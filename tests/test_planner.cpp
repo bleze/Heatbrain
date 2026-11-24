@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <iterator>
 
 #include "core/planner.hpp"
 
@@ -646,4 +648,101 @@ TEST_CASE("Warm-up towards a keep-above period ignores price, like the period it
     // Towards a heat period the same slot coasts (down to the curve minus the allowed drop).
     r.program[0].mode = ProgramMode::Heat;
     CHECK(decide(input(at(8), 20.5), r, makePrices(morningPeak)).reason == Reason::PeakAvoid);
+}
+
+namespace {
+// Heat to 20 all day, but off 17-21 (the peak tariff), still above `floor` when it ends.
+RoomConfig peakOffRoom(std::optional<double> floor) {
+    RoomConfig r = bedroom();
+    r.maxTemp = 23;
+    r.program = {{7 * 60, ProgramMode::Heat, 20.0}, {17 * 60, ProgramMode::Off, 0.0, floor}, {21 * 60, ProgramMode::Heat, 20.0}};
+    return r;
+}
+}  // namespace
+
+TEST_CASE("Coast: the level an off period with a floor needs, from cooling towards outdoors") {
+    const auto room = peakOffRoom(19.0);
+    // 4 hours at 5 %/h towards 5 deg outside: 5 + 14 e^0.2 = 22.1 when the period starts.
+    const auto c = nextCoast(room, tz(), at(15), learnedRoom(0.05), nullptr, 5.0);
+    REQUIRE(c);
+    CHECK(c->at == at(17));
+    CHECK(c->until == at(21));
+    CHECK(c->floor == 19.0);
+    CHECK(c->level == Catch::Approx(5 + 14 * std::exp(0.2)).epsilon(1e-6));
+    // Never above max - hysteresis.
+    const auto cold = nextCoast(room, tz(), at(15), learnedRoom(0.2), nullptr, -5.0);
+    REQUIRE(cold);
+    CHECK(cold->level == Catch::Approx(room.maxTemp - room.strategy.hysteresis));
+    // Not from inside the off period, not for a plain off, not further ahead than asked.
+    CHECK_FALSE(nextCoast(room, tz(), at(18), learnedRoom(), nullptr, 5.0));
+    CHECK_FALSE(nextCoast(peakOffRoom(std::nullopt), tz(), at(15), learnedRoom(), nullptr, 5.0));
+    CHECK_FALSE(nextCoast(room, tz(), at(8), learnedRoom(), nullptr, 5.0, hours{3}));
+}
+
+TEST_CASE("Coast: heat is stored before an off period with a floor, whatever the price") {
+    const auto room = peakOffRoom(19.0);
+    auto in = input(at(16), 20.0);
+    in.outdoorTemp = 5.0;
+    const auto d = decide(in, room);
+    CHECK(d.on);
+    CHECK(d.reason == Reason::WarmUp);
+    CHECK(d.inputs.storing);
+    REQUIRE(d.inputs.warmupTo);
+    CHECK(*d.inputs.warmupTo > 20.5);
+    REQUIRE(d.inputs.coastAbove);
+    CHECK(*d.inputs.coastAbove == 19.0);
+    CHECK_THAT(d.detail, ContainsSubstring("off period"));
+
+    // Well before it: the curve is still flat at the target, the plain thermostat runs.
+    auto early = input(at(12), 20.5);
+    early.outdoorTemp = 5.0;
+    CHECK_FALSE(decide(early, room).inputs.storing);
+
+    // A plain off stores nothing of its own.
+    CHECK_FALSE(decide(in, peakOffRoom(std::nullopt)).inputs.storing);
+
+    // A floor the room holds anyway (10 deg after 4 hours at 5 outside): nothing to store.
+    CHECK_FALSE(decide(in, peakOffRoom(10.0)).inputs.storing);
+}
+
+TEST_CASE("Coast: the off period itself still never heats, but says what it coasts to") {
+    const auto room = peakOffRoom(19.0);
+    const auto d = decide(input(at(19), 18.5), room);  // below the floor: still off
+    CHECK_FALSE(d.on);
+    CHECK(d.reason == Reason::ScheduledOff);
+    CHECK_FALSE(d.inputs.target);
+    REQUIRE(d.inputs.coastAbove);
+    CHECK(*d.inputs.coastAbove == 19.0);
+    CHECK_THAT(d.detail, ContainsSubstring("stay above 19.0"));
+    CHECK(decide(input(at(19), 3.0), room).reason == Reason::FrostProtection);
+}
+
+TEST_CASE("Plan: an off period shows the expected coast, and heat stored before one shows as pre-heat") {
+    const auto room = peakOffRoom(19.0);
+    const auto plan = planAhead(room, makePrices(), tz(), at(12), hours{12}, std::nullopt, 5.0, {}, 20.0, 0.05);
+    const auto first = std::ranges::find_if(plan, [](const PlanSegment& s) { return s.kind == "off"; });
+    REQUIRE(first != plan.end());
+    CHECK(first->from == at(17));
+    CHECK(std::prev(first)->kind == "preheat");
+    CHECK(std::prev(first)->warmup);
+    double last = 99;
+    for (auto it = first; it != plan.end() && it->kind == "off"; ++it) {
+        REQUIRE(it->coastFrom);
+        REQUIRE(it->coastTo);
+        if (last != 99) CHECK(*it->coastFrom == Catch::Approx(last));  // one line, joined up
+        CHECK(*it->coastTo < *it->coastFrom);
+        REQUIRE(it->coastAbove);
+        CHECK(*it->coastAbove == 19.0);
+        last = *it->coastTo;
+    }
+    CHECK(last >= 19.0 - 0.3);  // stored enough to stay (about) above the floor
+
+    // A plain off period without a current temperature: one segment, nothing expected.
+    const auto plain = planAhead(peakOffRoom(std::nullopt), makePrices(), tz(), at(12), hours{12}, std::nullopt, 5.0);
+    const auto off = std::ranges::find_if(plain, [](const PlanSegment& s) { return s.kind == "off"; });
+    REQUIRE(off != plain.end());
+    CHECK(off->from == at(17));
+    CHECK(off->to == at(21));
+    CHECK_FALSE(off->coastFrom);
+    CHECK_FALSE(off->coastAbove);
 }

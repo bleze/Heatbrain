@@ -72,6 +72,46 @@ std::optional<ProgramStep> nextStepUp(const RoomConfig& room, const TimeZone& tz
     return ProgramStep{at, current->point.target, next->target, next->mode};
 }
 
+std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, Instant now,
+                                   const std::optional<ThermalModel>& m, const OutdoorForecast* forecast,
+                                   std::optional<double> outdoor, minutes within) {
+    constexpr double kCautiousLoss = 0.05;  // per hour, as the plan assumes until the room is learned
+    const auto& p = room.program;
+    if (p.size() < 2) return std::nullopt;
+    const LocalTime local = tz.toLocal(now);
+    const int mod = minuteOfDay(local);
+    std::size_t next = 0;
+    int ahead = 0;
+    for (std::size_t i = 0; i < p.size(); ++i) {
+        int d = ((p[i].atMinute - mod) % 1440 + 1440) % 1440;
+        if (d == 0) d = 1440;
+        if (i == 0 || d < ahead) { next = i; ahead = d; }
+    }
+    const auto current = periodAt(room, mod);
+    if (!current || current->point.mode == ProgramMode::Off) return std::nullopt;
+    const ProgramPoint& off = p[next];
+    if (off.mode != ProgramMode::Off || !off.coastAbove) return std::nullopt;
+    int length = ((p[(next + 1) % p.size()].atMinute - off.atMinute) % 1440 + 1440) % 1440;
+    if (length == 0) length = 1440;
+    CoastStep c;
+    c.at = tz.toInstant(floor<minutes>(local) + minutes{ahead});
+    if (c.at - now > within) return std::nullopt;
+    c.until = c.at + minutes{length};
+    c.floor = *off.coastAbove;
+    c.outdoor = (forecast ? forecast->meanOver(c.at, c.until) : std::nullopt).value_or(outdoor.value_or(5.0));
+    const double loss = m && m->usable() && m->loss > 0 ? m->loss : kCautiousLoss;
+    // Newton cooling backwards from the floor at the end: T(h) = out + (T0 - out) e^(-loss h).
+    const double hours = length / 60.0;
+    c.level = c.floor <= c.outdoor ? c.floor : c.outdoor + (c.floor - c.outdoor) * std::exp(std::min(loss * hours, 50.0));
+    c.level = std::min(c.level, room.maxTemp - room.strategy.hysteresis);
+    return c;
+}
+
+bool continuesSegment(const PlanSegment& a, const PlanSegment& b) {
+    return a.to == b.from && a.kind == b.kind && a.target == b.target && a.warmup == b.warmup && a.booked == b.booked &&
+           a.coastAbove == b.coastAbove && !a.coastTo && !b.coastFrom;
+}
+
 namespace {
 
 // Smooth max of a and b: equal to the larger one more than w apart, a parabola in between.
@@ -313,7 +353,33 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     }
     // A warmer period ahead: the target follows the warm-up curve towards it, so the room is warm
     // when the period begins (not while booked or away: those replace the program).
-    if (!booked && !away && mode != ProgramMode::Off && room.warmup > minutes{0}) {  // 0: no early start
+    // An off period ahead that must not fall below a floor: heat is stored before it, along the same
+    // curve, up to the level the room needs to coast through (regardless of price: the floor was asked for).
+    const auto coast = !booked && !away && mode != ProgramMode::Off
+                           ? nextCoast(room, tz, in.now, in.thermal, in.forecast.get(), in.outdoorTemp)
+                           : std::nullopt;
+    if (coast && coast->level > target + 0.05) {
+        const double outside = (in.forecast ? in.forecast->meanOver(in.now, coast->at) : std::nullopt)
+                                   .value_or(in.outdoorTemp.value_or(5.0));
+        const ProgramStep step{coast->at, target, coast->level, ProgramMode::Keep};
+        const double curve = warmupCurve(room, step, in.now, in.thermal, outside,
+                                         room.warmup > minutes{0} ? room.warmup : s.preheatWindow);
+        if (curve > target + 0.05) {
+            warming = true;
+            warmingAnyPrice = true;
+            warmupAt = coast->at;
+            mode = ProgramMode::Heat;
+            target = curve;
+            inputs.warmupTo = coast->level;
+            inputs.coastAbove = coast->floor;
+            inputs.storing = true;
+            inputs.targetLabel = std::format(
+                "storing heat for the off period {} (stay above {})",
+                formatWindow(DayWindow{minuteOfDay(tz.toLocal(coast->at)), minuteOfDay(tz.toLocal(coast->until))}),
+                temp(coast->floor));
+        }
+    }
+    if (!coast && !booked && !away && mode != ProgramMode::Off && room.warmup > minutes{0}) {  // 0: no early start
         if (const auto step = nextStepUp(room, tz, in.now)) {
             const double outside = (in.forecast ? in.forecast->meanOver(in.now, step->at) : std::nullopt)
                                        .value_or(in.outdoorTemp.value_or(5.0));
@@ -331,6 +397,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         }
     }
     if (mode != ProgramMode::Off) inputs.target = target;
+    else if (!away && period && period->point.coastAbove) inputs.coastAbove = period->point.coastAbove;
     inputs.mode = booked ? "booked" : away ? "away" : std::string(modeName(mode));
 
     const bool fresh = in.temperature && in.measuredAt && in.now - *in.measuredAt <= s.staleAfter;
@@ -376,6 +443,12 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
             return make(true, Reason::FrostProtection,
                         std::format("Off {}, but {} is below frost protection {}", inputs.targetLabel, temp(t),
                                     temp(room.frostTemp)),
+                        inputs);
+        }
+        if (inputs.coastAbove) {
+            return make(false, Reason::ScheduledOff,
+                        std::format("Off by program {}: coasting on stored heat, to stay above {}", inputs.targetLabel,
+                                    temp(*inputs.coastAbove)),
                         inputs);
         }
         return make(false, Reason::ScheduledOff, "Off by program " + inputs.targetLabel, inputs);
@@ -473,10 +546,16 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     //     them (both against the curve), so a warm-up does not run through the peak; towards a
     //     keep-above period or a booking price does not matter. Heats below the curve, stops a little above it.
     if (warming) {
-        const std::string what = booked ? "the booking" : "the next period";
+        const std::string what = booked ? "the booking" : inputs.storing ? "the off period" : "the next period";
         const std::string where = std::format("{} (curve {} now, {} at {})", temp(t), temp(target), temp(*inputs.warmupTo),
                                               formatLocalHm(tz.toLocal(warmupAt)));
         if (t < target || (in.currentlyOn && t < target + h)) {
+            if (inputs.storing) {
+                return make(true, Reason::WarmUp,
+                            std::format("Storing heat for the off period (to stay above {}): {}", temp(*inputs.coastAbove),
+                                        where),
+                            inputs);
+            }
             return make(true, Reason::WarmUp, "Warming up for " + what + ": " + where, inputs);
         }
         return make(false, Reason::WarmUpOnTrack, "Warm enough for now, on track for " + what + ": " + where, inputs);
@@ -547,7 +626,7 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
             case Reason::BelowComfortDuringPeak: kind = "coast"; break;
             case Reason::CheapBoost: kind = "boost"; break;
             case Reason::WarmUp:
-            case Reason::WarmUpOnTrack: kind = "warmup"; break;
+            case Reason::WarmUpOnTrack: kind = d.inputs.storing ? "preheat" : "warmup"; break;
             case Reason::KeepAbove:
             case Reason::KeepSatisfied: kind = d.inputs.mode == "away" ? "away" : "keep"; break;
             case Reason::ScheduledOff:
@@ -558,12 +637,15 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
             case Reason::NoPricesFallback: kind = "heat"; break;
             default: kind = room.priceOnly ? (d.on ? "heat" : "off") : "heat"; break;
         }
+        std::optional<double> coastFrom, coastTo;
         if (room_t) {
             if (kind == "keep" || kind == "off" || kind == "away") {
+                if (kind == "off") coastFrom = *room_t;
                 *room_t = outside + (*room_t - outside) * cool;
                 const double floor = kind == "off" ? room.frostTemp : d.inputs.target.value_or(room.frostTemp);
                 if (kind == "keep" && *room_t > floor + room.strategy.hysteresis) kind = "idle";
                 *room_t = std::max(*room_t, floor);  // heating holds it at the floor
+                if (kind == "off") coastTo = *room_t;
             } else if (d.inputs.target &&
                        (kind == "heat" || kind == "preheat" || kind == "boost" || kind == "coast" || kind == "warmup")) {
                 // A heat period whose target (with any boost) is below where the room still is: no heat
@@ -580,11 +662,12 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
         const std::optional<double> target = (kind == "off") ? std::nullopt : d.inputs.target;
         const bool warmup = d.inputs.warmupTo.has_value();
         const bool booked = d.inputs.mode == "booked";
-        if (!out.empty() && out.back().kind == kind && out.back().target == target && out.back().warmup == warmup &&
-            out.back().booked == booked) {
-            out.back().to = t + kSlotLength;
+        PlanSegment seg{t, t + kSlotLength, kind, target, warmup, booked, coastFrom, coastTo,
+                        kind == "off" ? d.inputs.coastAbove : std::nullopt};
+        if (!out.empty() && continuesSegment(out.back(), seg)) {
+            out.back().to = seg.to;
         } else {
-            out.push_back({t, t + kSlotLength, kind, target, warmup, booked});
+            out.push_back(std::move(seg));
         }
     }
     return out;

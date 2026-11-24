@@ -115,6 +115,13 @@ RoomConfig parseRoom(const json& rj) {
                 throw std::runtime_error(std::format("program: {} target {} must be between {} and {}", mode, p.target,
                                                      lo, r.maxTemp));
             }
+        } else if (pj.contains("coastAbove") && !pj["coastAbove"].is_null()) {
+            const double c = pj["coastAbove"].get<double>();
+            if (c < r.frostTemp || c > r.maxTemp) {
+                throw std::runtime_error(std::format("program: off 'stay above' {} must be between {} and {}", c,
+                                                     r.frostTemp, r.maxTemp));
+            }
+            p.coastAbove = c;
         }
         r.program.push_back(p);
     }

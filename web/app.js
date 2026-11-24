@@ -228,14 +228,14 @@ function renderProblems() {
 // ---------------------------------------------------------------------------------------
 const PLAN = {
   heat: (t) => (t == null ? "heat (cheap hours)" : `heat to ${temp(t)} as needed`),
-  preheat: (t) => `pre-heat (target ${temp(t)})`,
+  preheat: (t, s) => (s?.warmup ? `store heat (to ${temp(t)}) for the off period` : `pre-heat (target ${temp(t)})`),
   coast: () => "coast - expensive",
   boost: () => "cheap boost",
   keep: (t) => `keep above ${temp(t)}`,
   idle: () => "warm enough, no heat",
   away: (t) => `away - keep above ${temp(t)}`,
   booked: (t) => `booked - ${temp(t)}`,
-  off: () => "off",
+  off: (t, s) => (s?.coastAbove != null ? `off - coasting, stays above ${temp(s.coastAbove)}` : "off"),
   warmup: () => "warm up for the next period",
   night: () => "Wi-Fi off - heating by night schedule",
   nightoff: () => "Wi-Fi off - off",
@@ -247,14 +247,18 @@ const PLAN_SHADE = {
   idle: shade("--grid", 50), preheat: shade("--cat-price", 80), boost: shade("--cat-price", 80),
   night: shade("--cat-price", 55), away: shade("--accent", 35),
 };
-const planLabel = (s) => (PLAN[s.kind] || (() => s.kind))(s.target);
+const planLabel = (s) => (PLAN[s.kind] || (() => s.kind))(s.target, s);
 
 function planStrip(parent, all) {
-  // A warm-up comes as one segment per 15 minutes (its target rises along the curve): one here.
+  // A warm-up comes as one segment per 15 minutes (its target rises along the curve), and so does an
+  // off period (the room's expected temperature falls as it coasts): one here.
   const plan = [];
   for (const s of all) {
     const last = plan[plan.length - 1];
-    if (last && last.kind === s.kind && last.warmup && s.warmup && last.to === s.from) plan[plan.length - 1] = { ...last, to: s.to, target: s.target };
+    const joins = last && last.kind === s.kind && last.to === s.from &&
+      ((last.warmup && s.warmup) || (s.kind === "off" && last.coastAbove === s.coastAbove) ||
+       (s.kind === "nightoff" && last.target === s.target && !!last.warmup === !!s.warmup));
+    if (joins) plan[plan.length - 1] = { ...last, to: s.to, target: s.target };
     else plan.push(s);
   }
   const t0 = plan[0].from, t1 = plan[plan.length - 1].to;
@@ -936,7 +940,7 @@ function priceSummary() {
   return pieces.join(" · ");
 }
 
-function renderLegend(room, segs, wifi, booked) {
+function renderLegend(room, segs, wifi, booked, coasting, floor) {
   const host = $("legend");
   host.replaceChildren();
   if (wifi) {
@@ -953,6 +957,12 @@ function renderLegend(room, segs, wifi, booked) {
     const b = el("span", {}, host); el("i", { class: "key-dash" }, b); b.appendChild(document.createTextNode("Target"));
     if (booked) {
       const k = el("span", {}, host); el("i", { class: "key-dash key-dash-booked" }, k); k.appendChild(document.createTextNode("Target: booking"));
+    }
+    if (coasting) {
+      const k = el("span", {}, host); el("i", { class: "key-coast" }, k); k.appendChild(document.createTextNode("Expected while off"));
+    }
+    if (floor) {
+      const k = el("span", {}, host); el("i", { class: "key-floor" }, k); k.appendChild(document.createTextNode("Off: stay above"));
     }
   }
   for (const [cat, label] of Object.entries(CATEGORIES)) {
@@ -999,11 +1009,21 @@ function renderDetail() {
       targets.push([t, seg.kind === "off" ? null : seg.target ?? null, !!seg.warmup, !!seg.booked]);
     }
   }
+  // Off periods have no target. Ahead of now the plan says how the room is expected to coast through
+  // them (from its current temperature, cooling at its learned rate): [from, temp, to, temp] each.
+  const coast = roomPlan.filter((s) => s.coast && s.to > Math.max(t0, lastDecision) && s.from < t1)
+    .map((s) => [s.from, s.coast[0], s.to, s.coast[1]]);
+  // An off period's "stay above" floor: logged with each decision, ahead of now from the plan.
+  const floors = decisions.map((d) => [d[0], d[6] ?? null]);
+  for (const seg of roomPlan) {
+    for (let t = Math.max(seg.from, lastDecision + step); t < seg.to && t <= t1; t += step) floors.push([t, seg.coastAbove ?? null]);
+  }
+  const hasFloor = floors.some((p) => p[1] != null);
   const segs = heatingSegments(decisions, tick, h.to);
   const wifi = h.wifi && (h.wifi.seen.length || h.wifi.planned.length) ? h.wifi : null;
   // Bookings still known to the server (coming or under way), for the band and the tooltip.
   const bookings = (state.status?.rooms?.find((r) => r.id === room.id)?.bookings || []).filter((b) => b.until > t0 && b.warmupFrom < t1);
-  renderLegend(room, segs, wifi, targets.some((p) => p[3] && p[1] != null));
+  renderLegend(room, segs, wifi, targets.some((p) => p[3] && p[1] != null), coast.length > 0, hasFloor);
 
   const W = host.clientWidth, m = { l: 40, r: 8 };
   const showTemp = !room.priceOnly;
@@ -1028,7 +1048,8 @@ function renderDetail() {
   let yT = null;
   if (showTemp) {
     el("text", { class: "panel-label", x: m.l, y: 12 }, svg, "Temperature °C");
-    const vals = [...temps.map((p) => p[1]), ...targets.map((p) => p[1]).filter((v) => v != null)];
+    const vals = [...temps.map((p) => p[1]), ...targets.map((p) => p[1]).filter((v) => v != null),
+                  ...coast.flatMap((c) => [c[1], c[3]]), ...floors.map((p) => p[1]).filter((v) => v != null)];
     if (!vals.length) vals.push(room.minTemp, room.maxTemp);
     const yTicks = niceTicks(Math.min(...vals) - 0.5, Math.max(...vals) + 0.5, 4);
     const lo = yTicks[0], hi = yTicks[yTicks.length - 1];
@@ -1058,6 +1079,15 @@ function renderDetail() {
     });
     el("path", { class: "target", d: stepPath(own(false), x, yT, t1, 3 * tick) }, svg);
     el("path", { class: "target target-booked", d: stepPath(own(true), x, yT, t1, 3 * tick) }, svg);
+    // Off periods: the floor to stay above (faint, dotted), and ahead of now the expected coast down
+    // from where the heating leaves the room - one line per off period, so the target line has no hole.
+    if (hasFloor) el("path", { class: "coast-floor", d: stepPath(floors, x, yT, t1, 3 * tick) }, svg);
+    let cd = "";
+    coast.forEach(([a, av, b, bv], i) => {
+      const joined = i > 0 && coast[i - 1][2] === a;
+      cd += `${joined ? "L" : "M"}${x(Math.max(a, t0)).toFixed(1)},${yT(av).toFixed(1)}L${x(Math.min(b, t1)).toFixed(1)},${yT(bv).toFixed(1)}`;
+    });
+    if (cd) el("path", { class: "coast-expected", d: cd }, svg);
     // Temperature line, broken where readings are missing for > 30 min. Each gap is bridged by a
     // dashed straight line from the last reading before to the first after: an estimate, not data
     // (e.g. a Wi-Fi off night, when the station can't upload).
@@ -1148,6 +1178,10 @@ function renderDetail() {
       const byBooking = di >= 0 && targets[di][3];
       rows.push({ label: byBooking ? "Target (booking)" : "Target", value: temp(di >= 0 ? targets[di][1] : null),
                   color: byBooking ? "var(--accent)" : "var(--target)" });
+      const c = coast.find(([a, , b]) => t >= a && t < b);
+      if (c) rows.push({ label: "Expected (off, coasting)", value: `≈ ${temp(c[1] + ((c[3] - c[1]) * (t - c[0])) / (c[2] - c[0]))}`, color: "var(--target)" });
+      const fi = lastAtOrBefore(floors, t);
+      if (fi >= 0 && floors[fi][1] != null) rows.push({ label: "Off: stay above", value: temp(floors[fi][1]), color: "var(--target)" });
       const b = bookings.find((k) => t >= k.warmupFrom && t < k.until);
       if (b) {
         rows.push({ label: t < b.from ? "Warming up for booking" : "Booked", color: "var(--accent)", box: true,
