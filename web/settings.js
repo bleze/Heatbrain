@@ -177,6 +177,15 @@
     d.addEventListener("toggle", () => { if (d.open) S.openDetails.add(key); else S.openDetails.delete(key); });
     return d;
   }
+  // The element that scrolls `node` (the page itself unless a panel in between scrolls).
+  function scrollerOf(node) {
+    for (let p = node.parentElement; p && p !== document.body; p = p.parentElement) {
+      const oy = getComputedStyle(p).overflowY;
+      if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight) return p;
+    }
+    return window;
+  }
+
   function btn(parent, label, iconName, onClick, cls = "") {
     const b = el("button", { type: "button", class: cls }, parent);
     if (iconName) b.appendChild(icon(iconName));
@@ -412,7 +421,7 @@
   }
 
   function renderRoom(list, room, idx) {
-    const c = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, list);
+    const c = el("div", { class: "card", style: "margin:0;background:var(--surface-2)", "data-room": room.id }, list);
     if (S.scrollToRoom === room.id) {
       S.scrollToRoom = null;
       requestAnimationFrame(() => {
@@ -450,12 +459,21 @@
     };
 
     const right = el("div", { class: "row" }, head);
-    // Order: the dashboard shows the rooms in this order.
+    // Order: the dashboard shows the rooms in this order. The moved room stays where it was on the
+    // screen (the page scrolls by as much as it moved), with the same arrow focused, so it can be
+    // clicked again and again.
     const move = (dir) => {
       const to = idx + dir;
       if (to < 0 || to >= S.cfg.rooms.length) return;
+      const before = c.getBoundingClientRect().top;
       [S.cfg.rooms[idx], S.cfg.rooms[to]] = [S.cfg.rooms[to], S.cfg.rooms[idx]];
       changed(); render();
+      const moved = document.querySelector(`[data-room="${CSS.escape(room.id)}"]`);
+      if (!moved) return;
+      scrollerOf(moved).scrollBy(0, moved.getBoundingClientRect().top - before);  // before anything is painted
+      const arrows = moved.querySelectorAll(".move-btn");
+      const again = arrows[dir < 0 ? 0 : 1];
+      (again && !again.disabled ? again : arrows[dir < 0 ? 1 : 0])?.focus({ preventScroll: true });
     };
     const up = btn(right, "", "up", () => move(-1), "ghost move-btn");
     up.title = "Move up (earlier on the dashboard)"; up.disabled = idx === 0;

@@ -186,6 +186,9 @@ a { color: var(--accent); }
 .batt-proj { fill: none; stroke: var(--good); stroke-width: 1.5; stroke-dasharray: 2 3; opacity: 0.8; }
 .batt-empty { stroke: var(--critical); stroke-width: 1; stroke-dasharray: 2 3; opacity: 0.6; }
 .move-btn .icon { color: var(--accent); }  /* like a booking's Cancel */
+.move-btn:disabled { opacity: 1; }
+.move-btn:disabled .icon { color: var(--muted); opacity: 0.35; }
+button.ghost.move-btn:disabled:hover { background: transparent; }
 .away-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-color: var(--accent);
   background: linear-gradient(90deg, var(--accent-soft), transparent 70%), var(--surface); }
 .away-bar .grow { flex: 1; min-width: 200px; }
