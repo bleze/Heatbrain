@@ -349,6 +349,45 @@ TEST_CASE("Wi-Fi off period: back late - plugs keep their schedule, one quiet no
     CHECK(f.controller->offlineInfo(f.now)->late);
 }
 
+TEST_CASE("Wi-Fi off period: the plugs switch their own Wi-Fi off too, dry-run ones included") {
+    Fixture f;
+    f.plug("bedroom").sw->provision(false);
+    f.plug("spare").sw->provision(false);  // dry-run, with the fail-safe
+    auto* live = dynamic_cast<SimulatedSwitch*>(f.plug("bedroom").sw.get());
+    auto* spare = dynamic_cast<SimulatedSwitch*>(f.plug("spare").sw.get());
+    f.controller->setDataDir(f.dir.path());
+    f.controller->setOfflineWindow(DayWindow{12 * 60 + 5, 14 * 60}, minutes{10});
+
+    f.controller->tick(f.now, true);
+    REQUIRE(live->radioOff());
+    CHECK(live->radioOff()->start == f.now + minutes{6});              // 12:06
+    CHECK(live->radioOff()->end == f.now + hours{2} - minutes{2});     // 13:58
+    REQUIRE(spare->radioOff());
+    CHECK_FALSE(spare->schedule());                                    // dry-run: no schedule
+    CHECK(f.controller->offlineInfo(f.now)->radioOff == std::vector<std::string>{"bedroom", "spare"});
+    CHECK(f.controller->offlineInfo(f.now)->armedPlugs == std::vector<std::string>{"bedroom"});
+
+    // Morning: both handed back.
+    f.now += hours{2} + minutes{5};
+    f.setTemps(18.0, 14.0);
+    f.controller->tick(f.now, true);
+    CHECK_FALSE(live->radioOff());
+    CHECK_FALSE(spare->radioOff());
+    CHECK(f.controller->offlineInfo(f.now)->radioOff.empty());
+}
+
+TEST_CASE("Wi-Fi off period: the plugs' own Wi-Fi can be left on") {
+    Fixture f;
+    f.plug("bedroom").sw->provision(false);
+    auto* live = dynamic_cast<SimulatedSwitch*>(f.plug("bedroom").sw.get());
+    WifiOffPlan plan{DayWindow{12 * 60 + 5, 14 * 60}, std::nullopt};
+    plan.plugRadio = false;
+    f.controller->setOfflineWindow(plan, minutes{10});
+    f.controller->tick(f.now, true);
+    REQUIRE(live->schedule());
+    CHECK_FALSE(live->radioOff());
+}
+
 TEST_CASE("Dry-run plugs with a fail-safe get their watchdog fed, never switched") {
     Fixture f;
     auto* spare = dynamic_cast<SimulatedSwitch*>(f.plug("spare").sw.get());  // dry-run

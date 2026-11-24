@@ -389,6 +389,7 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
                    {"late", o->late},
                    {"scheduleUntil", o->scheduleUntil ? json(o->scheduleUntil->time_since_epoch().count()) : json(nullptr)},
                    {"armedPlugs", o->armedPlugs},
+                   {"radioOff", o->radioOff},
                    {"errors", o->errors}};
     }
     json outdoor = nullptr;

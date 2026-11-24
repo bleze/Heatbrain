@@ -32,6 +32,7 @@ struct OfflinePeriod {
 struct WifiOffPlan {
     DayWindow normal;
     std::optional<DayWindow> weekend;
+    bool plugRadio = true;  // the plugs switch their own Wi-Fi off too (Tasmota 15.4+)
 };
 
 // The occurrence that is running at `now`, or else the next one.
@@ -99,13 +100,20 @@ std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& pr
 
 bool scheduleOnAt(const std::vector<OnSpan>& spans, Instant t);
 
+// When a plug turns its own Wi-Fi off during the period: a minute after the network goes, and back
+// on two minutes before it returns, so it is connected again by then. Nothing for a period under
+// 20 minutes.
+std::optional<OfflinePeriod> plugRadioOffWindow(const OfflinePeriod& period);
+
 // Tasmota rules that switch the relay at the spans' edges, using the plug's own clock:
 // "ON Time#Minute=1410 DO Power1 1 ENDON ON Time#Minute=60 DO Power1 0 ENDON ...".
+// With radioOff, "ON Time#Minute=.. DO Wifi 0 ENDON" and "... DO Wifi 1 ENDON" come first.
 // plugUtcOffset: the plug's local time minus UTC (its Time#Minute counts local minutes).
 // Split over at most maxRules rule sets of at most maxLength characters; nullopt if it
 // doesn't fit (too many switch points).
 std::optional<std::vector<std::string>> tasmotaScheduleRules(const std::vector<OnSpan>& spans,
                                                              std::chrono::minutes plugUtcOffset,
+                                                             std::optional<OfflinePeriod> radioOff = {},
                                                              std::size_t maxLength = 500, int maxRules = 2);
 
 // True for an empty rule set or one tasmotaScheduleRules wrote (so it may be replaced).

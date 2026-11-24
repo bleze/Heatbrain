@@ -54,10 +54,20 @@ public:
     // `until`, with the fail-safe stretched to match (auto-off covers the longest planned ON,
     // the watchdog runs until the period is over). Throws with a readable reason when the
     // device can't do it (clock not synced, its rule slots in use, too many switch points).
-    virtual void armOffline(const std::vector<OnSpan>& spans, Instant now, Instant until) {
-        (void)spans, (void)now, (void)until;
+    // radioOff: the plug also switches its own Wi-Fi off in that window, if its firmware can;
+    // returns whether it will.
+    virtual bool armOffline(const std::vector<OnSpan>& spans, Instant now, Instant until,
+                            std::optional<OfflinePeriod> radioOff = {}) {
+        (void)spans, (void)now, (void)until, (void)radioOff;
+        return false;
     }
-    // Back on the network: remove the schedule and restore the normal fail-safe timers.
+    // Dry-run plug: only its own Wi-Fi off and on again in the window - no schedule, the relay
+    // untouched. Returns whether the plug will (false: its firmware can't). Undone by disarmOffline.
+    virtual bool armRadioOff(const OfflinePeriod& radioOff, Instant now) {
+        (void)radioOff, (void)now;
+        return false;
+    }
+    // Back on the network: remove the schedule (and the Wi-Fi off) and restore the normal fail-safe timers.
     virtual void disarmOffline() {}
 
     // Dry-run plug with a fail-safe: restart the watchdog without switching anything, so limp mode

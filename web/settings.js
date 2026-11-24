@@ -1748,6 +1748,17 @@
       });
       if (weekendOn) { krow.appendChild(time(S.cfg.wifiOff.weekend, "from")); el("span", {}, krow, "–"); krow.appendChild(time(S.cfg.wifiOff.weekend, "to", true)); }
       el("div", { class: "hint" }, wk, "the nights ending Saturday and Sunday morning");
+      const pr = el("div", { class: "field span2" }, g);
+      el("span", {}, pr, "The plugs' own Wi-Fi");
+      const prow = el("div", { class: "row" }, pr);
+      const radioOn = S.cfg.wifiOff.plugWifi !== false;
+      toggle(prow, radioOn, radioOn ? "Off during the period too" : "Stays on", (v) => {
+        if (v) delete S.cfg.wifiOff.plugWifi; else S.cfg.wifiOff.plugWifi = false;
+        changed(); render();
+      });
+      el("div", { class: "hint" }, pr, radioOn
+        ? "no searching for the network all night: a little less power and radio (Tasmota 15.4 or newer)"
+        : "the plugs keep looking for the network while it is off");
     }
     renderWifiSeen(card);
   }

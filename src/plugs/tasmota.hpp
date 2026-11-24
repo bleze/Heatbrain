@@ -3,6 +3,7 @@
 #include <chrono>
 #include <functional>
 #include <string>
+#include <string_view>
 
 #include "net/http.hpp"
 #include "plugs/switch.hpp"
@@ -20,7 +21,9 @@ public:
     nlohmann::json backup() override;
     void provision(bool overwriteRules) override;
     void restore(const nlohmann::json& backup) override;
-    void armOffline(const std::vector<OnSpan>& spans, Instant now, Instant until) override;
+    bool armOffline(const std::vector<OnSpan>& spans, Instant now, Instant until,
+                    std::optional<OfflinePeriod> radioOff = {}) override;
+    bool armRadioOff(const OfflinePeriod& radioOff, Instant now) override;
     void disarmOffline() override;
     void keepAlive(Instant now, std::optional<Instant> until) override;
 
@@ -43,6 +46,11 @@ public:
     bool testPulse(const Log& log, const Sleeper& sleep);
 
 private:
+    // radioOff kept only when the firmware can switch Wi-Fi off safely.
+    std::optional<OfflinePeriod> supportedRadioOff(std::optional<OfflinePeriod> radioOff);
+    // Writes the schedule into Rule2/Rule3, refusing when they hold the user's own rules.
+    void loadScheduleRules(const std::vector<OnSpan>& spans, Instant now, std::optional<OfflinePeriod> radioOff);
+
     HttpClient& http_;
     std::string host_;
     std::string password_;
@@ -53,6 +61,10 @@ private:
 // `tolerance` of `now`. Throws std::runtime_error with the reason otherwise.
 std::chrono::minutes tasmotaClockOffset(const nlohmann::json& status7, Instant now,
                                         std::chrono::minutes tolerance = std::chrono::minutes{5});
+
+// "Wifi 0" crashed Tasmota when traffic arrived as it ran until 15.4.0 (arendst/Tasmota#24536).
+inline constexpr const char* kTasmotaWifiOffSince = "15.4.0";
+bool tasmotaCanSwitchWifiOff(std::string_view firmware);
 
 // Parses a reply to "Power" / "Power1": {"POWER":"ON"} or {"POWER1":"OFF"}.
 std::optional<bool> parseTasmotaPower(const nlohmann::json& reply);

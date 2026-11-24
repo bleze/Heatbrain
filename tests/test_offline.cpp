@@ -111,6 +111,30 @@ TEST_CASE("Night schedule as Tasmota rules on the plug's local clock") {
     CHECK_FALSE(tasmotaScheduleRules(many, minutes{60}));
 }
 
+TEST_CASE("The plug's own Wi-Fi goes off just after the network and comes back just before it") {
+    const OfflinePeriod night{at(0, 23, 30), at(1, 6, 30)};
+    const auto radio = plugRadioOffWindow(night);
+    REQUIRE(radio);
+    CHECK(radio->start == at(0, 23, 31));
+    CHECK(radio->end == at(1, 6, 28));
+    CHECK_FALSE(plugRadioOffWindow({at(0, 23, 30), at(0, 23, 45)}));  // too short to bother
+
+    // Wi-Fi triggers first, on the plug's local clock (+60 min), then the relay's.
+    const std::vector<OnSpan> spans{{at(1, 0), at(1, 1)}};
+    const auto rules = tasmotaScheduleRules(spans, minutes{60}, radio);
+    REQUIRE(rules);
+    REQUIRE(rules->size() == 1);
+    CHECK((*rules)[0] == "ON Time#Minute=1411 DO Wifi 0 ENDON ON Time#Minute=388 DO Wifi 1 ENDON "
+                         "ON Time#Minute=0 DO Power1 1 ENDON ON Time#Minute=60 DO Power1 0 ENDON");
+    CHECK(isHeatbrainScheduleRule((*rules)[0]));
+    CHECK_FALSE(isHeatbrainScheduleRule("ON Time#Minute=10 DO Wifi 0 ENDON ON Button1#State DO Power1 2 ENDON"));
+
+    // Only the Wi-Fi (a dry-run plug): two triggers, no relay.
+    const auto only = tasmotaScheduleRules({}, minutes{60}, radio);
+    REQUIRE(only);
+    CHECK((*only)[0] == "ON Time#Minute=1411 DO Wifi 0 ENDON ON Time#Minute=388 DO Wifi 1 ENDON");
+}
+
 TEST_CASE("Weekend Wi-Fi off times apply to the nights ending Saturday and Sunday") {
     // 2026-11-23 is a Monday; kDay + 4 = Friday 27th, + 5 = Saturday, + 6 = Sunday.
     const WifiOffPlan plan{DayWindow{30, 6 * 60 + 30}, DayWindow{30, 9 * 60}};

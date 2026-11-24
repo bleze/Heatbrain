@@ -1,5 +1,7 @@
 #include "app/controller.hpp"
 
+#include "plugs/tasmota.hpp"
+
 #include "providers/forecast.hpp"
 
 #include <fstream>
@@ -746,6 +748,20 @@ std::optional<OfflineStart> Controller::offlineStart(const RoomConfig& room, Ins
 }
 
 void Controller::armOffline(const OfflinePeriod& period, Instant now, std::optional<AwayMode> away) {
+    // The plugs' own Wi-Fi off too (unless turned off in settings): no reconnect attempts all night.
+    const auto radio = offlineWindow_ && offlineWindow_->plugRadio ? plugRadioOffWindow(period) : std::nullopt;
+    const auto radioNote = [&](const std::string& id, bool off) {
+        if (!radio) return;
+        if (off) {
+            radioOffPlugs_.insert(id);
+            log::info("Plug {}: its own Wi-Fi goes off {:%H:%M}-{:%H:%M}", id, tz_.toLocal(radio->start),
+                      tz_.toLocal(radio->end));
+        } else {
+            log::info("Plug {}: its own Wi-Fi stays on tonight (switching it off needs Tasmota {} or newer)", id,
+                      kTasmotaWifiOffSince);
+        }
+    };
+    radioOffPlugs_.clear();
     for (const auto& room : rooms_) {
         const auto duty = learnedDuty(room.id, now);
         const Instant horizon = period.end + kOfflineBuffer;
@@ -765,14 +781,25 @@ void Controller::armOffline(const OfflinePeriod& period, Instant now, std::optio
                     } catch (const std::exception& e) {
                         log::warn("Plug {} (dry-run): watchdog not extended for the night: {}", id, e.what());
                     }
+                    // Dry-run switches nothing, but its Wi-Fi can rest all the same.
+                    if (radio) {
+                        try {
+                            const bool off = it->sw->armRadioOff(*radio, now);
+                            if (off) radioOnlyPlugs_[id] = period.end + kOfflineBuffer;
+                            radioNote(id, off);
+                        } catch (const std::exception& e) {
+                            log::warn("Plug {} (dry-run): its Wi-Fi stays on tonight: {}", id, e.what());
+                        }
+                    }
                 }
                 continue;
             }
             if (!failsafeProblem(*it, now).empty()) continue;               // not switched by heatbrain anyway
             try {
-                it->sw->armOffline(spans, now, period.end + kOfflineBuffer);
+                const bool off = it->sw->armOffline(spans, now, period.end + kOfflineBuffer, radio);
                 armedPlugs_[id] = period.end + kOfflineBuffer;
                 log::info("Plug {}: night schedule loaded", id);
+                radioNote(id, off);
             } catch (const std::exception& e) {
                 offlineArmErrors_[id] = {e.what(), period.end};
                 log::warn("Plug {}: night schedule not loaded: {}", id, e.what());
@@ -801,22 +828,27 @@ void Controller::disarmOffline(Instant now, bool networkBack) {
     const bool pastEnd = armedPeriod_ && now >= armedPeriod_->end;
     const bool periodic = pastEnd && (!lastDisarmTry_ || now - *lastDisarmTry_ >= minutes{15});
     if (periodic) lastDisarmTry_ = now;
-    for (auto it = armedPlugs_.begin(); it != armedPlugs_.end();) {
-        if (now < it->second && !networkBack && !periodic) { ++it; continue; }
-        auto plug = std::ranges::find_if(plugs_, [&](const Plug& p) { return p.id == it->first; });
-        if (plug == plugs_.end()) { it = armedPlugs_.erase(it); changed = true; continue; }
-        try {
-            plug->sw->disarmOffline();
-            log::info("Plug {}: back on the network, normal fail-safe restored", it->first);
-            failsafeChecks_.erase(it->first);
-            it = armedPlugs_.erase(it);
-            changed = true;
-        } catch (const std::exception&) {
-            ++it;  // still offline: try again next tick (alerts resume after the grace time)
+    const auto handBack = [&](std::map<std::string, Instant>& armed, const char* what) {
+        for (auto it = armed.begin(); it != armed.end();) {
+            if (now < it->second && !networkBack && !periodic) { ++it; continue; }
+            auto plug = std::ranges::find_if(plugs_, [&](const Plug& p) { return p.id == it->first; });
+            if (plug == plugs_.end()) { it = armed.erase(it); changed = true; continue; }
+            try {
+                plug->sw->disarmOffline();
+                log::info("Plug {}: back on the network, {}", it->first, what);
+                failsafeChecks_.erase(it->first);
+                radioOffPlugs_.erase(it->first);
+                it = armed.erase(it);
+                changed = true;
+            } catch (const std::exception&) {
+                ++it;  // still offline: try again next tick (alerts resume after the grace time)
+            }
         }
-    }
+    };
+    handBack(armedPlugs_, "normal fail-safe restored");
+    handBack(radioOnlyPlugs_, "its Wi-Fi off/on for the night removed");
     std::erase_if(offlineArmErrors_, [&](const auto& kv) { return now >= kv.second.second + kOfflineGrace; });
-    if (armedPeriod_ && armedRooms_.empty() && armedPlugs_.empty()) {
+    if (armedPeriod_ && armedRooms_.empty() && armedPlugs_.empty() && radioOnlyPlugs_.empty()) {
         armedPeriod_.reset();
         lastDisarmTry_.reset();
         changed = true;
@@ -832,6 +864,7 @@ std::optional<Controller::OfflineInfo> Controller::offlineInfo(Instant now) cons
     info.active = info.period.contains(now) || info.late;
     if (!armedPlugs_.empty()) info.scheduleUntil = armedPlugs_.begin()->second;
     for (const auto& [id, until] : armedPlugs_) info.armedPlugs.push_back(id);
+    info.radioOff.assign(radioOffPlugs_.begin(), radioOffPlugs_.end());
     for (const auto& [id, err] : offlineArmErrors_) info.errors.push_back(id + ": " + err.first);
     return info;
 }
@@ -839,6 +872,8 @@ std::optional<Controller::OfflineInfo> Controller::offlineInfo(Instant now) cons
 void Controller::loadOfflineState() {
     armedRooms_.clear();
     armedPlugs_.clear();
+    radioOnlyPlugs_.clear();
+    radioOffPlugs_.clear();
     armedPeriod_.reset();
     handledPeriodEnd_.reset();
     if (dataDir_.empty()) return;
@@ -857,6 +892,9 @@ void Controller::loadOfflineState() {
             armedRooms_[id] = std::move(a);
         }
         for (const auto& [id, until] : plugs.items()) armedPlugs_[id] = at(until);
+        const json radioOnly = j.value("radioOnly", json::object());
+        for (const auto& [id, until] : radioOnly.items()) radioOnlyPlugs_[id] = at(until);
+        for (const auto& id : j.value("radioOff", json::array())) radioOffPlugs_.insert(id.get<std::string>());
         if (j.contains("handledEnd")) handledPeriodEnd_ = at(j["handledEnd"]);
         if (j.contains("period")) armedPeriod_ = OfflinePeriod{at(j["period"].at(0)), at(j["period"].at(1))};
         else if (!armedRooms_.empty()) {
@@ -879,7 +917,9 @@ void Controller::saveOfflineState() const {
         rooms[id] = {{"start", epoch(a.start)}, {"until", epoch(a.until)}, {"loadedAt", epoch(a.loadedAt)}, {"spans", spans}};
     }
     for (const auto& [id, until] : armedPlugs_) plugs[id] = epoch(until);
-    json out{{"rooms", rooms}, {"plugs", plugs}};
+    json radioOnly = json::object();
+    for (const auto& [id, until] : radioOnlyPlugs_) radioOnly[id] = epoch(until);
+    json out{{"rooms", rooms}, {"plugs", plugs}, {"radioOnly", radioOnly}, {"radioOff", radioOffPlugs_}};
     if (armedPeriod_) out["period"] = {epoch(armedPeriod_->start), epoch(armedPeriod_->end)};
     if (handledPeriodEnd_) out["handledEnd"] = epoch(*handledPeriodEnd_);
     std::ofstream(dataDir_ / "offline.json") << out.dump(2);

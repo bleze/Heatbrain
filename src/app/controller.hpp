@@ -109,6 +109,7 @@ public:
         OfflinePeriod period;
         bool active = false;                  // inside the period now
         std::vector<std::string> armedPlugs;  // plugs following a loaded schedule
+        std::vector<std::string> radioOff;    // plugs that switch their own Wi-Fi off too
         std::vector<std::string> errors;      // plugs whose schedule could not be loaded
         bool late = false;                    // past the planned end and the network isn't back
         std::optional<Instant> scheduleUntil; // how far the loaded schedule reaches
@@ -194,6 +195,8 @@ private:
     };
     std::map<std::string, ArmedRoom> armedRooms_;          // room id -> schedule followed until
     std::map<std::string, Instant> armedPlugs_;            // plug id -> schedule on the device until
+    std::map<std::string, Instant> radioOnlyPlugs_;        // dry-run plug id -> only its Wi-Fi off/on loaded, until
+    std::set<std::string> radioOffPlugs_;                  // plugs switching their own Wi-Fi off tonight
     std::optional<OfflinePeriod> armedPeriod_;             // the planned period the schedules are for
     std::optional<Instant> lastDisarmTry_;
     std::optional<Instant> handledPeriodEnd_;  // schedules were loaded for the period ending then

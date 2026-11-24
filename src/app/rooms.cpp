@@ -38,6 +38,7 @@ std::optional<WifiOffPlan> parseWifiOff(const json& cfg) {
     if (cfg["wifiOff"].contains("weekend") && !cfg["wifiOff"]["weekend"].is_null()) {
         plan.weekend = window(cfg["wifiOff"]["weekend"], "Weekend Wi-Fi off period");
     }
+    plan.plugRadio = cfg["wifiOff"].value("plugWifi", true);
     return plan;
 }
 

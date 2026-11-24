@@ -149,9 +149,15 @@ std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& pr
     return spans;
 }
 
+std::optional<OfflinePeriod> plugRadioOffWindow(const OfflinePeriod& period) {
+    if (period.end - period.start < minutes{20}) return std::nullopt;
+    return OfflinePeriod{period.start + minutes{1}, period.end - minutes{2}};
+}
+
 std::optional<std::vector<std::string>> tasmotaScheduleRules(const std::vector<OnSpan>& spans,
-                                                             minutes plugUtcOffset, std::size_t maxLength,
-                                                             int maxRules) {
+                                                             minutes plugUtcOffset,
+                                                             std::optional<OfflinePeriod> radioOff,
+                                                             std::size_t maxLength, int maxRules) {
     const auto plugMinute = [&](Instant t) {
         const auto m = duration_cast<minutes>(t.time_since_epoch()) + plugUtcOffset;
         return static_cast<int>(((m.count() % 1440) + 1440) % 1440);
@@ -163,6 +169,11 @@ std::optional<std::vector<std::string>> tasmotaScheduleRules(const std::vector<O
         ordered.push_back({s.to, false});
     }
     std::vector<std::string> parts;
+    if (radioOff) {
+        // First, so they always fit (the rule set is cut at its end) and land in Rule2.
+        parts.push_back(std::format("ON Time#Minute={} DO Wifi 0 ENDON", plugMinute(radioOff->start)));
+        parts.push_back(std::format("ON Time#Minute={} DO Wifi 1 ENDON", plugMinute(radioOff->end)));
+    }
     std::map<int, std::size_t> seen;
     for (const auto& [t, state] : ordered) {
         const int m = plugMinute(t);
@@ -189,7 +200,7 @@ std::optional<std::vector<std::string>> tasmotaScheduleRules(const std::vector<O
 }
 
 bool isHeatbrainScheduleRule(const std::string& rules) {
-    static const std::regex ours(R"(^(ON Time#Minute=\d{1,4} DO Power1 [01] ENDON ?)*$)");
+    static const std::regex ours(R"(^(ON Time#Minute=\d{1,4} DO (Power1|Wifi) [01] ENDON ?)*$)");
     return std::regex_match(rules, ours);
 }
 

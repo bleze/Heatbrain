@@ -8,6 +8,7 @@
 
 #include "core/log.hpp"
 #include "core/time.hpp"
+#include "core/version.hpp"
 
 namespace hb {
 
@@ -249,9 +250,22 @@ minutes tasmotaClockOffset(const json& status7, Instant now, minutes tolerance) 
     return round<minutes>(*local - *utc);
 }
 
-void TasmotaSwitch::armOffline(const std::vector<OnSpan>& spans, Instant now, Instant until) {
+bool tasmotaCanSwitchWifiOff(std::string_view firmware) {
+    return !parseVersion(firmware).empty() && compareVersions(firmware, kTasmotaWifiOffSince) >= 0;
+}
+
+std::optional<OfflinePeriod> TasmotaSwitch::supportedRadioOff(std::optional<OfflinePeriod> radioOff) {
+    if (!radioOff) return std::nullopt;
+    const json fw = command("Status 2");
+    const std::string version = fw.contains("StatusFWR") ? fw["StatusFWR"].value("Version", "") : "";
+    if (tasmotaCanSwitchWifiOff(version)) return radioOff;
+    return std::nullopt;
+}
+
+void TasmotaSwitch::loadScheduleRules(const std::vector<OnSpan>& spans, Instant now,
+                                      std::optional<OfflinePeriod> radioOff) {
     const minutes offset = tasmotaClockOffset(command("Status 7"), now);
-    const auto rules = tasmotaScheduleRules(spans, offset);
+    const auto rules = tasmotaScheduleRules(spans, offset, radioOff);
     if (!rules) throw std::runtime_error("too many switch points for the plug's rule slots");
     // Rule1 is the fail-safe; Rule2/Rule3 carry the schedule - unless the user has rules there.
     for (const char* slot : {"Rule2", "Rule3"}) {
@@ -260,20 +274,34 @@ void TasmotaSwitch::armOffline(const std::vector<OnSpan>& spans, Instant now, In
             throw std::runtime_error(std::format("{} on the plug holds your own rule; heatbrain won't overwrite it", slot));
         }
     }
+    command(rules->size() > 0 ? "Rule2 " + (*rules)[0] : "Rule2 \"");
+    command(rules->size() > 0 ? "Rule2 1" : "Rule2 0");
+    command(rules->size() > 1 ? "Rule3 " + (*rules)[1] : "Rule3 \"");
+    command(rules->size() > 1 ? "Rule3 1" : "Rule3 0");
+}
+
+bool TasmotaSwitch::armOffline(const std::vector<OnSpan>& spans, Instant now, Instant until,
+                               std::optional<OfflinePeriod> radioOff) {
+    radioOff = supportedRadioOff(radioOff);
+    loadScheduleRules(spans, now, radioOff);
     seconds longest{0};
     for (const auto& s : spans) longest = std::max(longest, duration_cast<seconds>(s.to - s.from));
     // Auto-off long enough for the longest planned ON (each still ends with its own OFF);
     // the watchdog only starts limp mode if heatbrain is silent after the period.
     const seconds pulse = std::max(duration_cast<seconds>(failsafe_.pulse), longest + minutes{10});
     const seconds watchdog = duration_cast<seconds>(until - now) + duration_cast<seconds>(failsafe_.watchdog);
-    command(rules->size() > 0 ? "Rule2 " + (*rules)[0] : "Rule2 \"");
-    command(rules->size() > 0 ? "Rule2 1" : "Rule2 0");
-    command(rules->size() > 1 ? "Rule3 " + (*rules)[1] : "Rule3 \"");
-    command(rules->size() > 1 ? "Rule3 1" : "Rule3 0");
     command(std::format("PulseTime1 {}", tasmotaPulseTime(pulse)));
     command(std::format("RuleTimer1 {}", watchdog.count()));
     command("RuleTimer2 0");
     command(scheduleOnAt(spans, now) ? "Power1 On" : "Power1 Off");
+    return radioOff.has_value();
+}
+
+bool TasmotaSwitch::armRadioOff(const OfflinePeriod& radioOff, Instant now) {
+    const auto supported = supportedRadioOff(radioOff);
+    if (!supported) return false;
+    loadScheduleRules({}, now, supported);
+    return true;
 }
 
 void TasmotaSwitch::keepAlive(Instant now, std::optional<Instant> until) {

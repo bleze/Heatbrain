@@ -18,14 +18,23 @@ public:
         on_ = on;
         return on_;
     }
-    void armOffline(const std::vector<OnSpan>& spans, Instant now, Instant) override {
+    bool armOffline(const std::vector<OnSpan>& spans, Instant now, Instant,
+                    std::optional<OfflinePeriod> radioOff = {}) override {
         if (!reachable_) throw std::runtime_error("simulated: unreachable");
         schedule_ = spans;
         on_ = scheduleOnAt(spans, now);
+        radioOff_ = radioOff;
+        return radioOff.has_value();
+    }
+    bool armRadioOff(const OfflinePeriod& radioOff, Instant) override {
+        if (!reachable_) throw std::runtime_error("simulated: unreachable");
+        radioOff_ = radioOff;
+        return true;
     }
     void disarmOffline() override {
         if (!reachable_) throw std::runtime_error("simulated: unreachable");
         schedule_.reset();
+        radioOff_.reset();
     }
     void keepAlive(Instant, std::optional<Instant> until) override {
         if (!reachable_) throw std::runtime_error("simulated: unreachable");
@@ -38,6 +47,7 @@ public:
     void setReachable(bool r) { reachable_ = r; }
     void setFirmware(std::string v) { firmware_ = std::move(v); }  // "" = a status reply without it
     const std::optional<std::vector<OnSpan>>& schedule() const { return schedule_; }
+    const std::optional<OfflinePeriod>& radioOff() const { return radioOff_; }
     FailsafeStatus checkFailsafe() override {
         FailsafeStatus s;
         if (!provisioned_) s.problems.push_back("Fail-safe not installed (simulated)");
@@ -54,6 +64,7 @@ private:
     bool reachable_ = true;
     std::string firmware_ = "simulated";
     std::optional<std::vector<OnSpan>> schedule_;
+    std::optional<OfflinePeriod> radioOff_;
     int keepAlives_ = 0;
     std::optional<Instant> keptUntil_;
 };

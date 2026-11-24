@@ -43,6 +43,7 @@ struct FakeTasmota {
     std::vector<std::string> log;
     std::map<std::string, std::string> extraRules;  // Rule2 / Rule3
     std::string clockUtc = "2026-11-23T22:00:00", clockLocal = "2026-11-23T23:00:00";
+    std::string firmware = "14.6.0(release-tasmota)";
     // Simulated time for PulseTime (seconds), advanced by the test's sleeper.
     double clock = 0, onAt = 0;
     bool brokenRefresh = false;  // a firmware where re-sending ON does not restart the countdown
@@ -60,7 +61,7 @@ struct FakeTasmota {
         json r;
         if (name == "Status" && arg == "0") {
             r = {{"Status", {{"DeviceName", "Sonoff Bedroom"}}},
-                 {"StatusFWR", {{"Version", "14.6.0(release-tasmota)"}, {"Hardware", "ESP8285N08"}}},
+                 {"StatusFWR", {{"Version", firmware}, {"Hardware", "ESP8285N08"}}},
                  {"StatusSTS", {{"POWER", power ? "ON" : "OFF"}, {"Uptime", "1T02:03:04"}, {"Wifi", {{"RSSI", 78}}}}}};
         } else if (name == "Power1" || name == "Power") {
             tickPulse();
@@ -86,6 +87,8 @@ struct FakeTasmota {
             if (arg == "\"") text.clear();
             else if (!arg.empty() && arg != "1" && arg != "0") text = arg;
             r = {{name, {{"State", "ON"}, {"Rules", text}}}};
+        } else if (name == "Status" && arg == "2") {
+            r = {{"StatusFWR", {{"Version", firmware}, {"Hardware", "ESP8285N08"}}}};
         } else if (name == "Status" && arg == "7") {
             r = {{"StatusTIM", {{"UTC", clockUtc}, {"Local", clockLocal}}}};
         } else if (name == "Timers") {
@@ -291,6 +294,50 @@ TEST_CASE("Wi-Fi off: the night schedule goes onto the plug with a stretched fai
     CHECK(f.device.extraRules["Rule2"].empty());
     CHECK(f.device.pulseTime == 1300);
     CHECK(f.device.ruleTimer1 == 30 * 60);
+}
+
+TEST_CASE("Wi-Fi off: the plug switches its own Wi-Fi off only on firmware that does it safely") {
+    using namespace std::chrono;
+    const Instant now = Instant{sys_days{2026y / 11 / 23}.time_since_epoch()} + hours{22};  // 23:00 local
+    const OfflinePeriod radio{now + minutes{11}, now + hours{7} + minutes{8}};  // 23:11-06:08 local
+    const std::vector<OnSpan> spans{{now + hours{1}, now + hours{3}}};
+    const std::string wifi = "ON Time#Minute=1391 DO Wifi 0 ENDON ON Time#Minute=368 DO Wifi 1 ENDON";
+
+    CHECK_FALSE(tasmotaCanSwitchWifiOff("15.3.0(release-tasmota)"));
+    CHECK(tasmotaCanSwitchWifiOff("15.4.0(release-tasmota)"));
+    CHECK(tasmotaCanSwitchWifiOff("16.0.0(release-tasmota)"));
+    CHECK_FALSE(tasmotaCanSwitchWifiOff(""));
+    {
+        Fixture f;  // 14.6.0: the schedule only
+        f.sw.provision(false);
+        CHECK_FALSE(f.sw.armOffline(spans, now, now + hours{10}, radio));
+        CHECK(f.device.extraRules["Rule2"] == "ON Time#Minute=0 DO Power1 1 ENDON ON Time#Minute=120 DO Power1 0 ENDON");
+        CHECK_FALSE(f.sw.armRadioOff(radio, now));
+    }
+    {
+        Fixture f;
+        f.device.firmware = "16.0.0(release-tasmota)";
+        f.sw.provision(false);
+        CHECK(f.sw.armOffline(spans, now, now + hours{10}, radio));
+        CHECK(f.device.extraRules["Rule2"] ==
+              wifi + " ON Time#Minute=0 DO Power1 1 ENDON ON Time#Minute=120 DO Power1 0 ENDON");
+        CHECK(f.sw.checkFailsafe().installed());
+        f.sw.disarmOffline();
+        CHECK(f.device.extraRules["Rule2"].empty());
+    }
+    {
+        Fixture f;  // dry-run: only the Wi-Fi, the relay and fail-safe timers untouched
+        f.device.firmware = "16.0.0(release-tasmota)";
+        f.sw.provision(false);
+        f.device.power = true;
+        const int pulse = f.device.pulseTime;
+        CHECK(f.sw.armRadioOff(radio, now));
+        CHECK(f.device.extraRules["Rule2"] == wifi);
+        CHECK(f.device.power);
+        CHECK(f.device.pulseTime == pulse);
+        f.sw.disarmOffline();
+        CHECK(f.device.extraRules["Rule2"].empty());
+    }
 }
 
 TEST_CASE("Wi-Fi off: refused when the plug's clock is wrong or its rule slots hold the user's rules") {
