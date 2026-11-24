@@ -746,3 +746,24 @@ TEST_CASE("Plan: an off period shows the expected coast, and heat stored before 
     CHECK_FALSE(off->coastFrom);
     CHECK_FALSE(off->coastAbove);
 }
+
+TEST_CASE("Coast: when max caps the stored heat, the period stays off and the shortfall is told") {
+    auto room = peakOffRoom(20.0);
+    room.maxTemp = 22;
+    // At 0 outside, 4 h at 5 %/h: 24.4 needed, but at most 21.7 can be stored.
+    const auto c = nextCoast(room, tz(), at(15), learnedRoom(0.05), nullptr, 0.0);
+    REQUIRE(c);
+    CHECK(c->level == Catch::Approx(21.7));
+    CHECK(c->fallsShort());
+    CHECK(c->atEnd == Catch::Approx(21.7 * std::exp(-0.2)));
+    room.maxTemp = 25;
+    CHECK_FALSE(nextCoast(room, tz(), at(15), learnedRoom(0.05), nullptr, 0.0)->fallsShort());
+
+    room.maxTemp = 22;
+    auto in = input(at(16, 45), 21.0);
+    in.outdoorTemp = 0.0;
+    const auto d = decide(in, room);
+    CHECK(d.reason == Reason::WarmUp);
+    CHECK_THAT(d.detail, ContainsSubstring("only lasts until about"));
+    CHECK_FALSE(decide(input(at(20), 17.0), room).on);  // the period itself: still off
+}

@@ -104,6 +104,7 @@ std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, I
     const double hours = length / 60.0;
     c.level = c.floor <= c.outdoor ? c.floor : c.outdoor + (c.floor - c.outdoor) * std::exp(std::min(loss * hours, 50.0));
     c.level = std::min(c.level, room.maxTemp - room.strategy.hysteresis);
+    c.atEnd = c.level <= c.outdoor ? c.level : c.outdoor + (c.level - c.outdoor) * std::exp(-std::min(loss * hours, 50.0));
     return c;
 }
 
@@ -355,6 +356,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     // when the period begins (not while booked or away: those replace the program).
     // An off period ahead that must not fall below a floor: heat is stored before it, along the same
     // curve, up to the level the room needs to coast through (regardless of price: the floor was asked for).
+    std::string shortNote;  // the floor will not hold (max caps the stored heat)
     const auto coast = !booked && !away && mode != ProgramMode::Off
                            ? nextCoast(room, tz, in.now, in.thermal, in.forecast.get(), in.outdoorTemp)
                            : std::nullopt;
@@ -373,6 +375,11 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
             inputs.warmupTo = coast->level;
             inputs.coastAbove = coast->floor;
             inputs.storing = true;
+            // Max caps the stored heat: the period stays off, but say that the floor will not hold.
+            if (coast->fallsShort()) {
+                shortNote = std::format(". Max {} only lasts until about {} at {}: below {}", temp(room.maxTemp),
+                                        temp(coast->atEnd), formatLocalHm(tz.toLocal(coast->until)), temp(coast->floor));
+            }
             inputs.targetLabel = std::format(
                 "storing heat for the off period {} (stay above {})",
                 formatWindow(DayWindow{minuteOfDay(tz.toLocal(coast->at)), minuteOfDay(tz.toLocal(coast->until))}),
@@ -552,13 +559,14 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         if (t < target || (in.currentlyOn && t < target + h)) {
             if (inputs.storing) {
                 return make(true, Reason::WarmUp,
-                            std::format("Storing heat for the off period (to stay above {}): {}", temp(*inputs.coastAbove),
-                                        where),
+                            std::format("Storing heat for the off period (to stay above {}): {}{}", temp(*inputs.coastAbove),
+                                        where, shortNote),
                             inputs);
             }
             return make(true, Reason::WarmUp, "Warming up for " + what + ": " + where, inputs);
         }
-        return make(false, Reason::WarmUpOnTrack, "Warm enough for now, on track for " + what + ": " + where, inputs);
+        return make(false, Reason::WarmUpOnTrack, "Warm enough for now, on track for " + what + ": " + where + shortNote,
+                    inputs);
     }
 
     // 10. Plain thermostat with hysteresis.

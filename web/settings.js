@@ -406,6 +406,7 @@
       rooms.push({ id, name: "New room", plugs: [], sensor: "", minTemp: 16, maxTemp: 22,
         program: [{ at: "07:00", mode: "heat", target: 20 }, { at: "17:00", mode: "off" }, { at: "21:00", mode: "heat", target: 20 }, { at: "23:00", mode: "keep", target: 16 }] });
       S.scrollToRoom = id;  // the new room is added at the bottom: bring it into view, name ready to type
+      S.focusRoomName = true;
       render();
     }, "primary");
 
@@ -446,6 +447,7 @@
       S.scrollToRoom = null;
       requestAnimationFrame(() => {
         c.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (!S.focusRoomName) return;
         const input = c.querySelector("input");
         if (input) { input.focus({ preventScroll: true }); input.select(); }
       });
@@ -585,22 +587,42 @@
         if (!sorted) render();
       });
       r.appendChild(at);
-      r.appendChild(sel(pt, "mode", [["heat", "Heat to"], ["keep", "Keep above"], ["off", "Off"]], () => {
-        if (pt.mode === "off") delete pt.target;
-        else { pt.target ??= pt.mode === "keep" ? 15 : 20; delete pt.coastAbove; }
+      // "Off, stay above" is an off point with a floor (coastAbove): its own choice, so the
+      // temperature sits in the same column as every other row's.
+      const view = { mode: pt.mode === "off" && pt.coastAbove != null ? "coast" : pt.mode };
+      const modeSel = sel(view, "mode", [["heat", "Heat to"], ["keep", "Keep above"], ["off", "Off"], ["coast", "Off, stay above"]], () => {
+        const floor = pt.coastAbove ?? Math.min(pt.target ?? 19, 19);
+        if (view.mode === "off" || view.mode === "coast") {
+          pt.mode = "off";
+          delete pt.target;
+          if (view.mode === "coast") pt.coastAbove = floor; else delete pt.coastAbove;
+        } else {
+          pt.mode = view.mode;
+          pt.target ??= pt.mode === "keep" ? 15 : 20;
+          delete pt.coastAbove;
+        }
         render();
-      }));
+      });
+      modeSel.title = "Off, stay above: never heats in the period, but stores heat just before it, so the room coasts through and is still above this when it ends.";
+      r.appendChild(modeSel);
       if (pt.mode !== "off") {
         r.appendChild(num(pt, "target", { step: 0.5, unit: "°C", onChange: () => drawTimeline(tl, room) }));
-      } else {
-        // Optional: store heat beforehand so the room coasts through without falling below this.
-        el("span", { class: "muted", title: "Heat a little before the off period, so the room coasts through it and is still above this when it ends. Empty: just off." }, r, "stay above");
-        r.appendChild(num(pt, "coastAbove", { step: 0.5, unit: "°C", placeholder: "–", onChange: () => drawTimeline(tl, room) }));
+      } else if (pt.coastAbove != null) {
+        r.appendChild(num(pt, "coastAbove", { step: 0.5, unit: "°C", onChange: () => drawTimeline(tl, room) }));
       }
+      // The saved plan says the stored heat won't last (the room's max caps it): say so under the row.
+      const short = pt.mode === "off" && pt.coastAbove != null &&
+        coastShortfalls(state.status?.rooms?.find((x) => x.id === room.id)?.plan)
+          .find((x) => hm(x.from) === pt.at && x.floor === pt.coastAbove);
       const next = program[(i + 1) % program.length];
       el("span", { class: "muted" }, r, program.length === 1 ? "all day" : `until ${next.at}`);
       if (program.length > 1) {
         btn(r, "", "trash", () => { program.splice(i, 1); changed(); render(); }, "ghost danger row-delete");
+      }
+      if (short) {
+        el("div", { class: "hint sched-warn" }, r,
+           `Can't stay above ${temp(short.floor)}: heat stored up to the max (${temp(room.maxTemp)}) lasts only to about ${temp(short.end)} by ${hm(short.to)}. ` +
+           "Raise the max, lower the floor or shorten the off period.");
       }
     });
     const addRow = el("div", { class: "row", style: "margin-top:8px" }, c);
@@ -2149,9 +2171,9 @@
       S.plugStatus = null;
       toast("Saved - heatbrain is applying the new settings");
       render();
-      // heatbrain restarts with the new settings; ask until the status of its first step is in, so the
-      // dashboard (room order, names, programs) is current when you go back to it.
-      if (typeof refreshAfterTick === "function") refreshAfterTick(); else setTimeout(refreshStatus, 2500);
+      // heatbrain restarts with the new settings: the dashboard asks until a status from after the save
+      // is in (however long the first step takes), so it is current when you go back to it.
+      if (typeof awaitApplied === "function") awaitApplied(r.at); else setTimeout(refreshStatus, 2500);
     } catch (e) {
       toast(e.message, true);
     } finally {
@@ -2167,5 +2189,11 @@
 
   window.addEventListener("beforeunload", (e) => { if (dirty()) e.preventDefault(); });
 
-  window.Settings = { open };
+  // From a room card: open the Rooms tab at that room (route() then calls open(), which renders).
+  function showRoom(id) {
+    S.tab = "rooms";
+    S.scrollToRoom = id;
+    S.focusRoomName = false;
+  }
+  window.Settings = { open, showRoom };
 })();

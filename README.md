@@ -240,9 +240,11 @@ a warm-up inside the Wi-Fi off period at full power, and thermostats get the new
 the period, but heat is stored just before it: the level the room needs so that, cooling towards the
 forecast outdoor temperature at its learned rate (a cautious 5 %/h until learned) for the whole
 period, it is still above 19 when the period ends (at most `maxTemp` − hysteresis). It is reached
-along the warm-up curve, regardless of price (the floor was asked for). In the room chart the hours
-ahead show how the room is expected to coast through every off period, and the floor as a faint
-dotted line, so off periods are no longer holes in the target line.
+along the warm-up curve, regardless of price (the floor was asked for). It never stores more than
+`maxTemp` − hysteresis allows; when that does not last, the period still stays off and the program
+row, the plan strip, the chart and the decision text say how far the room is expected to fall. In the room chart the hours
+ahead show how the room is expected to coast through every off period, and the floor as a thin
+solid line marked with its value, so off periods are no longer holes in the target line.
 
 **The heating model.** `dT/dt = gain · heating − loss · (T − T_outdoor)`, fitted per room from
 the last 21 days of decisions (90-minute stretches of steady heating or not; limp mode, night

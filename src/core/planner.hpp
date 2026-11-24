@@ -120,6 +120,8 @@ struct CoastStep {
     double floor = 0;
     double level = 0;   // needed at `at` (at most max - hysteresis)
     double outdoor = 0; // assumed during the off period
+    double atEnd = 0;   // where the room is expected at `until`, from `level`: below `floor` when max caps it
+    bool fallsShort() const { return atEnd < floor - 0.05; }
 };
 // The next program switch after `now`, if it is an off period with a floor within `within`. The room
 // cools at its learned rate, else a cautious 5 %/h, towards the forecast (else `outdoor`, else 5).

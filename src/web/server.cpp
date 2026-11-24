@@ -639,8 +639,10 @@ void WebServer::routes() {
         if (!errors.empty()) return sendJson(res, json{{"errors", errors}}, 400);
         saveConfig(ctx_.configFile, incoming);
         log::info("Web: configuration saved - reloading");
+        // When: a status from before this is from the old settings (the dashboard waits for a newer one).
+        const Instant at = floor<seconds>(system_clock::now());
         if (ctx_.onConfigSaved) ctx_.onConfigSaved();
-        sendJson(res, json{{"saved", true}});
+        sendJson(res, json{{"saved", true}, {"at", epoch(at)}});
     });
 
     s.Get("/api/plugs", [this](const httplib::Request&, httplib::Response& res) {

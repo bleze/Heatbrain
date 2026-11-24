@@ -235,7 +235,9 @@ const PLAN = {
   idle: () => "warm enough, no heat",
   away: (t) => `away - keep above ${temp(t)}`,
   booked: (t) => `booked - ${temp(t)}`,
-  off: (t, s) => (s?.coastAbove != null ? `off - coasting, stays above ${temp(s.coastAbove)}` : "off"),
+  off: (t, s) => (s?.coastAbove == null ? "off"
+    : s.coast && s.coast[1] < s.coastAbove - 0.1 ? `off - coasting, about ${temp(s.coast[1])} by ${hm(s.to)} (below ${temp(s.coastAbove)})`
+    : `off - coasting, stays above ${temp(s.coastAbove)}`),
   warmup: () => "warm up for the next period",
   night: () => "Wi-Fi off - heating by night schedule",
   nightoff: () => "Wi-Fi off - off",
@@ -249,6 +251,22 @@ const PLAN_SHADE = {
 };
 const planLabel = (s) => (PLAN[s.kind] || (() => s.kind))(s.target, s);
 
+// Off periods with a "stay above" floor that the stored heat does not carry through (max caps it):
+// [{ from, to, floor, end }] from the plan's expected coast, `end` the expected temperature at `to`.
+function coastShortfalls(plan) {
+  const out = [];
+  let run = null;
+  for (const s of plan || []) {
+    const off = (s.kind === "off" || s.kind === "nightoff") && s.coastAbove != null && s.coast;
+    if (off && run && run.to === s.from && run.floor === s.coastAbove) { run.to = s.to; run.end = s.coast[1]; continue; }
+    if (run) out.push(run);
+    run = off ? { from: s.from, to: s.to, floor: s.coastAbove, end: s.coast[1] } : null;
+  }
+  if (run) out.push(run);
+  return out.filter((r) => r.end < r.floor - 0.1);
+}
+const shortfallText = (r) => `can't stay above ${temp(r.floor)}: about ${temp(r.end)} by ${hm(r.to)}`;
+
 function planStrip(parent, all) {
   // A warm-up comes as one segment per 15 minutes (its target rises along the curve), and so does an
   // off period (the room's expected temperature falls as it coasts): one here.
@@ -258,7 +276,7 @@ function planStrip(parent, all) {
     const joins = last && last.kind === s.kind && last.to === s.from &&
       ((last.warmup && s.warmup) || (s.kind === "off" && last.coastAbove === s.coastAbove) ||
        (s.kind === "nightoff" && last.target === s.target && !!last.warmup === !!s.warmup));
-    if (joins) plan[plan.length - 1] = { ...last, to: s.to, target: s.target };
+    if (joins) plan[plan.length - 1] = { ...last, to: s.to, target: s.target, coast: last.coast && s.coast ? [last.coast[0], s.coast[1]] : undefined };
     else plan.push(s);
   }
   const t0 = plan[0].from, t1 = plan[plan.length - 1].to;
@@ -711,12 +729,26 @@ let renderRooms = function () {
     act("Heat 1 h", "flame", "act-heat", (b) => setOverride(r.id, true, 60, b));
     act("Off 2 h", "power", "act-off", (b) => setOverride(r.id, false, 120, b));
     if (r.override) act("Back to auto", "undo", "", (b) => clearOverride(r.id, b));
+    // Lower right: this room's settings (the Rooms tab, scrolled to it).
+    const gear = el("button", { type: "button", class: "room-settings", title: `${r.name}: settings`, "aria-label": `${r.name} settings` }, actions);
+    gear.appendChild(icon("gear"));
+    gear.addEventListener("click", (e) => { e.stopPropagation(); window.Settings?.showRoom(r.id); location.hash = "#settings"; });
   }
 }
 
 // After a change (booking, away, override) the server re-plans at once, but the control step takes a
 // few seconds (sensors, plugs): ask again until the status of that new step is in, at most ~20 s.
 let tickWait = null;
+// After saving settings: ask every 1.5 s until a status from after the save (server time `at`) is in,
+// for up to 2 minutes - whichever view is open, so the dashboard is current when you go back to it.
+let appliedTimer = null;
+function awaitApplied(at) {
+  state.appliedAfter = at ?? Math.floor(Date.now() / 1000);
+  state.appliedDeadline = Date.now() + 120_000;
+  clearTimeout(appliedTimer);
+  appliedTimer = setTimeout(refreshStatus, 1200);
+}
+
 function refreshAfterTick() {
   const before = state.status?.now;
   if (tickWait) clearTimeout(tickWait);
@@ -959,7 +991,7 @@ function renderLegend(room, segs, wifi, booked, coasting, floor) {
       const k = el("span", {}, host); el("i", { class: "key-dash key-dash-booked" }, k); k.appendChild(document.createTextNode("Target: booking"));
     }
     if (coasting) {
-      const k = el("span", {}, host); el("i", { class: "key-coast" }, k); k.appendChild(document.createTextNode("Expected while off"));
+      const k = el("span", {}, host); el("i", { class: "key-coast" }, k); k.appendChild(document.createTextNode("Expected temperature while off"));
     }
     if (floor) {
       const k = el("span", {}, host); el("i", { class: "key-floor" }, k); k.appendChild(document.createTextNode("Off: stay above"));
@@ -1019,6 +1051,7 @@ function renderDetail() {
     for (let t = Math.max(seg.from, lastDecision + step); t < seg.to && t <= t1; t += step) floors.push([t, seg.coastAbove ?? null]);
   }
   const hasFloor = floors.some((p) => p[1] != null);
+  const shortfalls = coastShortfalls(roomPlan);
   const segs = heatingSegments(decisions, tick, h.to);
   const wifi = h.wifi && (h.wifi.seen.length || h.wifi.planned.length) ? h.wifi : null;
   // Bookings still known to the server (coming or under way), for the band and the tooltip.
@@ -1081,7 +1114,23 @@ function renderDetail() {
     el("path", { class: "target target-booked", d: stepPath(own(true), x, yT, t1, 3 * tick) }, svg);
     // Off periods: the floor to stay above (faint, dotted), and ahead of now the expected coast down
     // from where the heating leaves the room - one line per off period, so the target line has no hole.
-    if (hasFloor) el("path", { class: "coast-floor", d: stepPath(floors, x, yT, t1, 3 * tick) }, svg);
+    if (hasFloor) {
+      el("path", { class: "coast-floor", d: stepPath(floors, x, yT, t1, 3 * tick) }, svg);
+      // "≥ 20°" just above the start of each floor (or the chart's left edge), if the stretch is wide enough.
+      floors.forEach(([t, v], i) => {
+        if (v == null) return;
+        const prev = floors[i - 1];
+        if (prev && prev[1] === v && t - prev[0] <= 3 * tick) return;
+        let end = t;
+        for (let k = i + 1; k < floors.length && floors[k][1] === v && floors[k][0] - floors[k - 1][0] <= 3 * tick; k++) end = floors[k][0];
+        const a = Math.max(t, t0);
+        const miss = shortfalls.find((r) => r.from < end + step && r.to > t && r.floor === v);
+        if (x(Math.min(end, t1)) - x(a) > 40) {
+          el("text", { class: `coast-floor-label${miss ? " short" : ""}`, x: x(a) + 3, y: yT(v) - 4 }, svg,
+             miss && x(Math.min(end, t1)) - x(a) > 150 ? `≥ ${temp(v)} – ${shortfallText(miss).replace(/^can't stay above [^:]+: /, "")}` : `≥ ${temp(v)}`);
+        }
+      });
+    }
     let cd = "";
     coast.forEach(([a, av, b, bv], i) => {
       const joined = i > 0 && coast[i - 1][2] === a;
@@ -1179,9 +1228,11 @@ function renderDetail() {
       rows.push({ label: byBooking ? "Target (booking)" : "Target", value: temp(di >= 0 ? targets[di][1] : null),
                   color: byBooking ? "var(--accent)" : "var(--target)" });
       const c = coast.find(([a, , b]) => t >= a && t < b);
-      if (c) rows.push({ label: "Expected (off, coasting)", value: `≈ ${temp(c[1] + ((c[3] - c[1]) * (t - c[0])) / (c[2] - c[0]))}`, color: "var(--target)" });
+      if (c) rows.push({ label: "Expected (off, coasting)", value: `≈ ${temp(c[1] + ((c[3] - c[1]) * (t - c[0])) / (c[2] - c[0]))}`, color: "var(--ink-2)" });
       const fi = lastAtOrBefore(floors, t);
       if (fi >= 0 && floors[fi][1] != null) rows.push({ label: "Off: stay above", value: temp(floors[fi][1]), color: "var(--target)" });
+      const miss = shortfalls.find((r) => t >= r.from && t < r.to);
+      if (miss) rows.push({ label: "Falls short", value: `${shortfallText(miss)} (max ${temp(room.maxTemp)})`, color: "var(--warning)" });
       const b = bookings.find((k) => t >= k.warmupFrom && t < k.until);
       if (b) {
         rows.push({ label: t < b.from ? "Warming up for booking" : "Booked", color: "var(--accent)", box: true,
@@ -1255,6 +1306,8 @@ async function refreshStatus() {
     if (s.version) state.loadedVersion ??= s.version;
     if (!s.rooms) { $("updated").textContent = "waiting for the first control step…"; retrySoon(); return; }
     const first = !state.status;
+    // Settings just saved: until a status from after the save is in, this one shows the old settings.
+    const stale = state.appliedAfter != null && s.now < state.appliedAfter;
     state.status = s;
     // Settings drawn before the first status (just after a restart) lacked the sensor lists: draw them
     // again now, keeping any unsaved edits.
@@ -1270,17 +1323,25 @@ async function refreshStatus() {
       el("a", { href: "#settings" }, ce, "Open settings");
     }
     state.tz = s.timezone || state.tz;
-    $("updated").textContent = `updated ${hm(s.now)} · every ${Math.round(s.tickSeconds / 60)} min`;
+    $("updated").textContent = stale ? "applying the new settings…" : `updated ${hm(s.now)} · every ${Math.round(s.tickSeconds / 60)} min`;
     renderProblems();
     renderWifiOff();
     renderAway();
     renderBook();
     renderRooms();
     renderBookingsCard();
-    window.Costs?.load();
-    window.Usage?.load();
+    if (!stale) { window.Costs?.load(); window.Usage?.load(); }  // not on every quick re-ask while applying
+    if (stale) {
+      if (Date.now() < state.appliedDeadline) { clearTimeout(appliedTimer); appliedTimer = setTimeout(refreshStatus, 1500); }
+      else state.appliedAfter = null;  // gave up: the regular refresh takes over
+    }
+    const applied = !stale && state.appliedAfter != null;
+    if (applied) state.appliedAfter = null;
+    // A room that the new settings removed: show the first one instead.
+    if (state.selected && state.selected !== "__outdoor" && !s.rooms.some((r) => r.id === state.selected)) state.selected = null;
     if (state.selected) {
-      if (!state.history) await loadHistory();
+      // After new settings the chart's history is fetched again too (its range, limits and program).
+      if (!state.history || applied) await loadHistory();
       else renderDetail();  // the planned part (target, heating ahead) comes from the status: redraw with it
     } else if (s.rooms.length) {
       await selectRoom(s.rooms[0].id, false);
