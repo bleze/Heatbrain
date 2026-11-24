@@ -29,6 +29,8 @@ const REASONS = {
   KEEP_SATISFIED: ["Above the floor", null],
   OFFLINE_SCHEDULE: ["Wi-Fi off: night schedule", "price"],
   WINDOW_OPEN: ["Window open? Paused", null],
+  WARM_UP: ["Warming up for the next period", "comfort"],
+  WARM_UP_ON_TRACK: ["On track for the next period", null],
 };
 const CATEGORIES = {
   comfort: "Heating: comfort",
@@ -170,15 +172,18 @@ function niceTicks(min, max, count) {
 }
 
 // Step path for [t, value] series where each value holds until the next point.
+// Steps between points, except from a point marked smooth ([t, v, true]: on a warm-up curve) to the
+// next one: a straight line, so the curve rises smoothly instead of in stairs.
 function stepPath(points, x, y, tEnd, maxGap) {
   let d = "";
   for (let i = 0; i < points.length; i++) {
-    const [t, v] = points[i];
+    const [t, v, smooth] = points[i];
     if (v == null) continue;
     const next = i + 1 < points.length ? points[i + 1][0] : tEnd;
-    const end = next - t > maxGap ? t + maxGap : next;
     const prevOk = i > 0 && points[i - 1][1] != null && t - points[i - 1][0] <= maxGap;
-    d += `${prevOk ? "L" : "M"}${x(t).toFixed(1)},${y(v).toFixed(1)}H${x(end).toFixed(1)}`;
+    d += `${prevOk ? "L" : "M"}${x(t).toFixed(1)},${y(v).toFixed(1)}`;
+    if (smooth && i + 1 < points.length && points[i + 1][1] != null && next - t <= maxGap) continue;
+    d += `H${x(next - t > maxGap ? t + maxGap : next).toFixed(1)}`;
   }
   return d;
 }
@@ -231,12 +236,20 @@ const PLAN = {
   away: (t) => `away - keep above ${temp(t)}`,
   booked: (t) => `booked - ${temp(t)}`,
   off: () => "off",
+  warmup: () => "warm up for the next period",
   night: () => "Wi-Fi off - heating by night schedule",
   nightoff: () => "Wi-Fi off - off",
 };
 const planLabel = (s) => (PLAN[s.kind] || (() => s.kind))(s.target);
 
-function planStrip(parent, plan) {
+function planStrip(parent, all) {
+  // A warm-up comes as one segment per 15 minutes (its target rises along the curve): one here.
+  const plan = [];
+  for (const s of all) {
+    const last = plan[plan.length - 1];
+    if (last && last.kind === s.kind && last.warmup && s.warmup && last.to === s.from) plan[plan.length - 1] = { ...last, to: s.to, target: s.target };
+    else plan.push(s);
+  }
   const t0 = plan[0].from, t1 = plan[plan.length - 1].to;
   const wrap = el("div", { class: "plan" }, parent);
   const head = el("div", { class: "plan-head" }, wrap);
@@ -955,15 +968,17 @@ function renderDetail() {
   const temps = isThermostatRoom ? settledReadings(h.temperatures) : h.temperatures;
   const decisions = h.decisions;
   const prices = h.prices.filter((p) => p[0] >= t0 - 900 && p[0] <= t1);
-  const targets = decisions.map((d) => [d[0], d[3]]);
+  const targets = decisions.map((d) => [d[0], d[3], !!d[4]]);
   // Ahead of now the target comes from the room's plan, so the line doesn't seem to stop at the last
   // decision (an off period has no target: a gap, then the line where heating resumes).
   const roomPlan = state.status?.rooms?.find((r) => r.id === room.id)?.plan || [];
   const lastDecision = decisions.length ? decisions[decisions.length - 1][0] : h.to;
   const step = Math.min(900, tick);  // within stepPath's gap limit, so the steps join up
   for (const seg of roomPlan) {
-    for (let t = Math.max(seg.from, lastDecision + step); t < seg.to && t <= t1; t += step) {
-      targets.push([t, seg.kind === "off" || seg.kind === "nightoff" ? null : seg.target ?? null]);
+    // A warm-up curve comes as one segment per 15 minutes, its value at the start: one point each,
+    // joined by straight lines.
+    for (let t = Math.max(seg.from, lastDecision + step); t < seg.to && t <= t1; t += seg.warmup ? seg.to : step) {
+      targets.push([t, seg.kind === "off" ? null : seg.target ?? null, !!seg.warmup]);
     }
   }
   const segs = heatingSegments(decisions, tick, h.to);

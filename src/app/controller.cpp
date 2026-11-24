@@ -58,19 +58,21 @@ std::string spansText(const std::vector<OnSpan>& spans, const TimeZone& tz) {
 std::vector<PlanSegment> overlayNight(const std::vector<PlanSegment>& plan, const OfflinePeriod& p,
                                       const std::vector<OnSpan>& spans) {
     std::vector<PlanSegment> out;
-    const auto push = [&](Instant from, Instant to, const std::string& kind, std::optional<double> target) {
+    const auto push = [&](Instant from, Instant to, const std::string& kind, std::optional<double> target, bool warmup) {
         if (from >= to) return;
-        if (!out.empty() && out.back().kind == kind && out.back().target == target && out.back().to == from) {
+        if (!out.empty() && out.back().kind == kind && out.back().target == target && out.back().warmup == warmup &&
+            out.back().to == from) {
             out.back().to = to;
         } else {
-            out.push_back({from, to, kind, target});
+            out.push_back({from, to, kind, target, warmup});
         }
     };
     for (const auto& seg : plan) {
         for (Instant t = seg.from; t < seg.to; t += kSlotLength) {
             const Instant e = std::min(t + kSlotLength, seg.to);
-            if (p.contains(t)) push(t, e, scheduleOnAt(spans, t) ? "night" : "nightoff", std::nullopt);
-            else push(t, e, seg.kind, seg.target);
+            // The target stays, so the chart's target line (a warm-up curve too) runs on through the night.
+            if (p.contains(t)) push(t, e, scheduleOnAt(spans, t) ? "night" : "nightoff", seg.target, seg.warmup);
+            else push(t, e, seg.kind, seg.target, seg.warmup);
         }
     }
     return out;
@@ -86,6 +88,7 @@ json toJson(const DecisionInputs& in) {
     if (in.medianPrice) j["medianPrice"] = *in.medianPrice;
     if (in.outdoorTemp) j["outdoorTemp"] = *in.outdoorTemp;
     if (in.ceiling) j["ceiling"] = *in.ceiling;
+    if (in.warmupTo) j["warmupTo"] = *in.warmupTo;
     return j;
 }
 
@@ -540,7 +543,7 @@ TickResult Controller::tick(Instant now, bool apply) {
             const auto spans = following ? armed->second.spans
                                          : offlineSchedule(room, prices_, tz_, std::max(now, offline->start),
                                                            offline->end, learnedDuty(room.id, now), away,
-                                                           offlineStart(room, now));
+                                                           offlineStart(room, now), in.thermal);
             rr.plan = overlayNight(rr.plan, *offline, spans);
         }
 
@@ -710,6 +713,8 @@ OfflineDuty Controller::learnedDuty(const std::string& roomId, Instant now) cons
                 d.reason == "OFFLINE_SCHEDULE" || d.reason == "ABOVE_MAX") {
                 continue;
             }
+            // Warming up: full heat by design, not the room's usual share.
+            if (d.inputs.is_object() && d.inputs.contains("warmupTo")) continue;
             const std::string mode = d.inputs.is_object() ? d.inputs.value("mode", "") : "";
             const int g = mode == "heat" ? 0 : (mode == "keep" || mode == "away") ? 1 : -1;
             if (g < 0) continue;
@@ -765,7 +770,11 @@ void Controller::armOffline(const OfflinePeriod& period, Instant now, std::optio
     for (const auto& room : rooms_) {
         const auto duty = learnedDuty(room.id, now);
         const Instant horizon = period.end + kOfflineBuffer;
-        const auto spans = offlineSchedule(room, prices_, tz_, now, horizon, duty, away, offlineStart(room, now));
+        std::optional<ThermalModel> thermal;
+        if (!room.priceOnly) {
+            if (const ThermalModel m = thermalModel(room, now); m.usable()) thermal = m;
+        }
+        const auto spans = offlineSchedule(room, prices_, tz_, now, horizon, duty, away, offlineStart(room, now), thermal);
         armedRooms_[room.id] = {period.start, horizon, spans, now};
         log::info("Wi-Fi off period {:%H:%M}-{:%H:%M}: {} {} (duty heat {:.0f}%, keep {:.0f}%)",
                   tz_.toLocal(period.start), tz_.toLocal(period.end), room.id, spansText(spans, tz_),

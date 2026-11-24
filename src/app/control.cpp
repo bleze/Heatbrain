@@ -330,6 +330,7 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
         for (const auto& s : r.plan) {
             json seg{{"from", s.from.time_since_epoch().count()}, {"to", s.to.time_since_epoch().count()}, {"kind", s.kind}};
             if (s.target) seg["target"] = *s.target;
+            if (s.warmup) seg["warmup"] = true;
             plan.push_back(seg);
         }
         room["plan"] = plan;
@@ -455,6 +456,8 @@ std::string shortReason(hb::Reason r) {
         case Reason::AwayOff: return "away";
         case Reason::OfflineSchedule: return "following the night schedule";
         case Reason::NoPricesFallback: return "on, no prices (fallback)";
+        case Reason::WarmUp: return "warming up for the next period";
+        case Reason::WarmUpOnTrack: return "off, on track for the next period";
     }
     return std::string(hb::reasonCode(r));
 }

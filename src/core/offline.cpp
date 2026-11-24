@@ -50,13 +50,14 @@ std::optional<double> priceAt(const PriceTable& prices, Instant slot) {
     return std::nullopt;
 }
 
-enum class Group { Off, On, Heat, Keep };
+enum class Group { Off, On, Heat, Keep, Warmup };
 
 }  // namespace
 
 std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz,
                                     Instant from, Instant to, const OfflineDuty& duty,
-                                    std::optional<AwayMode> away, std::optional<OfflineStart> start) {
+                                    std::optional<AwayMode> away, std::optional<OfflineStart> start,
+                                    std::optional<ThermalModel> thermal) {
     // Classify every 15-minute slot.
     struct Slot {
         Instant start;
@@ -68,6 +69,8 @@ std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& pr
         PlannerInput in;
         in.now = t;
         in.away = away;
+        in.thermal = thermal;
+        if (start) { in.outdoorTemp = start->outdoor; in.forecast = start->forecast; }
         const auto period = periodAt(room, minuteOfDay(tz.toLocal(t)));
         // As in planAhead: a room exactly at its target, so only program and price decide.
         double assumed = period && period->point.mode != ProgramMode::Off ? period->point.target : room.minTemp + 1;
@@ -78,6 +81,8 @@ std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& pr
         Group g;
         if (room.priceOnly) {
             g = d.on ? Group::On : Group::Off;
+        } else if (d.inputs.warmupTo && d.reason != Reason::PeakAvoid) {
+            g = Group::Warmup;  // (expensive slots in it coast: a heat run of their own)
         } else if (d.inputs.mode == "off") {
             g = Group::Off;
         } else if (d.inputs.mode == "keep" || d.inputs.mode == "away") {
@@ -110,10 +115,19 @@ std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& pr
     std::vector<bool> on(slots.size(), false);
     for (std::size_t i = 0; i < slots.size();) {
         std::size_t j = i;
-        while (j < slots.size() && slots[j].group == slots[i].group && slots[j].target == slots[i].target) ++j;
         const Group g = slots[i].group;
+        // A warm-up is one run, its target rising along the curve.
+        while (j < slots.size() && slots[j].group == g && (g == Group::Warmup || slots[j].target == slots[i].target)) ++j;
         if (g == Group::On) {
             for (std::size_t k = i; k < j; ++k) on[k] = true;
+        } else if (g == Group::Warmup) {
+            // The curve assumes full heat from where it starts: on from when the unheated room would
+            // be below it, to the end of the warm-up.
+            std::size_t first = i;
+            if (start) {
+                while (first < j && unheated[first] && slots[first].target && *unheated[first] > *slots[first].target) ++first;
+            }
+            for (std::size_t k = first; k < j; ++k) on[k] = true;
         } else if (g == Group::Heat || g == Group::Keep) {
             // From when the unheated room would be at the target (with the hysteresis): before that,
             // heating is not needed. Without a starting temperature: the whole run.

@@ -144,6 +144,12 @@ double thermostatSetpoint(const RoomConfig& room, const Decision& d) {
             sp = in.ceiling.value_or(in.target.value_or(frost) + room.strategy.preheatBoost);
             break;
         case Reason::CheapBoost: sp = in.ceiling.value_or(in.target.value_or(frost) + room.strategy.cheapBoost); break;
+        case Reason::WarmUp:
+        case Reason::WarmUpOnTrack:
+            // Warming up: the coming period's target at once - a thermostat regulates towards its
+            // setpoint itself, so stepping it up along the curve would only make it lag behind.
+            sp = in.warmupTo.value_or(in.target.value_or(frost));
+            break;
         default:
             // heat periods (thermostat logic, below minimum, limp, ...): the target; the
             // thermostat does the regulating itself.

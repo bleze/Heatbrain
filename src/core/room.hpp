@@ -62,7 +62,9 @@ struct RoomConfig {
     double maxTemp = 23.0;          // never heat above this
     double frostTemp = 5.0;         // even "off" or a manual OFF heats below this
     std::vector<ProgramPoint> program;  // sorted by time, at least one point
-    std::chrono::minutes warmup{180};   // a booking starts heating this long before it begins
+    // A booking - and a step up in the program - starts heating this long before it begins, until
+    // the room's heating model is learned. 0: program steps do not start early at all.
+    std::chrono::minutes warmup{180};
     Strategy strategy;
     std::optional<PriceOnlyConfig> priceOnly;
 };

@@ -40,6 +40,7 @@ RoomConfig room(ProgramMode nightMode) {
     r.minTemp = 10;
     r.maxTemp = 24;
     r.program = {{7 * 60, ProgramMode::Heat, 20.0}, {23 * 60, nightMode, 16.0}};
+    r.warmup = minutes{0};  // no early start for 07:00 (tested on its own below)
     return r;
 }
 
@@ -204,4 +205,16 @@ TEST_CASE("Night schedule: a warm room in a keep-above night stays silent until 
     const auto all = offlineSchedule(room(ProgramMode::Keep), nightPrices(), tz(), at(0, 23, 30), at(1, 6, 30),
                                      OfflineDuty{0.25, 0.25}, std::nullopt, cold);
     CHECK(scheduleOnAt(all, at(1, 2, 30)));
+}
+
+TEST_CASE("Night schedule: a warm-up for the morning heats at full power") {
+    // Keep above 16 at night, 20 at 07:00, Wi-Fi back at 06:30: the 3 h ramp starts about 04:00.
+    RoomConfig r = room(ProgramMode::Keep);
+    r.warmup = minutes{180};
+    const OfflineStart cold{at(0, 23, 30), 16.0, 0.05, 5.0, nullptr};
+    const auto spans = offlineSchedule(r, nightPrices(), tz(), at(0, 23, 30), at(1, 6, 30), OfflineDuty{0.25, 0.25},
+                                       std::nullopt, cold);
+    CHECK(scheduleOnAt(spans, at(1, 2, 30)));        // the keep-above share, in the cheap hour
+    CHECK_FALSE(scheduleOnAt(spans, at(1, 3, 30)));
+    for (int m = 15; m < 150; m += 15) CHECK(scheduleOnAt(spans, at(1, 4) + minutes{m}));  // 04:15-06:30 solid
 }

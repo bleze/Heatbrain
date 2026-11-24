@@ -93,7 +93,7 @@ TEST_CASE("Flat prices: nothing is expensive or cheap, plain thermostat") {
     const auto o = priceOutlook(makePrices(flat), at(18), minutes{180});
     CHECK_FALSE(o.expensive);
     CHECK_FALSE(o.cheapest);
-    CHECK(decide(input(at(18), 18.5), bedroom(), makePrices(flat)).reason == Reason::BelowTarget);
+    CHECK(decide(input(at(12), 18.5), bedroom(), makePrices(flat)).reason == Reason::BelowTarget);
 }
 
 TEST_CASE("Hard limits win") {
@@ -208,7 +208,7 @@ TEST_CASE("Price-only rooms run the cheapest hours and respect no-heat windows")
 }
 
 TEST_CASE("Decision inputs are captured for the log") {
-    const auto d = decide(input(at(18), 18.4));
+    const auto d = decide(input(at(17), 18.4));  // before the warm-up for 21:00 begins
     CHECK(d.inputs.temperature == 18.4);
     CHECK(d.inputs.temperatureAgeMinutes == 3);
     CHECK(d.inputs.target == 19.0);
@@ -539,4 +539,92 @@ TEST_CASE("Window open: heating paused, frost protection and manual ON still win
     later.now = at(10, 30);
     later.measuredAt = later.now;
     CHECK(decide(later).reason != Reason::WindowOpen);
+}
+
+TEST_CASE("Warm-up: the next step up in the program, never out of an off period") {
+    const auto night = nextStepUp(bedroom(), tz(), at(3));  // heat to 16 -> 19 at 07:00
+    REQUIRE(night);
+    CHECK(night->at == at(7));
+    CHECK(night->from == 16.0);
+    CHECK(night->target == 19.0);
+    CHECK(nextStepUp(bedroom(), tz(), at(12))->at == at(21));  // 19 -> 20
+    CHECK_FALSE(nextStepUp(bedroom(), tz(), at(22)));          // next: down to 16 at 23:00
+    CHECK_FALSE(nextStepUp(bedroom(), tz(), at(7)));           // 07:00 itself is under way: next is 21:00, 14 h off
+
+    RoomConfig r = bedroom();
+    r.program = {{7 * 60, ProgramMode::Heat, 19.0}, {17 * 60, ProgramMode::Off, 0}, {21 * 60, ProgramMode::Heat, 20.0},
+                 {23 * 60, ProgramMode::Keep, 16.0}};
+    CHECK_FALSE(nextStepUp(r, tz(), at(20)));  // off until 21:00: the peak stays off
+    CHECK(nextStepUp(r, tz(), at(3))->from == 16.0);  // keep above 16 -> 19
+    CHECK(decide(input(at(20, 30), 15.5), r).reason == Reason::ScheduledOff);
+}
+
+TEST_CASE("Warm-up curve: flat, then an S up to the target half an hour early") {
+    const RoomConfig r = bedroom();  // not learned: a ramp over the 3 h warm-up setting
+    const ProgramStep step{at(7), 16.0, 19.0};
+    CHECK(warmupCurve(r, step, at(3), std::nullopt, 5.0) == 16.0);
+    CHECK(warmupCurve(r, step, at(6, 55), std::nullopt, 5.0) == 19.0);
+    double prev = 16.0;
+    for (int m = 0; m <= 240; m += 5) {
+        const double v = warmupCurve(r, step, at(3) + minutes{m}, std::nullopt, 5.0);
+        CHECK(v >= prev - 1e-9);  // never falls
+        CHECK(v - prev < 0.3);     // no jumps
+        prev = v;
+    }
+    CHECK(warmupCurve(r, step, at(5), std::nullopt, 5.0) == Catch::Approx(19.0 - 3.0 * 1.5 / 2.5));  // mid-ramp
+
+    // Learned: the room's own full-heat curve, so a slow room starts much earlier.
+    const ThermalModel slow{0.05, 1.5, 9, 9};
+    const double learned = warmupCurve(r, step, at(3), slow, 0.0);
+    CHECK(learned > 17.5);
+    CHECK(learned < 18.5);
+    RoomConfig off = r;
+    off.warmup = minutes{0};
+    CHECK(decide(input(at(6, 15), 16.2), off).reason != Reason::WarmUp);
+}
+
+TEST_CASE("Warm-up: heats below the curve, rests above it, targets the curve") {
+    const auto d = decide(input(at(6, 15), 16.2));  // a normal-priced slot
+    CHECK(d.on);
+    CHECK(d.reason == Reason::WarmUp);
+    REQUIRE(d.inputs.target);
+    CHECK(*d.inputs.target > 17.0);
+    CHECK(*d.inputs.target < 19.0);
+    CHECK(d.inputs.warmupTo == 19.0);
+    CHECK(d.inputs.mode == "heat");
+    CHECK_THAT(d.inputs.targetLabel, ContainsSubstring("19.0°C at 07:00"));
+
+    const auto ahead = decide(input(at(6, 15), 18.9));
+    CHECK_FALSE(ahead.on);
+    CHECK(ahead.reason == Reason::WarmUpOnTrack);
+
+    // The plan: warm-up segments, their targets rising to 19 at 07:00.
+    const auto plan = planAhead(bedroom(), makePrices(), tz(), at(3), hours{5}, std::nullopt, 5.0);
+    double last = 0;
+    int warm = 0;
+    for (const auto& s : plan) {
+        if (!s.warmup) continue;
+        ++warm;
+        REQUIRE(s.target);
+        CHECK(*s.target >= last);
+        CHECK(s.to <= at(7));
+        last = *s.target;
+    }
+    CHECK(warm > 4);
+    CHECK(plan.back().target == 19.0);
+}
+
+TEST_CASE("Warm-up towards a keep-above period ignores price, like the period itself") {
+    RoomConfig r = bedroom();
+    r.program = {{9 * 60, ProgramMode::Keep, 21.5}, {17 * 60, ProgramMode::Off, 0}, {23 * 60, ProgramMode::Keep, 16.0}};
+    std::array<double, 24> morningPeak = kHourly;
+    for (int h = 6; h < 9; ++h) morningPeak[static_cast<std::size_t>(h)] = 3.4;  // expensive while warming
+    const auto d = decide(input(at(8), 17.0), r, makePrices(morningPeak));
+    CHECK(d.on);
+    CHECK(d.reason == Reason::WarmUp);
+    CHECK(d.inputs.warmupTo == 21.5);
+
+    // Towards a heat period the same slot coasts (down to the curve minus the allowed drop).
+    r.program[0].mode = ProgramMode::Heat;
+    CHECK(decide(input(at(8), 20.5), r, makePrices(morningPeak)).reason == Reason::PeakAvoid);
 }

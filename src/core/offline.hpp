@@ -92,11 +92,15 @@ struct OfflineStart {
 //  - "off" periods: off;
 //  - heat / keep periods: duty x length of each run, placed in its cheapest 15-minute slots - with a
 //    known starting temperature only the part of the run from when the room (cooling unheated) would
-//    be below the target, so a warm room in a "keep above" night stays silent.
+//    be below the target, so a warm room in a "keep above" night stays silent;
+//  - warming up for a warmer period ahead (see warmupCurve, with `thermal` once learned): full heat
+//    from when the room (cooling unheated) would be below the curve - the whole warm-up without a
+//    starting temperature.
 // Spans are merged and sorted.
 std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz,
                                     Instant from, Instant to, const OfflineDuty& duty,
-                                    std::optional<AwayMode> away, std::optional<OfflineStart> start = {});
+                                    std::optional<AwayMode> away, std::optional<OfflineStart> start = {},
+                                    std::optional<ThermalModel> thermal = {});
 
 bool scheduleOnAt(const std::vector<OnSpan>& spans, Instant t);
 

@@ -52,6 +52,64 @@ std::optional<ActivePeriod> periodAt(const RoomConfig& room, int minute) {
     return a;
 }
 
+std::optional<ProgramStep> nextStepUp(const RoomConfig& room, const TimeZone& tz, Instant now, minutes within) {
+    const auto& p = room.program;
+    if (p.size() < 2) return std::nullopt;
+    const LocalTime local = tz.toLocal(now);
+    const int m = minuteOfDay(local);
+    const ProgramPoint* next = nullptr;
+    int ahead = 0;
+    for (const auto& pt : p) {
+        int d = ((pt.atMinute - m) % 1440 + 1440) % 1440;
+        if (d == 0) d = 1440;  // starts now: under way, the next one comes later
+        if (!next || d < ahead) { next = &pt; ahead = d; }
+    }
+    const auto current = periodAt(room, m);
+    if (!current || current->point.mode == ProgramMode::Off || next->mode == ProgramMode::Off) return std::nullopt;
+    if (next->target < current->point.target + 0.5) return std::nullopt;
+    const Instant at = tz.toInstant(floor<minutes>(local) + minutes{ahead});
+    if (at - now > within) return std::nullopt;
+    return ProgramStep{at, current->point.target, next->target, next->mode};
+}
+
+namespace {
+
+// Smooth max of a and b: equal to the larger one more than w apart, a parabola in between.
+double smoothMax(double a, double b, double w) {
+    const double d = a - b;
+    if (d >= w) return a;
+    if (d <= -w) return b;
+    return b + (d + w) * (d + w) / (4 * w);
+}
+double smoothMin(double a, double b, double w) { return -smoothMax(-a, -b, w); }
+
+}  // namespace
+
+double warmupCurve(const RoomConfig& room, const ProgramStep& step, Instant t, const std::optional<ThermalModel>& m,
+                   double outdoor) {
+    constexpr double kEarlyHours = 0.5;  // at the target this long before the step
+    constexpr double kGainMargin = 0.8;  // heat as if a little weaker than learned
+    const double lo = step.from, hi = step.target;
+    // Hours of heating still to come before the room must be at `hi` (negative: past that point).
+    const double tau = duration<double, std::ratio<3600>>(step.at - t).count() - kEarlyHours;
+    std::optional<double> need;
+    if (m && m->usable()) {
+        const double gain = m->gain * kGainMargin;
+        if (m->loss <= 1e-6) {
+            need = hi - gain * tau;
+        } else if (const double eq = outdoor + gain / m->loss; eq > hi + 0.3) {
+            // Full heat follows T(h) = eq - (eq - T0) e^(-loss h); backwards from `hi`:
+            need = eq - (eq - hi) * std::exp(std::min(m->loss * tau, 50.0));
+        }
+    }
+    if (!need) {  // not learned, or out of reach by the model: a straight ramp over the warm-up setting
+        const double len = std::max(0.25, duration<double, std::ratio<3600>>(room.warmup).count() - kEarlyHours);
+        need = hi - (hi - lo) * tau / len;
+    }
+    const double w = std::min(0.4, (hi - lo) / 4);
+    return smoothMin(smoothMax(*need, lo, w), hi, w);
+}
+
 std::string formatWindow(const DayWindow& w) {
     return std::format("{:02}:{:02}-{:02}:{:02}", w.fromMinute / 60, w.fromMinute % 60, w.toMinute / 60,
                        w.toMinute % 60);
@@ -83,6 +141,8 @@ std::string_view reasonCode(Reason r) {
         case Reason::NoPricesFallback: return "NO_PRICES_FALLBACK";
         case Reason::OfflineSchedule: return "OFFLINE_SCHEDULE";
         case Reason::WindowOpen: return "WINDOW_OPEN";
+        case Reason::WarmUp: return "WARM_UP";
+        case Reason::WarmUpOnTrack: return "WARM_UP_ON_TRACK";
     }
     return "UNKNOWN";
 }
@@ -235,6 +295,26 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                                  ? std::format("warming up for the booking {}-{}", hm(in.booking->from), hm(in.booking->until))
                                  : std::format("booked until {}", hm(in.booking->until));
     }
+    // A warmer period ahead: the target follows the warm-up curve towards it, so the room is warm
+    // when the period begins (not while booked or away: those replace the program).
+    bool warming = false;
+    bool warmingAnyPrice = false;  // towards a keep-above period: like it, regardless of price
+    if (!booked && !away && mode != ProgramMode::Off && room.warmup > minutes{0}) {  // 0: no early start
+        if (const auto step = nextStepUp(room, tz, in.now)) {
+            const double outside = (in.forecast ? in.forecast->meanOver(in.now, step->at) : std::nullopt)
+                                       .value_or(in.outdoorTemp.value_or(5.0));
+            const double curve = warmupCurve(room, *step, in.now, in.thermal, outside);
+            if (curve > target + 0.05) {
+                warming = true;
+                warmingAnyPrice = step->mode == ProgramMode::Keep;
+                mode = ProgramMode::Heat;
+                target = curve;
+                inputs.warmupTo = step->target;
+                inputs.targetLabel = std::format("warming up for {} at {}", temp(step->target),
+                                                 formatLocalHm(tz.toLocal(step->at)));
+            }
+        }
+    }
     if (mode != ProgramMode::Off) inputs.target = target;
     inputs.mode = booked ? "booked" : away ? "away" : std::string(modeName(mode));
 
@@ -314,7 +394,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     }
 
     // 7. Expensive now: coast, unless it gets too cold (not when booked: someone is there).
-    if (outlook.expensive && !booked) {
+    if (outlook.expensive && !booked && !warmingAnyPrice) {
         const double floor = target - s.peakAllowedDrop;
         if (t < floor || (in.currentlyOn && t < floor + h)) {
             return make(true, Reason::BelowComfortDuringPeak,
@@ -329,7 +409,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     }
 
     // 8. Cheap now, expensive soon: pre-heat.
-    if (outlook.nextExpensiveAt && *outlook.current < *outlook.nextExpensivePrice * kPreheatMaxRatio) {
+    if (!warmingAnyPrice && outlook.nextExpensiveAt && *outlook.current < *outlook.nextExpensivePrice * kPreheatMaxRatio) {
         const Instant peak = *outlook.nextExpensiveAt;
         const Instant peakEnd = outlook.nextExpensiveUntil.value_or(peak + hours{1});
         // The outdoor temperature during the expensive stretch: forecast, else the current reading.
@@ -362,7 +442,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     }
 
     // 9. Among the cheapest slots: a little extra.
-    if (outlook.cheapest) {
+    if (outlook.cheapest && !warmingAnyPrice) {
         const double ceiling = std::min(target + s.cheapBoost, room.maxTemp - h);
         if (t < ceiling - h || (in.currentlyOn && t < ceiling)) {
             inputs.ceiling = ceiling;
@@ -371,6 +451,19 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                                     *outlook.current, currency, *outlook.median, temp(ceiling)),
                         inputs);
         }
+    }
+
+    // 9b. Warming up for the next period: the curve instead of the plain thermostat. Towards a heat
+    //     period, expensive slots still coast and pre-heating still stores heat before them (both
+    //     against the curve), so a warm-up does not run through the peak; towards a keep-above
+    //     period price does not matter. Heats below the curve, stops a little above it.
+    if (warming) {
+        const std::string where = std::format("{} (curve {} now, {} at {})", temp(t), temp(target), temp(*inputs.warmupTo),
+                                              inputs.targetLabel.substr(inputs.targetLabel.rfind(' ') + 1));
+        if (t < target || (in.currentlyOn && t < target + h)) {
+            return make(true, Reason::WarmUp, "Warming up for the next period: " + where, inputs);
+        }
+        return make(false, Reason::WarmUpOnTrack, "Warm enough for now, on track for the next period: " + where, inputs);
     }
 
     // 10. Plain thermostat with hysteresis.
@@ -437,6 +530,8 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
             case Reason::PeakAvoid:
             case Reason::BelowComfortDuringPeak: kind = "coast"; break;
             case Reason::CheapBoost: kind = "boost"; break;
+            case Reason::WarmUp:
+            case Reason::WarmUpOnTrack: kind = "warmup"; break;
             case Reason::KeepAbove:
             case Reason::KeepSatisfied: kind = d.inputs.mode == "away" ? "away" : "keep"; break;
             case Reason::ScheduledOff:
@@ -453,7 +548,8 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
                 const double floor = kind == "off" ? room.frostTemp : d.inputs.target.value_or(room.frostTemp);
                 if (kind == "keep" && *room_t > floor + room.strategy.hysteresis) kind = "idle";
                 *room_t = std::max(*room_t, floor);  // heating holds it at the floor
-            } else if (d.inputs.target && (kind == "heat" || kind == "preheat" || kind == "boost" || kind == "coast")) {
+            } else if (d.inputs.target &&
+                       (kind == "heat" || kind == "preheat" || kind == "boost" || kind == "coast" || kind == "warmup")) {
                 // A heat period whose target (with any boost) is below where the room still is: no heat
                 // either - a room "heated to 5 deg" at 16 deg just cools.
                 const double ceiling = d.inputs.ceiling.value_or(
@@ -466,10 +562,11 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
             }
         }
         const std::optional<double> target = (kind == "off") ? std::nullopt : d.inputs.target;
-        if (!out.empty() && out.back().kind == kind && out.back().target == target) {
+        const bool warmup = d.inputs.warmupTo.has_value();
+        if (!out.empty() && out.back().kind == kind && out.back().target == target && out.back().warmup == warmup) {
             out.back().to = t + kSlotLength;
         } else {
-            out.push_back({t, t + kSlotLength, kind, target});
+            out.push_back({t, t + kSlotLength, kind, target, warmup});
         }
     }
     return out;

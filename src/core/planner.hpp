@@ -39,6 +39,8 @@ enum class Reason {
     AwayOff,                // price-only room while away
     OfflineSchedule,        // Wi-Fi off period: the plug follows the schedule loaded onto it
     WindowOpen,             // the temperature fell fast: window open? heating paused
+    WarmUp,                 // a warmer program period is coming: below the warm-up curve, heating
+    WarmUpOnTrack,          // a warmer program period is coming: on or above the curve, off
 };
 
 std::string_view reasonCode(Reason r);  // "PREHEAT_BEFORE_PEAK", stable for storage/UI
@@ -86,6 +88,27 @@ struct Booking {
 // The booking in effect at `t` (warming up or under way), if any.
 std::optional<Booking> bookingAt(const std::vector<Booking>& bookings, Instant t);
 
+// A step up in a room's program: from a heat or keep period to a heat or keep period at least half a
+// degree warmer. The room starts warming before it, so it is warm when the period begins.
+// Never out of an "off" period (often the peak tariff: heating there would defeat it).
+struct ProgramStep {
+    Instant at;        // when the warmer period begins
+    double from = 0;   // the target before it
+    double target = 0; // the target from then on
+    ProgramMode mode = ProgramMode::Heat;  // of the warmer period: keep-above warms up regardless of price
+};
+
+// The next program switch after `now`, if it is a step up within `within` (12 h).
+std::optional<ProgramStep> nextStepUp(const RoomConfig& room, const TimeZone& tz, Instant now,
+                                      std::chrono::minutes within = std::chrono::hours{12});
+
+// The warm-up curve: where the room should be at `t` to reach the step's target in time. Learned
+// rooms follow their full-heat curve backwards from the step (gain x 0.8, reaching the target 30
+// min early); until learned, a straight ramp over the room's warm-up setting. Flat at the earlier
+// target, eased in and out at both ends, so it rises as an S. A warm-up setting of 0 turns it off.
+double warmupCurve(const RoomConfig& room, const ProgramStep& step, Instant t, const std::optional<ThermalModel>& m,
+                   double outdoor);
+
 struct PlannerInput {
     Instant now;
     std::optional<double> temperature;
@@ -116,6 +139,7 @@ struct DecisionInputs {
     bool priceCheapest = false;
     std::optional<double> outdoorTemp;
     std::optional<double> ceiling;  // pre-heat / cheap boost: heating up to this
+    std::optional<double> warmupTo;  // warming up: the target of the period ahead (`target` is the curve)
 };
 
 struct Decision {
@@ -135,7 +159,8 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 // What a room is set to do over the coming hours, for display. Each slot is decided by the
 // real planner assuming the room sits at its target, which yields the intent per period:
 //   "heat" (to target, as needed), "preheat", "coast" (expensive: lets it cool a little),
-//   "boost" (cheapest hours), "keep" (keep above), "away", "booked" (incl. warm-up), "off", and
+//   "boost" (cheapest hours), "keep" (keep above), "away", "booked" (incl. warm-up), "off",
+//   "warmup" (warming up for a warmer program period ahead: the target is the curve), and
 //   "idle": a keep-above or heat period in which the room is predicted to stay warm enough by itself
 //   (from its current temperature, cooling towards outdoors at `coolingRate` per hour).
 struct PlanSegment {
@@ -143,6 +168,7 @@ struct PlanSegment {
     Instant to;
     std::string kind;
     std::optional<double> target;
+    bool warmup = false;  // the target is a point on a warm-up curve (also when "idle" or overlaid by the night)
 };
 std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& prices, const TimeZone& tz, Instant now,
                                    std::chrono::hours horizon, std::optional<AwayMode> away,

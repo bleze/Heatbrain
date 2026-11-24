@@ -194,7 +194,8 @@ planner decides each room, checking in this order:
 | 8 | Expensive slot: coast down to target − 1.0 °C | `PEAK_AVOID`, `BELOW_COMFORT_DURING_PEAK` |
 | 9 | Expensive slot within 3 h and clearly cheaper now: pre-heat (see below) | `PREHEAT_BEFORE_PEAK` |
 | 10 | Among the cheapest slots: heat to target + 0.5 °C | `CHEAP_BOOST` |
-| 11 | Thermostat with ±0.3 °C hysteresis | `BELOW_TARGET`, `TARGET_REACHED`, `HOLD_ON`, `HOLD_OFF` |
+| 11 | Warming up for a warmer period ahead (see below): heat below the curve | `WARM_UP`, `WARM_UP_ON_TRACK` |
+| 12 | Thermostat with ±0.3 °C hysteresis | `BELOW_TARGET`, `TARGET_REACHED`, `HOLD_ON`, `HOLD_OFF` |
 
 "Expensive" = top quarter of the next 24 h *and* 15% above the median; "cheapest" = bottom
 quarter *and* 10% below the median, so flat-price days fall back to a plain thermostat.
@@ -208,11 +209,22 @@ temperature at its learned rate, it ends the stretch no lower than target − th
 That is capped at twice the pre-heat setting, and pre-heating only starts as early as heating
 that far takes.
 
+**Warming up for the program.** When the program steps up by at least 0.5 °C within 12 h
+(from a heat or keep-above period, never out of an off period), the target becomes a curve
+towards the new one instead of a jump: at each moment, how warm the room must be so that full
+heat still reaches the new target 30 minutes before the period starts. With a learned heating
+model it is the room's own full-heat curve (gain × 0.8, for the forecast outdoor temperature);
+until then a straight ramp over the room's warm-up setting (`warmupMinutes`, 0 = start on time).
+It is eased into both ends, so the chart's target line rises as an S. Towards a heat period rules
+8-10 still apply to it (coast in expensive slots against the curve, pre-heat before them); towards
+a keep-above period, like the period itself, price does not matter. The night schedule heats
+a warm-up inside the Wi-Fi off period at full power, and thermostats get the new target at once.
+
 **The heating model.** `dT/dt = gain · heating − loss · (T − T_outdoor)`, fitted per room from
 the last 21 days of decisions (90-minute stretches of steady heating or not; limp mode, night
 schedules and open windows are left out) and refitted hourly. It is used once it has seen at
 least three cooling and three heating stretches. It also gives bookings their warm-up time
-(×1.25 + 30 min, at most 48 h) and the "Next 24 h" plan its "warm enough, no heat" periods.
+(×1.25 + 30 min, at most 48 h), program steps their warm-up curve and the "Next 24 h" plan its "warm enough, no heat" periods.
 
 **Weather forecast.** Hourly temperatures for two days from Open-Meteo, for the position of the
 Netatmo station or a place searched in Settings → Climate (only the position, rounded to about

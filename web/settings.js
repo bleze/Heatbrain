@@ -517,7 +517,7 @@
     helpButton(nb.querySelector("span"), "limits", g);
     field(g, "Never above", num(room, "maxTemp", { step: 0.5, unit: "°C" }), { hint: "hard stop, even when manual" });
     field(g, "Frost protection", num(room, "frostTemp", { step: 0.5, placeholder: "5", unit: "°C" }));
-    field(g, "Warm-up for bookings", num(room, "warmupMinutes", { step: 15, min: 0, max: 720, placeholder: "180", unit: "min" }), { hint: "until heatbrain has learned how fast the room warms (concrete floors: 12+ h)" });
+    field(g, "Warm-up time", num(room, "warmupMinutes", { step: 15, min: 0, max: 720, placeholder: "180", unit: "min" }), { hint: "for bookings and warmer program periods, until heatbrain has learned how fast the room warms (concrete floors: 12+ h); 0: program periods start on time" });
     const hl = state.status?.rooms?.find((r) => r.id === room.id)?.heatLoss;
     const fa = field(g, "Floor area", num(room, "areaM2", { step: 1, min: 1, max: 500, unit: "m²" }),
       { hint: hl ? heatLossText(hl) : "for comparing how well rooms keep their heat" });
