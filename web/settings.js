@@ -1251,10 +1251,10 @@
     el("div", { class: "hint", style: "margin-top:6px" }, shSetup, "It reports only when a value changes (Set up makes that every 0.5°), so heatbrain treats no news as no change for up to 3 hours. During Wi-Fi-off periods nothing arrives.");
 
     const mods = el("section", { class: "card" }, body);
-    const mh = sectionHead(mods, "Modules", "wifi", "violet");
+    const mh = sectionHead(mods, "Your sensors", "thermo", "violet");
     // One time range for all module charts, like the room chart's (remembered in this browser).
     if (!S.moduleDays) { try { S.moduleDays = Number(localStorage.getItem("hb.moduleDays")) || 30; } catch { S.moduleDays = 30; } }
-    const rg = el("div", { class: "range", role: "group", "aria-label": "Module chart range" }, mh);
+    const rg = el("div", { class: "range", role: "group", "aria-label": "Sensor chart range" }, mh);
     for (const [d, label] of [[2, "2 days"], [7, "7 days"], [30, "30 days"], [91, "3 months"], [365, "1 year"]]) {
       const b = el("button", { type: "button", class: S.moduleDays === d ? "active" : "" }, rg, label);
       b.addEventListener("click", () => { S.moduleDays = d; try { localStorage.setItem("hb.moduleDays", String(d)); } catch { /* private mode */ } render(); });
