@@ -445,11 +445,11 @@
 
   // What heats the room, in the same kind of dropdown as its sensor: plugs (one dropdown per plug,
   // and one to add another) or a thermostat (then heatbrain sets its setpoint instead of switching).
-  function heaterField(g, room, nameAfter) {
+  // A row per device with its delete button on the right, lined up with the switch points'.
+  function heaterField(parent, room, nameAfter) {
     const plugs = S.cfg.plugs || [], stats = S.cfg.thermostats || [];
     const chosen = room.thermostat ? [] : (room.plugs || []).filter((id) => plugs.some((p) => p.id === id));
-    const usedBy = (id) => S.cfg.rooms.find((r) => r !== room && !r.thermostat && (r.plugs || []).includes(id))?.name;
-    const plugItem = (p) => ({ value: `plug:${p.id}`, label: `${p.name || p.id}${usedBy(p.id) ? ` (also ${usedBy(p.id)})` : ""}`, sonoff: isSonoff(p) });
+    const plugItem = (p) => ({ value: `plug:${p.id}`, label: p.name || p.id, sonoff: isSonoff(p) });
     // Free plugs (not yet in this room, except `keep`), by kind; thermostats when the room has at most one plug.
     const groupsFor = (keep, withStats) => {
       const free = plugs.filter((p) => p.id === keep || !chosen.includes(p.id)).map(plugItem);
@@ -474,12 +474,17 @@
       }
       changed(); render();
     };
-    const col = el("div", { style: "display:flex;flex-direction:column;gap:6px" });
+    // Not a <label> like other fields: a click on it would press the first button inside (a dropdown or delete).
+    const col = el("div", { class: "field", style: "margin-top:12px" }, parent);
+    el("span", {}, col, room.thermostat ? "Thermostat" : chosen.length > 1 ? "Plugs" : "Heated by");
+    const row = (picker) => {
+      const r = el("div", { class: "sched-row", style: "margin-top:0" }, col);
+      r.appendChild(picker);
+      return r;
+    };
     // A chosen device: its dropdown (to swap it) and a delete button on the right, like a switch point's.
     const chosenRow = (picker, onRemove, what) => {
-      const r = el("div", { class: "row", style: "gap:6px;flex-wrap:nowrap" }, col);
-      r.appendChild(picker);
-      btn(r, "", "trash", () => { onRemove(); changed(); render(); }, "ghost danger").title = `Remove ${what} from this room`;
+      btn(row(picker), "", "trash", () => { onRemove(); changed(); render(); }, "ghost danger row-delete").title = `Remove ${what} from this room`;
     };
     if (room.thermostat) {
       chosenRow(sensorPicker({ value: `stat:${room.thermostat}`, plain: [], groups: groupsFor(null, true), onPick: (v) => pickDevice(v) }),
@@ -491,13 +496,13 @@
       }
       const more = groupsFor(null, !chosen.length);
       if (more.length) {
-        col.appendChild(sensorPicker({ value: "", plain: [], groups: more, onPick: (v) => pickDevice(v),
+        row(sensorPicker({ value: "", plain: [], groups: more, onPick: (v) => pickDevice(v),
           placeholder: chosen.length ? "+ another plug" : "— choose a plug or thermostat —" }));
       }
     }
-    field(g, room.thermostat ? "Thermostat" : chosen.length > 1 ? "Plugs" : "Heated by", col, {
-      hint: !plugs.length && !stats.length ? "add plugs (or a thermostat) on the Heaters tab first"
-        : room.thermostat ? "heatbrain sets its setpoint" : chosen.length > 1 ? "switched together" : "" });
+    const hint = !plugs.length && !stats.length ? "add plugs (or a thermostat) on the Heaters tab first"
+      : room.thermostat ? "heatbrain sets its setpoint" : chosen.length > 1 ? "switched together" : "";
+    if (hint) el("div", { class: "hint" }, col, hint);
   }
 
   function renderRoom(list, room, idx) {
@@ -563,9 +568,9 @@
     confirmBtn(right, "", "trash", "Delete room?", () => { S.cfg.rooms.splice(idx, 1); changed(); render(); }, "ghost danger");
 
     if (room.priceOnly) {
+      heaterField(c, room, nameAfter);
+      sensorField(el("div", { class: "form-grid room-fields" }, c), room);
       const g = el("div", { class: "form-grid room-fields" }, c);
-      heaterField(g, room, nameAfter);
-      sensorField(g, room);
       const ch = field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1, unit: "h" }), { hint: "heats only in those hours" });
       helpButton(ch.querySelector("span"), "priceOnly", g);
       el("h3", {}, c, "Never heat between");
@@ -579,9 +584,9 @@
       return;
     }
 
+    heaterField(c, room, nameAfter);
+    sensorField(el("div", { class: "form-grid room-fields" }, c), room);
     const g = el("div", { class: "form-grid room-fields" }, c);
-    heaterField(g, room, nameAfter);
-    sensorField(g, room);
     const nb = field(g, "Never below", num(room, "minTemp", { step: 0.5, unit: "°C" }), { hint: "heats whatever the price" });
     helpButton(nb.querySelector("span"), "limits", g);
     field(g, "Never above", num(room, "maxTemp", { step: 0.5, unit: "°C" }), { hint: "hard stop, even when manual" });
