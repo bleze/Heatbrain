@@ -22,6 +22,8 @@ using namespace std::chrono;
 
 namespace {
 constexpr auto kFailsafeRecheck = hours{1};
+// A room's new sensor: hours not learned from while it settles where it now is.
+constexpr auto kNewSensorSettle = hours{3};
 constexpr auto kHistoryRetention = days{3 * 366};  // ~100 MB a year with four rooms: years fit easily
 constexpr int kTomorrowPricesExpectedHour = 15;  // published ~13:00; alert if still missing at 15
 
@@ -81,6 +83,7 @@ std::vector<PlanSegment> overlayNight(const std::vector<PlanSegment>& plan, cons
 json toJson(const DecisionInputs& in) {
     json j{{"minTemp", in.minTemp}, {"maxTemp", in.maxTemp}, {"targetLabel", in.targetLabel}, {"mode", in.mode},
            {"priceExpensive", in.priceExpensive}, {"priceCheapest", in.priceCheapest}};
+    if (!in.sensor.empty()) j["sensor"] = in.sensor;
     if (in.temperature) j["temperature"] = *in.temperature;
     if (in.temperatureAgeMinutes) j["temperatureAgeMinutes"] = *in.temperatureAgeMinutes;
     if (in.target) j["target"] = *in.target;
@@ -448,7 +451,10 @@ TickResult Controller::tick(Instant now, bool apply) {
         in.outdoorTemp = outdoor;
         in.forecast = forecast;
         // Open window: the temperature fell fast. Pause heating for a while (manual ON still wins).
-        if (!room.priceOnly && reading && reading->temperature && reading->measuredAt) {
+        // Only below the room's max: above it heatbrain never heats, so a pause would change nothing
+        // (and a sensor brought in from somewhere warmer falls fast without any window open).
+        if (!room.priceOnly && reading && reading->temperature && reading->measuredAt &&
+            *reading->temperature < room.maxTemp) {
             auto& detector = windows_[room.id];
             if (apply) {
                 if (const auto ev = detector.update(*reading->measuredAt, *reading->temperature, openWindow_)) {
@@ -639,7 +645,20 @@ ThermalModel Controller::fitBetween(const RoomConfig& room, Instant from, Instan
     if (history_) {
         try {
             std::vector<ThermalSample> samples;
+            std::string sensor;            // the sensor of the decisions so far (older ones do not say)
+            std::optional<Instant> settle;  // a new sensor: its first hours are skipped
             for (const auto& d : history_->decisions(room.id, from, to, false)) {
+                // Another sensor: what the old one measured says nothing about the new one's place, and
+                // the new one first has to settle (brought in from somewhere warmer or colder).
+                if (d.inputs.is_object() && d.inputs.contains("sensor")) {
+                    const std::string key = d.inputs["sensor"].get<std::string>();
+                    if (!sensor.empty() && key != sensor) {
+                        samples.clear();
+                        settle = d.at + kNewSensorSettle;
+                    }
+                    sensor = key;
+                }
+                if (settle && d.at < *settle) continue;
                 // Only real states: not limp mode or night schedules (the plug did its own thing).
                 // An open window is not how the room normally cools.
                 if (d.reason == "STALE_DATA_LIMP" || d.reason == "OFFLINE_SCHEDULE" || d.reason == "WINDOW_OPEN" ||
@@ -647,6 +666,9 @@ ThermalModel Controller::fitBetween(const RoomConfig& room, Instant from, Instan
                     continue;
                 }
                 if (!d.inputs.contains("temperature") || d.inputs.value("temperatureAgeMinutes", 99) > 30) continue;
+                // Above the room's max: not where heatbrain keeps it - a sensor just brought in from
+                // somewhere warmer, or the sun - and how it cools from there is not how it holds its range.
+                if (d.inputs.contains("maxTemp") && d.inputs["temperature"].get<double>() > d.inputs["maxTemp"].get<double>()) continue;
                 ThermalSample s{d.at, d.inputs["temperature"].get<double>(), std::nullopt, d.on};
                 if (d.inputs.contains("outdoorTemp")) s.outdoor = d.inputs["outdoorTemp"].get<double>();
                 samples.push_back(s);

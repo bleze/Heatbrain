@@ -157,6 +157,7 @@ struct DecisionInputs {
     std::string targetLabel;   // program period, "17:00-21:00"
     std::string mode;          // "heat" | "keep" | "off"
     double minTemp = 0, maxTemp = 0;
+    std::string sensor;  // the room's sensor ("shelly:shed"): learning starts afresh when it changes
     std::optional<double> price;
     std::optional<double> medianPrice;
     bool priceExpensive = false;

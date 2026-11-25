@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 #include "app/controller.hpp"
 #include "app/rooms.hpp"
@@ -493,4 +495,49 @@ TEST_CASE("Sensor days: each new reading counts once in its day; filled once fro
     REQUIRE(days.size() == 2);
     CHECK(days[0].readings == 1);
     CHECK_FALSE(days[0].avgHumidity);
+}
+
+TEST_CASE("Open window: only when heating could happen - not while the room is above its max") {
+    Fixture f;  // bedroom: max 22
+    const auto window = [](const TickResult& r) {
+        return std::ranges::any_of(r.problems, [](const Problem& p) { return p.key == "room:bedroom:window"; });
+    };
+    // A sensor brought in from somewhere warmer, falling fast but still above the max: nothing to pause.
+    f.setTemps(26.0, 14.0);
+    f.controller->tick(f.now, true);
+    f.now += minutes{5};
+    f.setTemps(24.0, 14.0);
+    CHECK_FALSE(window(f.controller->tick(f.now, true)));
+
+    f.now += minutes{40};
+    f.setTemps(21.0, 14.0);
+    f.controller->tick(f.now, true);
+    f.now += minutes{5};
+    f.setTemps(19.5, 14.0);
+    const auto r = f.controller->tick(f.now, true);
+    CHECK(window(r));
+    CHECK(r.rooms[0].decision.reason == Reason::WindowOpen);
+}
+
+TEST_CASE("Learning how a room cools starts afresh with a new sensor, after it has settled") {
+    Fixture f;
+    // Cooling (heating off) every 10 minutes, -20 outside: the old sensor and the new one's first
+    // hours fall fast (0.3/h), the new one in its place slowly (0.05/h).
+    Instant t = f.now - hours{15};
+    const auto cool = [&](const std::string& sensor, double from, double loss, int hoursLong) {
+        for (int i = 0; i <= hoursLong * 6; ++i, t += minutes{10}) {
+            const double temp = -20 + (from + 20) * std::exp(-loss * i / 6.0);
+            f.history.recordDecision({t, "bedroom", false, false, "HOLD_OFF", "",
+                                      json{{"temperature", temp}, {"temperatureAgeMinutes", 2}, {"outdoorTemp", -20.0},
+                                           {"minTemp", 16.0}, {"maxTemp", 22.0}, {"sensor", sensor}},
+                                      json::array()});
+        }
+    };
+    cool("netatmo:Bedroom", 20, 0.3, 5);
+    cool("shelly:bedroom", 20, 0.3, 3);  // moved: settling
+    cool("shelly:bedroom", 12, 0.05, 6);
+    const auto r = f.controller->tick(f.now, false);
+    REQUIRE(r.rooms[0].recentThermal);
+    CHECK(r.rooms[0].recentThermal->coolingStretches >= 3);
+    CHECK(r.rooms[0].recentThermal->loss == Catch::Approx(0.05).margin(0.01));
 }

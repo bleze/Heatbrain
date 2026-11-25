@@ -300,6 +300,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     DecisionInputs inputs;
     inputs.minTemp = room.minTemp;
     inputs.maxTemp = room.maxTemp;
+    inputs.sensor = room.sensor;
     inputs.temperature = in.temperature;
     inputs.outdoorTemp = in.outdoorTemp;
     if (in.measuredAt) {
