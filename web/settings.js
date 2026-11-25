@@ -495,9 +495,18 @@
           () => { room.plugs = room.plugs.filter((x) => x !== id); }, "the plug");
       }
       const more = groupsFor(null, !chosen.length);
-      if (more.length) {
-        row(sensorPicker({ value: "", plain: [], groups: more, onPick: (v) => pickDevice(v),
-          placeholder: chosen.length ? "+ another plug" : "— choose a plug or thermostat —" }));
+      if (more.length && (!chosen.length || S.addingPlug === room.id)) {
+        // No plug yet, or "Add plug" pressed: an empty dropdown (opened right away after the button).
+        const picker = sensorPicker({ value: "", plain: [], groups: more, onPick: (v) => { S.addingPlug = null; pickDevice(v); },
+          placeholder: chosen.length ? "— choose a plug —" : "— choose a plug or thermostat —" });
+        if (chosen.length) {
+          btn(row(picker), "", "trash", () => { S.addingPlug = null; render(); }, "ghost danger row-delete").title = "Cancel";
+          if (S.openAddPlug) { S.openAddPlug = false; requestAnimationFrame(() => picker.querySelector(".picker-btn")?.click()); }
+        } else {
+          row(picker);
+        }
+      } else if (more.length) {
+        btn(el("div", {}, col), "Add plug", "plus", () => { S.addingPlug = room.id; S.openAddPlug = true; render(); });
       }
     }
     const hint = !plugs.length && !stats.length ? "add plugs (or a thermostat) on the Heaters tab first"
