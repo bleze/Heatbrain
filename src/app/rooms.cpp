@@ -95,7 +95,12 @@ RoomConfig parseRoom(const json& rj) {
     if (r.sensor.find(':') == std::string::npos) {
         throw std::runtime_error("'sensor' must look like \"netatmo:Bedroom\" (source id : sensor id or name)");
     }
-    if (r.minTemp >= r.maxTemp) throw std::runtime_error("minTemp must be below maxTemp");
+    if (r.minTemp >= r.maxTemp) {
+        // Equal would switch the plug on and off at every crossing, and leave no room for a target.
+        throw std::runtime_error(std::format(
+            "'Never below' ({:g}°) must be lower than 'Never above' ({:g}°): heating needs room between them, "
+            "e.g. never below {:g}°, never above {:g}°", r.minTemp, r.maxTemp, r.minTemp, r.minTemp + 3));
+    }
 
     const json program = roomWithProgram(rj).value("program", json::array());
     for (const auto& pj : program) {
