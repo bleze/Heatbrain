@@ -1191,7 +1191,55 @@
     }
     const shSetup = shRead.length ? section(sh, "shelly-setup") : el("div", { style: "margin-top:10px" }, sh);
     if (shRead.length) el("summary", {}, shSetup, "Add another / set up again");
-    const sg = el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:8px" }, shSetup);
+    // Find it on the network and let heatbrain set it up - no Shelly app needed.
+    el("div", { class: "hint", style: "margin-top:8px" }, shSetup,
+      "Connect the Shelly to your Wi-Fi (its own setup, or the Shelly app once). It sleeps between readings: press its button once to wake it, then scan within a minute or two.");
+    const shRow = el("div", { class: "row", style: "margin-top:8px" }, shSetup);
+    const shSubnet = el("input", { type: "text", value: S.subnet || guessSubnet(), style: "width:180px" }, shRow);
+    btn(shRow, "Scan", "search", async (b) => {
+      b.disabled = true; b.lastChild.textContent = "Scanning…";
+      try { S.subnet = shSubnet.value; S.shellyFound = await api("/api/shelly/discover", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subnet: shSubnet.value }) }); }
+      catch (e) { toast(e.message, true); }
+      render();
+    }, "primary");
+    if (S.shellyFound) {
+      const list = el("div", { class: "list" }, shSetup);
+      if (!S.shellyFound.length) el("div", { class: "muted" }, list, "No Shelly found. Press its button to wake it and scan again.");
+      for (const d of S.shellyFound) {
+        const r = el("div", { class: "item-head", style: "flex-wrap:wrap;gap:8px" }, list);
+        const info = el("div", { class: "row" }, r);
+        info.appendChild(icon("shelly"));
+        el("b", {}, info, d.name || d.app || d.model);
+        const read = [d.temperature != null ? `${d.temperature.toFixed(1)}°` : "", d.humidity != null ? `${Math.round(d.humidity)} %` : "", d.battery != null ? `battery ${d.battery} %` : ""].filter(Boolean).join(" · ");
+        el("span", { class: "muted" }, info, `${d.host} · ${d.model}${d.gen ? ` · Gen${d.gen}` : ""}${read ? ` · ${read}` : ""}`);
+        const done = shRead.some((s) => s.key === `shelly:${d.id}`);
+        let why = "";
+        if (d.gen < 2) why = "Gen1: set it up by hand (below)";
+        else if (d.auth) why = "password protected: turn it off on its web page";
+        else if (!d.sensor && !/HT/i.test(d.app || "")) why = "no temperature sensor";
+        if (why) { el("span", { class: "muted" }, r, why); continue; }
+        const act = el("div", { class: "row", style: "gap:8px" }, r);
+        if (done) { const ok = el("span", { class: "chip ok" }, act); ok.appendChild(icon("check")); ok.appendChild(document.createTextNode("set up")); }
+        const nm = el("input", { type: "text", value: d.name || "", placeholder: "Name, e.g. Shed", style: "width:150px", autocomplete: "off" }, act);
+        btn(act, done ? "Set up again" : "Set up", "check", async (b) => {
+          if (!nm.value.trim()) { toast("Give it a name first (where it is, e.g. Shed)", true); nm.focus(); return; }
+          b.disabled = true; b.lastChild.textContent = "Setting up…";
+          try {
+            const res = await api("/api/shelly/setup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ host: d.host, name: nm.value.trim(), base: location.origin }) });
+            Object.assign(d, res.device);
+            toast(`${res.device.name} is set up: it reports to heatbrain when the temperature or humidity changes`);
+            await refreshStatus();
+          } catch (e) { toast(e.message, true); }
+          render();
+        }, done ? "" : "primary");
+      }
+    }
+    el("div", { class: "hint", style: "margin-top:6px" }, shSetup, "Set up installs two actions on the Shelly itself (temperature and humidity change → heatbrain), replacing any heatbrain set up before. Its address is this page's address, so open heatbrain by the address the Shelly can reach (e.g. its IP, not localhost).");
+
+    // By hand: in the Shelly app or on the device's own web page.
+    const man = section(shSetup, "shelly-manual");
+    el("summary", {}, man, "Or set it up by hand (Shelly app or its web page)");
+    const sg = el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:8px" }, man);
     el("span", { class: "muted" }, sg, "Name in heatbrain");
     const shName = el("input", { type: "text", value: S.shellyName || "", placeholder: "e.g. Shed", style: "width:180px", autocomplete: "off" }, sg);
     // The two addresses carry the name: they follow it as you type (no re-render, so the field keeps its focus).
@@ -1202,24 +1250,24 @@
       return `${location.protocol}//${location.host}/api/push/shelly?id=${id}&name=${encodeURIComponent(nm)}${suffix}`;
     };
     const urlRow = (label, suffix) => {
-      const r = el("div", { class: "field", style: "margin-top:8px" }, shSetup);
+      const r = el("div", { class: "field", style: "margin-top:8px" }, man);
       el("span", {}, r, label);
       const row = el("div", { class: "row", style: "gap:8px" }, r);
       const i = el("input", { type: "text", readonly: "", style: "flex:1;min-width:0;font-family:ui-monospace,Consolas,monospace;font-size:12px" }, row);
       i.addEventListener("focus", () => i.select());
       btn(row, "Copy", "check", async () => {
-        try { await navigator.clipboard.writeText(i.value); toast("Copied"); } catch { i.select(); }
+        if (await copyText(i.value, i)) toast("Copied"); else { i.focus(); i.select(); toast("Selected - press Ctrl+C (or long-press → Copy) to copy", true); }
       });
       urls.push({ r, i, suffix });
     };
-    const ol = el("ol", { class: "phone-steps", style: "margin-top:10px" }, shSetup);
-    el("li", {}, ol, "Set up the Shelly in its app (or its own web page) and connect it to your Wi-Fi.");
-    el("li", {}, ol, "In the Shelly app: the device → Actions → add one: When Temperature changes (Any), Then call a URL - paste the first address below.");
+    const ol = el("ol", { class: "phone-steps", style: "margin-top:10px" }, man);
+    el("li", {}, ol, "Wake the Shelly (press its button) and open its app or its own web page (http://its-address).");
+    el("li", {}, ol, "Actions (Webhooks) → add one: When Temperature changes (Any), Then call a URL - paste the first address below.");
     el("li", {}, ol, "Add a second action: When Humidity changes (Any), with the second address.");
     el("li", {}, ol, "Change the temperature a little (hold it in your hand): it appears above within a few minutes. Then choose it as a room's sensor on the Rooms tab.");
     urlRow("When temperature changes", "&temp=${ev.tC}");
     urlRow("When humidity changes", "&hum=${ev.rh}");
-    const noName = el("div", { class: "hint", style: "margin-top:8px" }, shSetup, "Type a name above (where the sensor is, e.g. Shed) to get its two addresses.");
+    const noName = el("div", { class: "hint", style: "margin-top:8px" }, man, "Type a name above (where the sensor is, e.g. Shed) to get its two addresses.");
     const refresh = () => {
       const has = !!(S.shellyName || "").trim();
       for (const u of urls) { u.i.value = urlFor(u.suffix); u.r.hidden = !has; }
@@ -1227,7 +1275,7 @@
     };
     shName.addEventListener("input", () => { S.shellyName = shName.value; refresh(); });
     refresh();
-    el("div", { class: "hint", style: "margin-top:6px" }, shSetup, "It reports only when a value changes (by the threshold you set in the action, e.g. 0.5°), so heatbrain treats no news as no change for up to 3 hours. During Wi-Fi-off periods nothing arrives.");
+    el("div", { class: "hint", style: "margin-top:6px" }, shSetup, "It reports only when a value changes (heatbrain sets it to every 0.5°; by hand, its own threshold), so heatbrain treats no news as no change for up to 3 hours. During Wi-Fi-off periods nothing arrives.");
 
     const mods = el("section", { class: "card" }, body);
     const mh = sectionHead(mods, "Modules", "wifi", "violet");

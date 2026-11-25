@@ -104,8 +104,8 @@ const HELP = {
   shelly: {
     title: "Shelly H&T",
     body: [
-      "The Shelly H&T (Gen3) runs on batteries and sleeps between readings, so heatbrain cannot ask it - it tells heatbrain. You set up two Actions on the Shelly (in its app or web page): when the temperature changes, call heatbrain's address with the temperature; when the humidity changes, with the humidity. Settings -> Sensors gives both addresses, ready to copy. Everything stays on your network: no Shelly cloud needed.",
-      "It only reports when a value changes by the action's threshold (e.g. 0.5°), so a steady room can be quiet for a long time. heatbrain treats no news as no change for up to 3 hours; after that the reading counts as stale, like any sensor that has gone quiet. The last readings are kept across restarts.",
+      "The Shelly H&T (Gen3) runs on batteries and sleeps between readings, so heatbrain cannot ask it - it tells heatbrain. It needs two Actions on the Shelly: when the temperature changes, call heatbrain's address with the temperature; when the humidity changes, with the humidity. heatbrain can put them there itself, no Shelly app needed: in Settings -> Sensors, press the Shelly's button once to wake it (it is only on the Wi-Fi while awake), Scan, give it a name and press Set up. Or add them by hand in its app or on its web page: Settings -> Sensors gives both addresses, ready to copy. Everything stays on your network: no Shelly cloud needed.",
+      "It only reports when a value changes by its threshold (Set up makes it 0.5°), so a steady room can be quiet for a long time. heatbrain treats no news as no change for up to 3 hours; after that the reading counts as stale, like any sensor that has gone quiet. The last readings are kept across restarts.",
       "During Wi-Fi-off periods the sensor cannot reach heatbrain; it catches up once the Wi-Fi is back.",
     ],
   },

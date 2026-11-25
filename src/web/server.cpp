@@ -29,6 +29,7 @@
 #include "core/offline.hpp"
 #include "sensors/velux.hpp"
 #include "sensors/push.hpp"
+#include "sensors/shelly.hpp"
 
 namespace hb {
 
@@ -594,6 +595,46 @@ void WebServer::routes() {
     };
     s.Get("/api/push/shelly", pushHandler);
     s.Post("/api/push/shelly", pushHandler);
+
+    // Finding Shellys on the network and setting one up without the Shelly app: heatbrain installs the
+    // two webhooks on the device itself (see sensors/shelly.hpp).
+    const auto shellyJson = [](const DiscoveredShelly& d) {
+        json j{{"host", d.host}, {"id", d.id}, {"model", d.model}, {"app", d.app}, {"name", d.name},
+               {"firmware", d.firmware}, {"gen", d.gen}, {"auth", d.auth}, {"sensor", d.sensor}};
+        if (d.temperature) j["temperature"] = *d.temperature;
+        if (d.humidity) j["humidity"] = *d.humidity;
+        if (d.battery) j["battery"] = *d.battery;
+        return j;
+    };
+    s.Post("/api/shelly/discover", [shellyJson](const httplib::Request& req, httplib::Response& res) {
+        const json body = parseBody(req);
+        HttplibClient probe(milliseconds{1500}, milliseconds{2000});
+        try {
+            json out = json::array();
+            for (const auto& d : discoverShelly(body.value("subnet", std::string()), probe)) out.push_back(shellyJson(d));
+            sendJson(res, out);
+        } catch (const std::exception& e) {
+            sendError(res, 400, e.what());
+        }
+    });
+    s.Post("/api/shelly/setup", [shellyJson](const httplib::Request& req, httplib::Response& res) {
+        const json body = parseBody(req);
+        const std::string host = body.value("host", "");
+        static const std::regex hostOk(R"(^[A-Za-z0-9.-]{1,253}(:\d{1,5})?$)");
+        if (!std::regex_match(host, hostOk)) return sendError(res, 400, "host must be an address like 192.168.1.42");
+        HttplibClient http(milliseconds{3000}, milliseconds{5000});
+        try {
+            const auto r = setupShelly(http, host, body.value("base", ""), body.value("name", ""));
+            // Its readings right away, rather than at its next change.
+            PushRegistry::instance().put(r.device.id, r.device.name, r.device.temperature, r.device.humidity, r.device.battery,
+                                         std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()));
+            log::info("Web: set up Shelly {} at {} as '{}' ({} earlier webhooks replaced)", r.device.model, host, r.device.name, r.removed);
+            sendJson(res, json{{"device", shellyJson(r.device)}, {"removed", r.removed}});
+        } catch (const std::exception& e) {
+            log::warn("Web: setting up the Shelly at {} failed: {}", host, e.what());
+            sendError(res, 502, e.what());
+        }
+    });
 
     // VELUX ACTIVE: log in once with the account (the password is used for this request only, never
     // stored), then list the rooms with climate readings so the page can show what was found.

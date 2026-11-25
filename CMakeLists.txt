@@ -93,6 +93,7 @@ add_library(heatbrain_io STATIC
   src/sensors/netatmo.cpp
   src/sensors/velux.cpp
   src/sensors/push.cpp
+  src/sensors/shelly.cpp
   src/sensors/sensors.cpp
   src/storage/history.cpp
   src/notify/notifier.cpp
@@ -147,6 +148,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_netatmo.cpp
     tests/test_velux.cpp
     tests/test_push.cpp
+    tests/test_shelly.cpp
     tests/test_planner.cpp
     tests/test_thermal.cpp
     tests/test_window.cpp

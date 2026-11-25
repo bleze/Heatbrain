@@ -82,7 +82,7 @@ https://github.com/user-attachments/assets/9845e588-631f-49b3-be1a-e6ed30a5e829
 |---|---|---|
 | Heaters on smart plugs | Tasmota (e.g. Sonoff Basic R2, Basic R4), up to Tasmota 16 | heatbrain installs a fail-safe on each plug and tests it per firmware version; upgrades pick the image for the plug's chip (ESP8266, ESP32-C3, ...). The model is read from the plug and shown with its chip; Sonoff plugs carry the Sonoff mark |
 | Floor heating | Danfoss DEVIreg Smart | paired from the DEVI app with a one-time code; heatbrain sets the setpoint and reads the floor temperature and real heating time |
-| Room temperatures | Netatmo Weather Station (indoor modules), VELUX ACTIVE (wall switch / climate sensors), Shelly H&T Gen3, DEVIreg Smart's own sensors | VELUX: read from the VELUX app's cloud (unofficial; log in once, only the token is kept). Shelly: battery sensors send their readings to heatbrain (no cloud) |
+| Room temperatures | Netatmo Weather Station (indoor modules), VELUX ACTIVE (wall switch / climate sensors), Shelly H&T Gen3, DEVIreg Smart's own sensors | VELUX: read from the VELUX app's cloud (unofficial; log in once, only the token is kept). Shelly: battery sensors send their readings to heatbrain (no cloud); heatbrain finds them on the network and sets them up itself, no Shelly app needed |
 | CO₂ | Netatmo indoor modules, VELUX ACTIVE | kept with the readings; notification above a chosen level |
 | Outdoor temperature | Netatmo outdoor module, plus the Open-Meteo forecast | |
 | Prices | Energi Data Service (DK1/DK2 spot, Danish grid tariffs) | any country via time-of-day `schedule` components |
