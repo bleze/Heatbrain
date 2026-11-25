@@ -475,16 +475,19 @@
       changed(); render();
     };
     const col = el("div", { style: "display:flex;flex-direction:column;gap:6px" });
-    const remove = { value: "-", label: "None (remove)" };
+    // A chosen device: its dropdown (to swap it) and a delete button on the right, like a switch point's.
+    const chosenRow = (picker, onRemove, what) => {
+      const r = el("div", { class: "row", style: "gap:6px;flex-wrap:nowrap" }, col);
+      r.appendChild(picker);
+      btn(r, "", "trash", () => { onRemove(); changed(); render(); }, "ghost danger").title = `Remove ${what} from this room`;
+    };
     if (room.thermostat) {
-      col.appendChild(sensorPicker({ value: `stat:${room.thermostat}`, plain: [remove], groups: groupsFor(null, true),
-        onPick: (v) => { if (v === "-") { delete room.thermostat; changed(); render(); } else pickDevice(v); } }));
+      chosenRow(sensorPicker({ value: `stat:${room.thermostat}`, plain: [], groups: groupsFor(null, true), onPick: (v) => pickDevice(v) }),
+        () => { delete room.thermostat; }, "the thermostat");
     } else {
       for (const id of chosen) {
-        col.appendChild(sensorPicker({ value: `plug:${id}`, plain: [remove], groups: groupsFor(id, chosen.length === 1),
-          onPick: (v) => {
-            if (v === "-") { room.plugs = room.plugs.filter((x) => x !== id); changed(); render(); } else pickDevice(v, id);
-          } }));
+        chosenRow(sensorPicker({ value: `plug:${id}`, plain: [], groups: groupsFor(id, chosen.length === 1), onPick: (v) => pickDevice(v, id) }),
+          () => { room.plugs = room.plugs.filter((x) => x !== id); }, "the plug");
       }
       const more = groupsFor(null, !chosen.length);
       if (more.length) {
