@@ -383,20 +383,22 @@
   }
   // Once the plugs' status is in: the Sonoff mark on the room's plug pills, in place (a full redraw
   // would take the focus from a field being typed in).
-  function markSonoffPills() {
-    for (const pill of document.querySelectorAll(".pick[data-plug]")) {
-      const p = (S.cfg.plugs || []).find((x) => x.id === pill.dataset.plug);
-      if (!p || !isSonoff(p) || pill.querySelector('[data-icon="sonoff"]')) continue;
-      const mark = icon("sonoff");
-      mark.classList.add("plug-mark");
-      const old = pill.querySelector(".plug-mark");
-      if (old) old.replaceWith(mark);
-      else pill.insertBefore(mark, pill.lastChild);  // after the check mark, before the name
-    }
+  // Plugs saved without a model are known as Sonoff only from their status, which may arrive after
+  // the page is drawn (right after a restart heatbrain is still asking the plugs). Then the Rooms tab
+  // is drawn again - when nothing is being typed or picked, so no focus or open dropdown is lost.
+  function redrawRoomsWhenIdle() {
+    if (S.tab !== "rooms") return;
+    const busy = document.querySelector(".picker.open") || document.activeElement?.matches("input, textarea, select");
+    if (busy) { setTimeout(redrawRoomsWhenIdle, 1000); return; }
+    render();
   }
 
   function renderRooms(body) {
-    if ((S.cfg.plugs || []).length && S.plugStatus == null && !plugStatusLoading) refreshPlugStatus().then(markSonoffPills);
+    if ((S.cfg.plugs || []).length && S.plugStatus == null && !plugStatusLoading) {
+      const marks = () => (S.cfg.plugs || []).map(isSonoff).join();
+      const before = marks();
+      refreshPlugStatus().then(() => { if (marks() !== before) redrawRoomsWhenIdle(); });
+    }
     const card = el("section", { class: "card" }, body);
     const head = sectionHead(card, "Rooms", "home", "violet",
       "Each room has plugs, a temperature sensor and target temperatures through the day. A room without a sensor runs the cheapest hours of each day.",
