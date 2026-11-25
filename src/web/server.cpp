@@ -9,6 +9,8 @@
 #include <fstream>
 #include <future>
 #include <iterator>
+#include <map>
+#include <mutex>
 #include <regex>
 
 #include "core/battery.hpp"
@@ -686,7 +688,8 @@ void WebServer::routes() {
     });
 
     s.Put("/api/config", [this](const httplib::Request& req, httplib::Response& res) {
-        const json incoming = unmaskSecrets(parseBody(req), readConfigFile(ctx_.configFile));
+        const json stored = readConfigFile(ctx_.configFile);
+        const json incoming = keepLearned(unmaskSecrets(parseBody(req), stored), stored);
         const auto errors = validateConfig(incoming, ctx_.dataDir);
         if (!errors.empty()) return sendJson(res, json{{"errors", errors}}, 400);
         saveConfig(ctx_.configFile, incoming);
@@ -743,7 +746,24 @@ void WebServer::routes() {
             }));
         }
         json out = json::array();
-        for (auto& f : futures) out.push_back(f.get());
+        std::map<std::string, std::string> models;
+        for (auto& f : futures) {
+            out.push_back(f.get());
+            if (!out.back().value("model", std::string()).empty()) models[out.back()["id"]] = out.back()["model"];
+        }
+        // A plug's model, once it reports one, goes into the settings: next time the page shows the
+        // plug as what it is (its Sonoff mark) before any plug has answered. Not a settings change to
+        // act on, so no reload.
+        try {
+            static std::mutex learning;
+            std::lock_guard lock(learning);
+            if (const auto updated = withLearnedPlugModels(readConfigFile(ctx_.configFile), models)) {
+                saveConfig(ctx_.configFile, *updated);
+                log::info("Saved the model of plugs that reported one");
+            }
+        } catch (const std::exception& e) {
+            log::warn("Could not save the plugs' models: {}", e.what());
+        }
         sendJson(res, out);
     });
 

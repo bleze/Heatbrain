@@ -80,6 +80,32 @@ json maskSecrets(const json& cfg) {
     return out;
 }
 
+json keepLearned(json incoming, const json& stored) {
+    if (!incoming.contains("plugs") || !incoming["plugs"].is_array()) return incoming;
+    for (auto& p : incoming["plugs"]) {
+        if (!p.is_object() || !p.value("model", std::string()).empty()) continue;
+        const json* old = findById(stored, "plugs", p);
+        if (old && old->is_object() && old->value("host", "") == p.value("host", "") && !old->value("model", std::string()).empty()) {
+            p["model"] = (*old)["model"];
+        }
+    }
+    return incoming;
+}
+
+std::optional<json> withLearnedPlugModels(json cfg, const std::map<std::string, std::string>& models) {
+    if (!cfg.contains("plugs") || !cfg["plugs"].is_array()) return std::nullopt;
+    bool changed = false;
+    for (auto& p : cfg["plugs"]) {
+        if (!p.is_object() || !p.value("model", std::string()).empty()) continue;
+        const auto it = models.find(p.value("id", ""));
+        if (it == models.end() || it->second.empty()) continue;
+        p["model"] = it->second;
+        changed = true;
+    }
+    if (!changed) return std::nullopt;
+    return cfg;
+}
+
 json unmaskSecrets(json incoming, const json& stored) {
     if (incoming.contains("temperatureSources")) {
         incoming["temperatureSources"] = withSourceIds(incoming["temperatureSources"]);

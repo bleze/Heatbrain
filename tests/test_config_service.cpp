@@ -98,3 +98,24 @@ TEST_CASE("Saving keeps a backup of the previous version") {
     }
     CHECK(backups >= 1);
 }
+
+TEST_CASE("A plug's model is learned once and kept when a page sends the settings without it") {
+    const json cfg = json::parse(R"({"plugs":[
+        {"id":"shed","host":"192.168.1.187","mode":"live"},
+        {"id":"office","host":"192.168.1.198","mode":"live","model":"Sonoff Basic R4"}]})");
+    // Learned: only where none is stored (a stored one is never replaced).
+    const auto learned = withLearnedPlugModels(cfg, {{"shed", "Sonoff Basic"}, {"office", "Something else"}});
+    REQUIRE(learned);
+    CHECK((*learned)["plugs"][0]["model"] == "Sonoff Basic");
+    CHECK((*learned)["plugs"][1]["model"] == "Sonoff Basic R4");
+    CHECK_FALSE(withLearnedPlugModels(*learned, {{"shed", "Sonoff Basic"}}));  // nothing new: not saved again
+
+    // A page loaded before it was learned saves the plugs without it: kept. A new address: maybe
+    // another device, so not kept.
+    json incoming = cfg;
+    incoming["plugs"][1].erase("model");
+    incoming["plugs"][1]["host"] = "192.168.1.200";
+    const json kept = keepLearned(incoming, *learned);
+    CHECK(kept["plugs"][0]["model"] == "Sonoff Basic");
+    CHECK_FALSE(kept["plugs"][1].contains("model"));
+}
