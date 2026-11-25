@@ -138,6 +138,9 @@
     const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
     const y = (v) => m.t + (1 - v / yMax) * (H - m.t - m.b);
     const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": "Household electricity use and the radiators' part" }, host);
+    // Quarters and hours (2 or 7 days): night shaded behind the bars, sunrise and sunset marked on top.
+    const sun = !energy ? daylight(t0, t1) : null;
+    if (sun) drawNights(svg, x, nights(t0, t1, sun), m.t, H - m.b);
     for (const v of yTicks) {
       el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }, svg);
       el("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }, svg, v.toFixed(v < 10 ? 1 : 0));
@@ -170,6 +173,8 @@
       }
     }
 
+    if (sun) drawSunMarks(svg, x, sun, t0, t1, m.t);
+
     // One hover layer for both drawings: the bucket under the pointer.
     const dayTitle = new Intl.DateTimeFormat("en-GB", { timeZone: state.tz, weekday: "short", day: "numeric", month: "short", year: "numeric" });
     const weekTitle = new Intl.DateTimeFormat("en-GB", { timeZone: state.tz, day: "numeric", month: "short", year: "numeric" });
@@ -186,6 +191,8 @@
         { label: "Everything else", value: kwh(Math.max(0, b.total - b.heat)), color: "var(--ink-2)", box: true },
       ];
       if (b.heat > b.total * 1.05) rows.push({ label: "Note", value: "radiators > measured: is a radiator's power set too high?" });
+      const sr = sun && sunRow(t, sun);
+      if (sr) rows.push(sr);
       const title = g === "month" ? monthTitle.format(b.start * 1000)
         : g === "week" ? `Week of ${weekTitle.format(b.start * 1000)}`
         : g === "day" ? dayTitle.format(b.start * 1000)

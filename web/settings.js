@@ -1296,7 +1296,7 @@
     // One time range for all module charts, like the room chart's (remembered in this browser).
     if (!S.moduleDays) { try { S.moduleDays = Number(localStorage.getItem("hb.moduleDays")) || 30; } catch { S.moduleDays = 30; } }
     const rg = el("div", { class: "range", role: "group", "aria-label": "Sensor chart range" }, mh);
-    for (const [d, label] of [[2, "2 days"], [7, "7 days"], [30, "30 days"], [91, "3 months"], [365, "1 year"]]) {
+    for (const [d, label] of [[1, "24 h"], [2, "2 days"], [7, "7 days"], [30, "30 days"], [91, "3 months"], [365, "1 year"]]) {
       const b = el("button", { type: "button", class: S.moduleDays === d ? "active" : "" }, rg, label);
       b.addEventListener("click", () => { S.moduleDays = d; try { localStorage.setItem("hb.moduleDays", String(d)); } catch { /* private mode */ } render(); });
     }
@@ -1316,7 +1316,8 @@
       const src = sourceOf(s.key);
       left.appendChild(srcBadge(src));
       const nm = el("div", {}, left);
-      el("b", {}, nm, s.name);
+      // A thermostat's floor probe is named "<room> (floor)" for messages; here the line below says so.
+      el("b", {}, nm, s.key.endsWith("-floor") ? s.name.replace(/ \(floor\)$/, "") : s.name);
       const from = src === "devi" ? `${sourceInfo(src).label} · ${s.key.endsWith("-floor") ? "floor probe" : "room sensor"}`
         : [sourceInfo(src).label, s.kind === "outdoor" ? "outdoor" : ""].filter(Boolean).join(" · ");
       el("div", { class: "muted", style: "font-size:12px" }, nm, from);
@@ -1495,16 +1496,17 @@
   }
 
   // One module's charts for the chosen range: up to three small charts, each with its own axis, on one
-  // time axis. Short ranges (2 or 7 days) draw the detailed readings, longer ones the daily summaries.
+  // time axis. Short ranges (24 h, 2 or 7 days) draw the detailed readings, longer ones the daily summaries.
   // A quarter of the range is left ahead of today for the battery's projection.
+  let plotClips = 0;  // unique clipPath ids across all module cards
   function sensorYear(card, s, allDays, battery, rangeDays, readings) {
     const host = el("div", { class: "module-year" }, card);
     const W = Math.max(260, card.clientWidth - 28), m = { l: 34, r: 6 };
     const now = Date.now() / 1000;
-    const t0 = now - rangeDays * 86400, t1 = now + Math.max(rangeDays / 4, 1) * 86400;
+    const t0 = now - rangeDays * 86400, t1 = now + (rangeDays / 4) * 86400;  // 24 h: 6 h ahead
     const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
     const days = allDays.filter((d) => d[0] + 86400 > t0);
-    // Ticks: every 6 h (2 days), every day (7), every week (30), every month (3 months, 1 year).
+    // Ticks: every 3 h (24 h), 6 h (2 days), every day (7), every week (30), every month (3 months, 1 year).
     const ticks = [];
     const fmtTick = rangeDays <= 2 ? (t) => (new Date(t * 1000).getHours() === 0 ? new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(t * 1000) : `${String(new Date(t * 1000).getHours()).padStart(2, "0")}:00`)
       : rangeDays <= 30 ? (t) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(t * 1000)
@@ -1512,7 +1514,7 @@
     if (rangeDays <= 2) {
       for (let d = new Date(t0 * 1000); d.getTime() / 1000 < t1; d.setHours(d.getHours() + 1)) {
         d.setMinutes(0, 0, 0);
-        if (d.getHours() % 6 === 0 && d.getTime() / 1000 >= t0) ticks.push(d.getTime() / 1000);
+        if (d.getHours() % (rangeDays <= 1 ? 3 : 6) === 0 && d.getTime() / 1000 >= t0) ticks.push(d.getTime() / 1000);
       }
     } else if (rangeDays <= 30) {
       const step = rangeDays <= 7 ? 1 : 7;
@@ -1526,12 +1528,19 @@
       }
     }
     const labelEvery = rangeDays >= 365 ? 2 : 1;
+    // 24 h, 2 or 7 days: night shaded in every panel, sunrise and sunset marked on the first.
+    const sun = rangeDays <= 7 ? daylight(t0, t1) : null;
+    const dark = sun ? nights(t0, t1, sun) : [];
+    let marked = false;
     const panel = (title, h, yLo, yHi, yFmt, draw, note) => {
       const svg = el("svg", { viewBox: `0 0 ${W} ${h + 30}`, width: W, height: h + 30, role: "img", "aria-label": `${s.name}: ${title}` }, host);
       const top = 16;
       el("text", { class: "panel-label", x: m.l, y: 11 }, svg, title);
       if (note) el("text", { class: "panel-note", x: W - m.r, y: 11, "text-anchor": "end" }, svg, note);
       const y = (v) => top + (1 - (v - yLo) / (yHi - yLo)) * h;
+      drawNights(svg, x, dark, top, top + h);
+      // Ahead of now: the same faint wash as on the room and price charts.
+      el("rect", { x: x(now), y: top, width: x(t1) - x(now), height: h, fill: "var(--grid)", opacity: 0.35 }, svg);
       for (const v of [yLo, yHi]) {
         el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }, svg);
         el("text", { x: m.l - 5, y: y(v) + 4, "text-anchor": "end" }, svg, yFmt(v));
@@ -1541,7 +1550,12 @@
         if (i % labelEvery === 0) el("text", { x: x(t), y: top + h + 12, "text-anchor": "middle" }, svg, fmtTick(t));
       });
       el("line", { class: "now", x1: x(now), x2: x(now), y1: top, y2: top + h }, svg);
-      draw(svg, y);
+      // The data stays inside the plot: the svg shows overflow (for labels), and series can start
+      // before the range (the battery's daily samples) or run past it.
+      const clipId = `plot-clip-${++plotClips}`;
+      el("rect", { x: m.l, y: top - 2, width: W - m.l - m.r, height: h + 4 }, el("clipPath", { id: clipId }, el("defs", {}, svg)));
+      draw(el("g", { "clip-path": `url(#${clipId})` }, svg), y);
+      if (sun && !marked) { drawSunMarks(svg, x, sun, t0, t1, top); marked = true; }
     };
     const span = (vals, pad, floor, ceil) => {
       let lo = Math.min(...vals), hi = Math.max(...vals);
@@ -1612,24 +1626,29 @@
         }, "CO₂ ppm · daily average and highest");
       }
     } else {
-      el("div", { class: "muted", style: "font-size:12.5px;margin:6px 0" }, host, "Builds up from today: a point per day (choose 2 or 7 days for the readings themselves).");
+      el("div", { class: "muted", style: "font-size:12.5px;margin:6px 0" }, host, "Builds up from today: a point per day (choose 24 h, 2 or 7 days for the readings themselves).");
     }
     if (battery !== null) {
       const samples = battery?.samples || [];
       const left = battery?.daysLeft;
-      const note = left == null ? (samples.length < 10 ? "projection after about 10 days" : "drain not known yet")
+      const note = left == null ? (samples.length < 10 ? "projection after about 10 days" : "no drop yet")
         : left <= 21 ? `empty in about ${Math.max(1, Math.round(left))} days`
         : `empty ≈ ${new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric" }).format(new Date((samples[samples.length - 1][0] + left * 86400) * 1000))}`;
       panel("Battery %", 40, 0, 100, (v) => `${v}`, (svg, y) => {
         el("line", { x1: m.l, x2: W - m.r, y1: y(5), y2: y(5), class: "batt-empty" }, svg);
-        if (samples.length) el("path", { d: path(samples.map(([t, p]) => [t + 43200, p]), y), class: "batt-line" }, svg);
-        if (samples.length === 1) el("circle", { cx: x(samples[0][0] + 43200), cy: y(samples[0][1]), r: 2.5, class: "batt-dot" }, svg);
+        // A day's level at its noon, today's at most now (not ahead of the now line in the morning).
+        const at = (t) => Math.min(t + 43200, now);
+        // The last level holds until now, so the line ends where the other charts' lines do.
+        const pts = samples.map(([t, p]) => [at(t), p]);
+        if (pts.length && pts[pts.length - 1][0] < now) pts.push([now, pts[pts.length - 1][1]]);
+        if (pts.length) el("path", { d: path(pts, y), class: "batt-line" }, svg);
+        if (samples.length === 1) el("circle", { cx: x(at(samples[0][0])), cy: y(samples[0][1]), r: 2.5, class: "batt-dot" }, svg);
         if (left != null && samples.length) {
           // Dotted from the last level to 5 %, as far as the axis goes.
           const [lt, lp] = samples[samples.length - 1];
           const tEmpty = lt + left * 86400;
           const tEnd = Math.min(tEmpty, t1), pEnd = lp - (lp - 5) * ((tEnd - lt) / (tEmpty - lt));
-          el("path", { d: `M${x(lt + 43200).toFixed(1)},${y(lp).toFixed(1)}L${x(tEnd).toFixed(1)},${y(pEnd).toFixed(1)}`, class: "batt-proj" }, svg);
+          el("path", { d: `M${x(at(lt)).toFixed(1)},${y(lp).toFixed(1)}L${x(tEnd).toFixed(1)},${y(pEnd).toFixed(1)}`, class: "batt-proj" }, svg);
         }
       }, note);
     }

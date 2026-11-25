@@ -566,6 +566,7 @@ void WebServer::routes() {
 
     // A battery sensor reporting by itself (Shelly H&T Gen3 "Actions"/webhooks):
     //   /api/push/shelly?id=shed&name=Shed&temp=${ev.tC}   and   ...&hum=${ev.rh}
+    //   (heatbrain's setup adds &battery=${status["devicepower:0"].battery.percent} to both)
     // GET or POST; temp/tC/temperature, hum/rh/humidity, batt/battery are all accepted.
     const auto pushHandler = [](const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.get_param_value("id");

@@ -73,10 +73,10 @@ TEST_CASE("Shelly setup: replaces heatbrain's earlier webhooks and adds one for 
     REQUIRE(created.size() == 2);
     CHECK(created[0]["event"] == "temperature.change");
     CHECK(created[0]["urls"][0] ==
-          "http://192.168.1.10:8090/api/push/shelly?id=shed&name=Shed&temp=${ev.tC}");
+          "http://192.168.1.10:8090/api/push/shelly?id=shed&name=Shed&temp=${ev.tC}&battery=${status[\"devicepower:0\"].battery.percent}");
     CHECK(created[1]["event"] == "humidity.change");
     CHECK(created[1]["urls"][0] ==
-          "http://192.168.1.10:8090/api/push/shelly?id=shed&name=Shed&hum=${ev.rh}");
+          "http://192.168.1.10:8090/api/push/shelly?id=shed&name=Shed&hum=${ev.rh}&battery=${status[\"devicepower:0\"].battery.percent}");
 }
 
 TEST_CASE("Shelly setup: a sleeping, password protected or sensorless Shelly gives a readable reason") {
@@ -122,5 +122,5 @@ TEST_CASE("Shelly set up by hand: the scan recognises it and Set up again keeps 
     CHECK(r.device.id == "shed");
     CHECK(r.device.name == "The shed");
     REQUIRE(created.size() == 2);
-    CHECK(created[0]["urls"][0] == "http://192.168.1.10:8090/api/push/shelly?id=shed&name=The%20shed&temp=${ev.tC}");
+    CHECK(created[0]["urls"][0] == "http://192.168.1.10:8090/api/push/shelly?id=shed&name=The%20shed&temp=${ev.tC}&battery=${status[\"devicepower:0\"].battery.percent}");
 }

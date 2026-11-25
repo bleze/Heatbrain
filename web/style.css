@@ -110,10 +110,9 @@ body {
   color: var(--ink);
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
-main { max-width: 1200px; margin: 0 auto; padding: 0 16px 96px; }
-/* The dashboard may grow on wide screens so more room cards share a row: 2200 px fits 7 cards
-   of 280 px (6 rooms + Outdoor). Settings and Help keep 1200 px, where long lines read badly. */
-#view-dashboard, body:has(#view-dashboard:not([hidden])) .top { max-width: 2200px; }
+/* Every page may grow on wide screens, the header with it: up to 1855 px, room for 6 room cards of
+   280 px in a row. Help puts its sections in columns instead of long lines. */
+main { max-width: 1855px; margin: 0 auto; padding: 0 16px 96px; }
 h2 { font-size: 16px; margin: 0; font-weight: 600; display: flex; align-items: center; gap: 10px; }
 h3 { font-size: 14px; margin: 24px 0 8px; font-weight: 600; }
 a { color: var(--accent); }
@@ -135,7 +134,7 @@ a { color: var(--accent); }
 /* Header */
 .top {
   display: flex; align-items: center; gap: 24px;
-  max-width: 1200px; margin: 0 auto; padding: 18px 16px 10px;
+  max-width: 1855px; margin: 0 auto; padding: 18px 16px 10px;
 }
 .brand { display: flex; align-items: center; gap: 8px; text-decoration: none; color: var(--ink); font-weight: 750; font-size: 20px; letter-spacing: -0.02em; }
 .logo { width: 26px; height: 26px; fill: url(#flame-grad); stroke: none; }
@@ -173,7 +172,9 @@ a { color: var(--accent); }
 .move-btn { padding: 5px 7px; }
 .heatloss-note { font-size: 12.5px; font-weight: 400; color: var(--muted); margin-left: 10px; }
 /* Settings -> Sensors: a card per module with its year (a point per day) */
-.module-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; margin-top: 12px; }
+/* Two sensor cards per row at any width (bigger charts), one on narrow screens. */
+.module-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+@media (max-width: 800px) { .module-cards { grid-template-columns: 1fr; } }
 .module-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; background: var(--surface); min-width: 0; }
 .module-card .item-head { align-items: flex-start; }
 .module-year { margin-top: 8px; }
@@ -627,7 +628,9 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 .helpbox li { margin: 3px 0; }
 .helpbox h4 { margin: 8px 0 2px; font-size: 13px; }
 .help-example { color: var(--ink-2); }
-.manual { max-width: 860px; }
+/* Help: the intro and contents across the top, the sections in columns of a readable width below. */
+.manual > p { max-width: 860px; }
+.manual-sections { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(460px, 100%), 1fr)); gap: 0 40px; align-items: start; }
 .manual h3 { margin-top: 28px; }
 .manual .helpbox { background: transparent; border-left: 0; padding: 0; font-size: 14px; }
 .toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; }
@@ -729,20 +732,20 @@ a.chip { text-decoration: none; }
 .chart .coast-floor-label.short { fill: var(--warning); }
 .sched-warn { flex-basis: 100%; margin: -2px 0 0; color: var(--warning); }
 /* Night (sunset to sunrise): a faint blue-grey shade behind the data; the key is the same colour, stronger. */
-.chart .night { fill: var(--night); }
+.night { fill: var(--night); }
 .legend .key-night { background: var(--night-key); }
 /* Sunrise / sunset: the power mix's solar colour, so "sun" reads the same in both cards. A surface-coloured
    halo keeps the mark and its time readable where a line passes behind. */
-.chart .sun-mark { pointer-events: none; }
-.chart .sun-disc { fill: var(--mix-solar); stroke: var(--surface); stroke-width: 1.5; paint-order: stroke; }
-.chart .sun-horizon { stroke: var(--mix-solar); stroke-width: 1.5; stroke-linecap: round; }
-.chart .sun-arrow { fill: none; stroke: var(--mix-solar); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.chart .sun-label { fill: var(--sun-ink); font-size: 10.5px; font-weight: 600;
+.sun-mark { pointer-events: none; }
+.sun-mark .sun-disc { fill: var(--mix-solar); stroke: var(--surface); stroke-width: 1.5; paint-order: stroke; }
+.sun-mark .sun-horizon { stroke: var(--mix-solar); stroke-width: 1.5; stroke-linecap: round; }
+.sun-mark .sun-arrow { fill: none; stroke: var(--mix-solar); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.sun-mark .sun-label { fill: var(--sun-ink); font-size: 10.5px; font-weight: 600;
   stroke: var(--surface); stroke-width: 3; paint-order: stroke; }
 .chart .booking-band { fill: var(--accent); fill-opacity: 0.08; }
 .chart .booking-band.warm { fill-opacity: 0.04; }
 .chart .booking-label { fill: var(--accent); font-size: 10.5px; font-weight: 600; }
-.chart .now { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.chart .now, .module-year .now { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 3; }
 .chart .now-label { fill: var(--accent); font-weight: 600; }
 .chart .future-label { fill: var(--muted); font-style: italic; }
 .chart .cross { stroke: var(--ink-2); stroke-width: 1; }

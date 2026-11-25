@@ -287,12 +287,14 @@ ShellySetupResult setupShelly(HttpClient& http, std::string_view host, std::stri
             }
         }
     }
+    // Each report also carries the battery level: the device fills in ${status[...]} from its own status
+    // before sending (Shelly's webhook URL tokens). On USB power it is null, which heatbrain ignores.
     rpc(http, host, "Webhook.Create",
         json{{"cid", 0}, {"enable", true}, {"event", "temperature.change"}, {"name", "heatbrain temperature"},
-             {"urls", json::array({shellyPushUrl(base, id, label, "&temp=${ev.tC}")})}});
+             {"urls", json::array({shellyPushUrl(base, id, label, std::string("&temp=${ev.tC}").append(kShellyBatteryToken))})}});
     rpc(http, host, "Webhook.Create",
         json{{"cid", 0}, {"enable", true}, {"event", "humidity.change"}, {"name", "heatbrain humidity"},
-             {"urls", json::array({shellyPushUrl(base, id, label, "&hum=${ev.rh}")})}});
+             {"urls", json::array({shellyPushUrl(base, id, label, std::string("&hum=${ev.rh}").append(kShellyBatteryToken))})}});
     // Report every half degree (best effort: not every model has the setting).
     try {
         rpc(http, host, "Temperature.SetConfig", json{{"id", 0}, {"config", {{"report_thr_C", 0.5}}}});

@@ -6,7 +6,7 @@
 // /rpc. A battery H&T sleeps between readings, so it only answers while awake (just after it joined
 // the Wi-Fi, or for a short while after its button is pressed). Setting one up installs two webhooks
 // on it (Webhook.Create) that call heatbrain's /api/push/shelly when the temperature or humidity
-// changes - the same as adding the two Actions by hand in the Shelly app.
+// changes - the same as adding the two Actions by hand in the Shelly app. Both also send the battery level.
 
 #include <optional>
 #include <string>
@@ -42,6 +42,9 @@ void applyShellyHooks(DiscoveredShelly& d, std::string_view body);
 
 // Probes every address of a /24 network ("192.168.1.0/24" or "192.168.1") for Shellys.
 std::vector<DiscoveredShelly> discoverShelly(std::string_view subnet, HttpClient& http);
+
+// Added to both webhook URLs: the battery level, read by the device from its own status when it sends.
+inline constexpr std::string_view kShellyBatteryToken = R"(&battery=${status["devicepower:0"].battery.percent})";
 
 // heatbrain's push address for a sensor; base is how the Shelly reaches heatbrain ("http://192.168.1.10:8090").
 std::string shellyPushUrl(std::string_view base, std::string_view id, std::string_view name, std::string_view suffix);

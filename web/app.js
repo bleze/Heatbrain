@@ -70,7 +70,7 @@ const temp = (v) => (v == null ? "–" : `${v.toFixed(1)}°`);
 const price = (v) => (v == null ? "–" : v.toFixed(2));
 
 function el(tag, attrs = {}, parent, text) {
-  const svg = ["svg", "g", "path", "rect", "line", "text", "polyline", "defs", "linearGradient", "stop", "use", "pattern", "circle"].includes(tag);
+  const svg = ["svg", "g", "path", "rect", "line", "text", "polyline", "defs", "linearGradient", "stop", "use", "pattern", "circle", "clipPath"].includes(tag);
   const node = svg ? document.createElementNS("http://www.w3.org/2000/svg", tag) : document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) if (v != null) node.setAttribute(k, v);
   if (text != null) node.textContent = text; // untrusted strings: textContent only
@@ -217,6 +217,8 @@ function drawNights(g, x, list, top, bottom) {
 function drawSunMarks(g, x, days, t0, t1, top) {
   const marks = days.filter((d) => d[2]).flatMap(([r, s]) => [[r, true], [s, false]])
     .filter(([t]) => t >= t0 && t <= t1).sort((a, b) => a[0] - b[0]);
+  // Too close together (a week on a narrow card): no marks, the night shade says enough.
+  if (marks.some(([t], i) => i && x(t) - x(marks[i - 1][0]) < 22)) return;
   const y = top + 11;  // the horizon line
   marks.forEach(([t, rise], i) => {
     const cx = x(t);
@@ -224,11 +226,14 @@ function drawSunMarks(g, x, days, t0, t1, top) {
     el("path", { class: "sun-disc", d: `M${cx - 5},${y}A5,5 0 0 1 ${cx + 5},${y}Z` }, grp);
     el("line", { class: "sun-horizon", x1: cx - 8, x2: cx + 8, y1: y + 0.5, y2: y + 0.5 }, grp);
     // The arrow under the horizon: points up at sunrise, down at sunset.
-    const ay = y + 4.5, dy = rise ? -1 : 1;
+    const ay = y + 4.5, dy = rise ? 1 : -1;  // the tip at ay - 1.5 * dy: up for a sunrise
     el("path", { class: "sun-arrow", d: `M${cx - 3},${ay + 1.5 * dy}L${cx},${ay - 1.5 * dy}L${cx + 3},${ay + 1.5 * dy}` }, grp);
+    // A sunrise's time points right, towards that day's sunset, whose time points left: the two share
+    // the day between them, so both need room (10 px from the icon + ~30 px of text each, and a gap).
+    // Next to the chart's edge only the one time does.
     const neighbour = rise ? marks[i + 1] : marks[i - 1];
     const room = neighbour ? Math.abs(x(neighbour[0]) - cx) : rise ? x(t1) - cx : cx - x(t0);
-    if (room > 60) {
+    if (room > (neighbour ? 88 : 44)) {
       el("text", { class: "sun-label", x: rise ? cx + 10 : cx - 10, y: y + 1, "text-anchor": rise ? "start" : "end" }, grp, hm(t));
     }
   });
