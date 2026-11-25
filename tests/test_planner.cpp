@@ -776,3 +776,84 @@ TEST_CASE("Coast: the stored heat follows the learned cooling rate before the wh
     in.coolingRate = 0.01;                    // learned: barely cools, 19.6 at the start is enough
     CHECK_FALSE(decide(in, room).inputs.storing);
 }
+
+TEST_CASE("A quiet sensor with an estimate: a plain thermostat on the estimate instead of limp mode") {
+    // 19 °C from 07:00; the last reading (18.0) is 65 min old.
+    auto in = input(at(12, 5), 18.0);
+    in.measuredAt = at(11);
+    in.estimate = 17.6;
+    auto d = decide(in);
+    CHECK(d.on);
+    CHECK(d.reason == Reason::EstimateHeating);
+    CHECK(d.inputs.estimate == 17.6);
+    CHECK_THAT(d.detail, ContainsSubstring("No reading for 65 min"));
+    CHECK_THAT(d.detail, ContainsSubstring("estimated 17.6"));
+
+    // Heating: on until the estimate reaches the target (not target + hysteresis: it is a guess).
+    in.currentlyOn = true;
+    in.estimate = 18.9;
+    CHECK(decide(in).reason == Reason::EstimateHeating);
+    in.estimate = 19.0;
+    d = decide(in);
+    CHECK_FALSE(d.on);
+    CHECK(d.reason == Reason::EstimateOff);
+
+    // Off and within the band: stays off.
+    in.currentlyOn = false;
+    in.estimate = 18.8;
+    CHECK_FALSE(decide(in).on);
+
+    // No price games on a guess: below target in the peak still heats, at target in the cheapest hours does not.
+    auto peak = input(at(18, 5), 18.0);
+    peak.measuredAt = at(17);
+    peak.estimate = 18.0;
+    CHECK(decide(peak).reason == Reason::EstimateHeating);
+
+    // A fresh reading wins: the estimate is ignored.
+    auto fresh = input(at(12, 5), 19.5);
+    fresh.estimate = 15.0;
+    CHECK(decide(fresh).reason != Reason::EstimateHeating);
+
+    // An "off" period stays off.
+    auto night = input(at(23, 30), 16.5);
+    auto room = bedroom();
+    room.program = {{7 * 60, ProgramMode::Heat, 19.0}, {23 * 60, ProgramMode::Off, 0.0}};
+    night.measuredAt = at(22, 30);
+    night.estimate = 15.0;
+    CHECK_FALSE(decide(night, room).on);
+}
+
+TEST_CASE("Learned overshoot: heating stops that much earlier, but the band never closes") {
+    // 19 °C from 07:00 (hysteresis 0.3): normally on until 19.3.
+    auto in = input(at(12, 5), 19.1, true);
+    CHECK(decide(in).on);
+    in.overshoot = 0.3;  // the room rises 0.3° after switching off
+    auto d = decide(in);
+    CHECK_FALSE(d.on);  // stops at 19.0 instead of 19.3
+    CHECK(d.reason == Reason::TargetReached);
+    CHECK_THAT(d.detail, ContainsSubstring("0.3° early for the after-heat"));
+    CHECK(d.inputs.overshoot == 0.3);
+
+    // Starting is unchanged: off at 18.8, on at 18.7.
+    in.currentlyOn = false;
+    in.temperature = 18.8;
+    CHECK_FALSE(decide(in).on);
+    in.temperature = 18.7;
+    CHECK(decide(in).on);
+
+    // A huge overshoot: still heats up to 0.1° above where it starts (18.7 -> 18.8).
+    in.overshoot = 1.5;
+    in.currentlyOn = true;
+    in.temperature = 18.75;
+    CHECK(decide(in).on);
+    in.temperature = 18.8;
+    CHECK_FALSE(decide(in).on);
+
+    // Keep-above periods too.
+    auto room = bedroom();
+    room.program = {{7 * 60, ProgramMode::Keep, 19.0}};
+    auto keep = input(at(12, 5), 19.05, true);
+    CHECK(decide(keep, room).on);
+    keep.overshoot = 0.3;
+    CHECK_FALSE(decide(keep, room).on);
+}

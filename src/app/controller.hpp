@@ -41,6 +41,7 @@ struct RoomResult {
     std::vector<BookingPlan> bookings;
     std::optional<ThermalModel> thermal;  // when learned well enough to use
     std::optional<ThermalModel> recentThermal, earlierThermal;  // last 7 days / the 4 weeks before
+    std::optional<double> overshoot;  // learned rise after switching off (heating stops that much early)
     Decision decision;
     std::vector<PlanSegment> plan;  // next 24 h
     bool changed = false;
@@ -138,6 +139,7 @@ private:
     std::vector<ThermostatConfig> thermostats_;
     ThermalModel thermalModel(const RoomConfig& room, Instant now);  // learned, refreshed hourly
     ThermalModel fitBetween(const RoomConfig& room, Instant from, Instant to);
+    std::optional<double> learnedOvershoot(const RoomConfig& room, Instant now);  // refreshed hourly
     // The last 7 days and the 4 weeks before them, fitted once a day: has the room started losing
     // heat faster (a window on the latch, a vent, wet insulation)?
     std::map<std::string, std::tuple<Instant, ThermalModel, ThermalModel>> trend_;
@@ -151,6 +153,7 @@ private:
     OpenWindowConfig openWindow_;
     std::map<std::string, OpenWindowDetector> windows_;  // room id -> detector
     std::map<std::string, std::pair<Instant, ThermalModel>> thermal_;
+    std::map<std::string, std::pair<Instant, std::optional<double>>> overshoot_;
     // Empty when the plug may be switched live; otherwise why not.
     std::string failsafeProblem(Plug& plug, Instant now);
     void armOffline(const OfflinePeriod& period, Instant now, std::optional<AwayMode> away);

@@ -349,6 +349,7 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
         }
         room["bookings"] = booked;
         if (r.thermal) room["thermal"] = {{"gain", r.thermal->gain}, {"loss", r.thermal->loss}};
+        if (r.overshoot) room["overshoot"] = *r.overshoot;
         if (const auto it = insulation.find(r.room->id); it != insulation.end()) {
             room["heatLoss"] = {{"wattsPerK", it->second.wattsPerK}, {"monthKWh", it->second.month.kWh}, {"monthCost", it->second.month.cost}};
             if (it->second.perM2) room["heatLoss"]["perM2"] = *it->second.perM2;
@@ -451,6 +452,8 @@ std::string shortReason(hb::Reason r) {
         case Reason::KeepAbove: return "heating to stay above the floor";
         case Reason::KeepSatisfied: return "off, above the floor";
         case Reason::StaleDataLimp: return "no temperature yet (limp mode)";
+        case Reason::EstimateHeating: return "heating on an estimate (sensor quiet)";
+        case Reason::EstimateOff: return "off on an estimate (sensor quiet)";
         case Reason::ManualOn: return "on (manual)";
         case Reason::ManualOff: return "off (manual)";
         case Reason::AboveMax: return "off, above maximum";

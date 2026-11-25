@@ -128,6 +128,20 @@ void sendError(httplib::Response& res, int status, const std::string& message) {
 
 long long epoch(Instant t) { return t.time_since_epoch().count(); }
 
+// The end of a history window: now, or ?to=<epoch seconds> for an earlier one (never later than now).
+// A window in the past gets no prices beyond its end (the live one shows the coming ones too).
+struct Window {
+    Instant from, to, pricesTo;
+};
+Window historyWindow(const httplib::Request& req, int hoursBack) {
+    const Instant now = floor<seconds>(system_clock::now()) + seconds{1};
+    Instant to = now;
+    if (req.has_param("to")) {
+        if (const long long t = std::atoll(req.get_param_value("to").c_str()); t > 0) to = std::min(now, Instant{seconds{t}});
+    }
+    return {to - hours{hoursBack}, to, to < now - minutes{5} ? to : to + hours{36}};
+}
+
 json readConfigFile(const fs::path& file) {
     std::ifstream in(file);
     if (!in) throw std::runtime_error("cannot read " + file.string());
@@ -196,8 +210,7 @@ void WebServer::routes() {
 
         // One SQLite connection per request: connections are not shared across threads.
         History history(ctx_.dataDir / "history.db");
-        const Instant to = floor<seconds>(system_clock::now()) + seconds{1};
-        const Instant from = to - hours{hoursBack};
+        const auto [from, to, pricesTo] = historyWindow(req, hoursBack);
 
         json temps = json::array();
         json co2 = json::array();
@@ -221,7 +234,7 @@ void WebServer::routes() {
             }
         }
         json prices = json::array();
-        for (const auto& p : history.prices(from, to + hours{36})) prices.push_back({epoch(p.slot), p.total});
+        for (const auto& p : history.prices(from, pricesTo)) prices.push_back({epoch(p.slot), p.total});
 
         sendJson(res, json{{"room",
                             {{"id", room->id},
@@ -246,8 +259,7 @@ void WebServer::routes() {
         int hoursBack = 24;
         if (req.has_param("hours")) hoursBack = std::clamp(std::atoi(req.get_param_value("hours").c_str()), 1, 24 * 14);
         History history(ctx_.dataDir / "history.db");
-        const Instant to = floor<seconds>(system_clock::now()) + seconds{1};
-        const Instant from = to - hours{hoursBack};
+        const auto [from, to, pricesTo] = historyWindow(req, hoursBack);
         json temps = json::array();
         json humidity = json::array();
         json co2 = json::array();
@@ -257,7 +269,7 @@ void WebServer::routes() {
             if (t.co2) co2.push_back({epoch(t.at), *t.co2});
         }
         json prices = json::array();
-        for (const auto& p : history.prices(from, to + hours{36})) prices.push_back({epoch(p.slot), p.total});
+        for (const auto& p : history.prices(from, pricesTo)) prices.push_back({epoch(p.slot), p.total});
         sendJson(res, json{{"key", key}, {"from", epoch(from)}, {"to", epoch(to)}, {"temperatures", temps},
                            {"humidity", humidity}, {"co2", co2}, {"prices", prices},
                            {"wifi", wifiLane(history, readConfigFile(ctx_.configFile), from, to)}});

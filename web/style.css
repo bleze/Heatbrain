@@ -468,6 +468,11 @@ input[type="number"] { width: 90px; }
 input[type="time"] { width: 110px; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 .range { display: flex; gap: 4px; }
+/* The room chart's time navigation: ‹ range › and, looking back, which days and a way back to now. */
+.time-nav { display: flex; align-items: center; gap: 6px; }
+.time-nav .step { font-size: 18px; line-height: 1; padding-inline: 10px; }
+.time-nav .step:disabled { opacity: 0.35; cursor: default; }
+.time-when { flex-basis: 100%; display: flex; justify-content: flex-end; align-items: center; gap: 10px; color: var(--accent); font-weight: 600; }
 .range button.active { border-color: var(--accent); color: var(--accent); font-weight: 600; background: var(--accent-soft); }
 
 /* Settings */

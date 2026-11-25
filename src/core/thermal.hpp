@@ -42,6 +42,12 @@ struct WarmupEstimate {
     bool reachable = true;  // false: the model says the target is (almost) out of reach; capped
 };
 
+// The room's temperature at `now`, estimated from its last reading `last` at `lastAt`: heating at full
+// power during `heating` (spans [from, to)), and cooling towards `outdoor` all the time, minute by
+// minute with the model's rates. For a sensor that went quiet for a while.
+double estimateTemperature(const ThermalModel& m, double last, Instant lastAt, Instant now,
+                           const std::vector<std::pair<Instant, Instant>>& heating, double outdoor);
+
 // How long heating at full power takes from `from` to `target` °C with `outdoor` outside,
 // with a margin (x1.25 + 30 min), capped at 48 h.
 WarmupEstimate estimateWarmup(const ThermalModel& m, double from, double target, double outdoor);

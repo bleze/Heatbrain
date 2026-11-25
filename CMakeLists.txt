@@ -70,6 +70,7 @@ add_library(heatbrain_core STATIC
   src/core/base64.cpp
   src/core/offline.cpp
   src/core/thermal.cpp
+  src/core/overshoot.cpp
   src/core/window.cpp
   src/core/forecast.cpp
   src/core/battery.cpp
@@ -151,6 +152,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_shelly.cpp
     tests/test_planner.cpp
     tests/test_thermal.cpp
+    tests/test_overshoot.cpp
     tests/test_window.cpp
     tests/test_forecast.cpp
     tests/test_power_mix.cpp

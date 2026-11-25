@@ -11,6 +11,7 @@
 #include <format>
 
 #include "core/log.hpp"
+#include "core/overshoot.hpp"
 #include "core/version.hpp"
 #include "sensors/netatmo.hpp"
 
@@ -24,6 +25,8 @@ namespace {
 constexpr auto kFailsafeRecheck = hours{1};
 // A room's new sensor: hours not learned from while it settles where it now is.
 constexpr auto kNewSensorSettle = hours{3};
+// A quiet sensor: its last reading is extrapolated with the learned rates for this long, then limp mode.
+constexpr auto kEstimateFor = hours{3};
 constexpr auto kHistoryRetention = days{3 * 366};  // ~100 MB a year with four rooms: years fit easily
 constexpr int kTomorrowPricesExpectedHour = 15;  // published ~13:00; alert if still missing at 15
 
@@ -93,6 +96,8 @@ json toJson(const DecisionInputs& in) {
     if (in.ceiling) j["ceiling"] = *in.ceiling;
     if (in.warmupTo) j["warmupTo"] = *in.warmupTo;
     if (in.coastAbove) j["coastAbove"] = *in.coastAbove;
+    if (in.estimate) j["estimate"] = *in.estimate;
+    if (in.overshoot) j["overshoot"] = *in.overshoot;
     return j;
 }
 
@@ -474,7 +479,30 @@ TickResult Controller::tick(Instant now, bool apply) {
             const ThermalModel m = thermalModel(room, now);
             if (m.usable()) in.thermal = m;
             if (m.coolingStretches >= 3 && m.loss > 0) in.coolingRate = m.loss;  // as the plan's expected coast
+            // The sensor is quiet (the reading is older than trusted, but recent): estimate the temperature
+            // from the last reading - cooling towards outdoors, warming while heatbrain heated since -
+            // rather than fall back to limp mode at once. Needs the learned rates and an outdoor temperature.
+            const auto age = in.measuredAt ? now - *in.measuredAt : seconds{0};
+            std::optional<double> outside = outdoor;
+            if (!outside && forecast) outside = forecast->at(now);
+            if (in.thermal && in.temperature && in.measuredAt && age > room.strategy.staleAfter && age <= kEstimateFor &&
+                outside && history_) {
+                try {
+                    std::vector<std::pair<Instant, Instant>> heating;
+                    const auto ds = history_->decisions(room.id, *in.measuredAt - hours{1}, now, false);
+                    for (std::size_t i = 0; i < ds.size(); ++i) {
+                        const Instant end = i + 1 < ds.size() ? ds[i + 1].at : now;
+                        if (ds[i].on && end > *in.measuredAt) heating.emplace_back(std::max(ds[i].at, *in.measuredAt), end);
+                    }
+                    in.estimate = estimateTemperature(*in.thermal, *in.temperature, *in.measuredAt, now, heating, *outside);
+                } catch (const std::exception& e) {
+                    log::warn("{}: no estimate for the quiet sensor ({})", room.id, e.what());
+                }
+            }
         }
+        // How far the room keeps warming after the heat goes off: heating stops that much earlier.
+        // Not for a thermostat (it regulates itself) or a price-only room (no temperature).
+        if (!room.priceOnly && room.thermostat.empty()) in.overshoot = learnedOvershoot(room, now);
         // Bookings: warm up as long as the room needs - learned from its history, from the current
         // and the outdoor temperature - or the room's warm-up setting until that is known.
         std::vector<BookingPlan> bookingPlans;
@@ -516,6 +544,7 @@ TickResult Controller::tick(Instant now, bool apply) {
         rr.room = &room;
         rr.bookings = std::move(bookingPlans);
         rr.thermal = learned;
+        rr.overshoot = in.overshoot;
         if (!room.priceOnly) {
             auto& t = trend_[room.id];
             if (std::get<0>(t) == Instant{} || now - std::get<0>(t) >= hours{24}) {
@@ -559,6 +588,11 @@ TickResult Controller::tick(Instant now, bool apply) {
         if (rr.decision.reason == Reason::StaleDataLimp) {
             add(result, "room:" + room.id + ":limp", Severity::Warning,
                 std::format("Room '{}' is in limp mode: {}", room.name, rr.decision.detail), minutes{15});
+        }
+        if (rr.decision.reason == Reason::EstimateHeating || rr.decision.reason == Reason::EstimateOff) {
+            add(result, "room:" + room.id + ":estimate", Severity::Warning,
+                std::format("Room '{}': its sensor is quiet, heating on an estimate. {}", room.name, rr.decision.detail),
+                minutes{30});
         }
         if (rr.decision.on && rr.decision.inputs.temperature && *rr.decision.inputs.temperature < room.minTemp) {
             add(result, "room:" + room.id + ":not-warming", Severity::Warning,
@@ -640,6 +674,38 @@ ThermalModel Controller::thermalModel(const RoomConfig& room, Instant now) {
     return m;
 }
 
+std::optional<double> Controller::learnedOvershoot(const RoomConfig& room, Instant now) {
+    if (auto it = overshoot_.find(room.id); it != overshoot_.end() && now - it->second.first < hours{1}) {
+        return it->second.second;
+    }
+    std::optional<double> out;
+    if (history_) {
+        try {
+            // The last two weeks with the room's current sensor: the switches heatbrain made on a real
+            // temperature, and the readings around them.
+            std::vector<HeatSwitch> switches;
+            for (const auto& d : history_->decisions(room.id, now - days{14}, now, true)) {
+                if (d.inputs.is_object() && d.inputs.contains("sensor") && d.inputs["sensor"] != room.sensor) {
+                    switches.clear();  // another sensor: what it saw says nothing about this one
+                    continue;
+                }
+                const bool usable = d.reason != "STALE_DATA_LIMP" && d.reason != "ESTIMATE_HEATING" && d.reason != "ESTIMATE_OFF" &&
+                                    d.reason != "OFFLINE_SCHEDULE" && d.reason != "WINDOW_OPEN" && d.reason != "MANUAL_ON" &&
+                                    d.reason != "MANUAL_OFF";
+                switches.push_back({d.at, d.on, usable});
+            }
+            std::vector<std::pair<Instant, double>> temps;
+            for (const auto& t : history_->temperatures(room.id, now - days{14}, now)) temps.emplace_back(t.at, t.temperature);
+            std::sort(temps.begin(), temps.end());
+            out = learnOvershoot(switches, temps);
+        } catch (const std::exception& e) {
+            log::warn("{}: learning the overshoot failed: {}", room.id, e.what());
+        }
+    }
+    overshoot_[room.id] = {now, out};
+    return out;
+}
+
 ThermalModel Controller::fitBetween(const RoomConfig& room, Instant from, Instant to) {
     ThermalModel m;
     if (history_) {
@@ -661,8 +727,8 @@ ThermalModel Controller::fitBetween(const RoomConfig& room, Instant from, Instan
                 if (settle && d.at < *settle) continue;
                 // Only real states: not limp mode or night schedules (the plug did its own thing).
                 // An open window is not how the room normally cools.
-                if (d.reason == "STALE_DATA_LIMP" || d.reason == "OFFLINE_SCHEDULE" || d.reason == "WINDOW_OPEN" ||
-                    !d.inputs.is_object()) {
+                if (d.reason == "STALE_DATA_LIMP" || d.reason == "ESTIMATE_HEATING" || d.reason == "ESTIMATE_OFF" ||
+                    d.reason == "OFFLINE_SCHEDULE" || d.reason == "WINDOW_OPEN" || !d.inputs.is_object()) {
                     continue;
                 }
                 if (!d.inputs.contains("temperature") || d.inputs.value("temperatureAgeMinutes", 99) > 30) continue;
@@ -734,8 +800,8 @@ OfflineDuty Controller::learnedDuty(const std::string& roomId, Instant now) cons
     try {
         for (const auto& d : history_->decisions(roomId, now - days{7}, now, false)) {
             // Only decisions made on a real temperature by the thermostat logic.
-            if (d.reason == "STALE_DATA_LIMP" || d.reason == "MANUAL_ON" || d.reason == "MANUAL_OFF" ||
-                d.reason == "OFFLINE_SCHEDULE" || d.reason == "ABOVE_MAX") {
+            if (d.reason == "STALE_DATA_LIMP" || d.reason == "ESTIMATE_HEATING" || d.reason == "ESTIMATE_OFF" ||
+                d.reason == "MANUAL_ON" || d.reason == "MANUAL_OFF" || d.reason == "OFFLINE_SCHEDULE" || d.reason == "ABOVE_MAX") {
                 continue;
             }
             // Warming up: full heat by design, not the room's usual share.

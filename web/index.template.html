@@ -109,11 +109,19 @@
       <div class="card-head">
         <h2><span class="badge badge-violet"><svg class="icon"><use href="#i-thermo"/></svg></span><span id="detail-title"></span>
           <span class="heatloss-note" id="detail-heatloss"></span></h2>
-        <div class="range" role="group" aria-label="Time range" id="detail-range">
-          <button data-hours="24" class="active">24 h</button>
-          <button data-hours="48">2 days</button>
-          <button data-hours="72">3 days</button>
-          <button data-hours="168">7 days</button>
+        <div class="time-nav">
+          <button type="button" class="step" id="detail-back" title="Earlier (←)" aria-label="Earlier">‹</button>
+          <div class="range" role="group" aria-label="Time range" id="detail-range">
+            <button data-hours="24" class="active">24 h</button>
+            <button data-hours="48">2 days</button>
+            <button data-hours="72">3 days</button>
+            <button data-hours="168">7 days</button>
+          </div>
+          <button type="button" class="step" id="detail-forward" title="Later (→)" aria-label="Later" disabled>›</button>
+        </div>
+        <div class="time-when" id="detail-when" hidden>
+          <span id="detail-when-text"></span>
+          <button type="button" id="detail-now">Now</button>
         </div>
       </div>
       <div class="legend" id="legend"></div>

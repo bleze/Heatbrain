@@ -93,3 +93,21 @@ TEST_CASE("Thermal model: a room that warms without heating (sun, PCs, people) d
     CHECK(after.coolingStretches == before.coolingStretches);
     CHECK(after.loss == Approx(before.loss));
 }
+
+TEST_CASE("A quiet sensor: the temperature is estimated from the last reading, the heating since and the rates") {
+    ThermalModel m;
+    m.loss = 0.1;  // per hour
+    m.gain = 1.0;  // °C per hour at full heat
+    const Instant t0 = sys_days{2026y / 11 / 25} + hours{8};
+    // Not heated for an hour: Newton's cooling towards 0 °C, 20 * e^-0.1.
+    CHECK(estimateTemperature(m, 20, t0, t0 + hours{1}, {}, 0) == Approx(20 * std::exp(-0.1)).margin(0.02));
+    // Heated the whole hour: towards gain/loss = 10 °C above outdoors, 10 + 10 * e^-0.1.
+    CHECK(estimateTemperature(m, 20, t0, t0 + hours{1}, {{t0 - minutes{30}, t0 + hours{2}}}, 0) ==
+          Approx(10 + 10 * std::exp(-0.1)).margin(0.02));
+    // Heated for the last half hour only: in between.
+    const double half = estimateTemperature(m, 20, t0, t0 + hours{1}, {{t0 + minutes{30}, t0 + hours{1}}}, 0);
+    CHECK(half > 18.2);
+    CHECK(half < 19.0);
+    // No time passed: the reading itself.
+    CHECK(estimateTemperature(m, 17.7, t0, t0, {}, 3) == 17.7);
+}

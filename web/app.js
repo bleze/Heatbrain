@@ -14,6 +14,8 @@ const REASONS = {
   BELOW_MIN: ["Below minimum", "safety"],
   FROST_PROTECTION: ["Frost protection", "safety"],
   STALE_DATA_LIMP: ["No temperature: limp mode", "safety"],
+  ESTIMATE_HEATING: ["Sensor quiet: heating on an estimate", "comfort"],
+  ESTIMATE_OFF: ["Sensor quiet: estimate at target", null],
   MANUAL_ON: ["Manual on", "safety"],
   NO_PRICES_FALLBACK: ["No prices: fallback", "safety"],
   PEAK_AVOID: ["Avoiding peak price", null],
@@ -44,7 +46,9 @@ const catColor = (cat) => `var(--cat-${cat})`;
 // ---------------------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------------------
-const state = { status: null, selected: null, hours: 24, history: null, tz: "Europe/Copenhagen" };
+// end: null for the live chart (up to now, with the plan ahead), else the end of an earlier window
+// (a local midnight, see the arrows by the range buttons).
+const state = { status: null, selected: null, hours: 24, end: null, history: null, tz: "Europe/Copenhagen" };
 const $ = (id) => document.getElementById(id);
 
 async function api(path, opts) {
@@ -66,6 +70,18 @@ const hm = (ts) => fmt({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
 const dayHm = (ts) => fmt({ weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts * 1000);
 const dayShort = (ts) => fmt({ weekday: "short", day: "numeric" }).format(ts * 1000);
 const localHour = (ts) => Number(fmt({ hour: "2-digit", hourCycle: "h23" }).format(ts * 1000));
+// The local midnight that starts ts's day.
+function localMidnight(ts) {
+  const parts = (t) => Object.fromEntries(fmt({ hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+    .formatToParts(t * 1000).map((x) => [x.type, Number(x.value)]));
+  const p = parts(ts);
+  const m = ts - (p.hour * 3600 + p.minute * 60 + p.second);
+  // On a DST day the clock jumped an hour since midnight: one hour off, either way.
+  const h = parts(m).hour;
+  return h === 23 ? m + 3600 : h === 1 ? m - 3600 : m;
+}
+// The midnight nearest to ts (a day's step in seconds lands an hour off across a DST change).
+const snapMidnight = (ts) => localMidnight(ts + 12 * 3600);
 const temp = (v) => (v == null ? "–" : `${v.toFixed(1)}°`);
 const price = (v) => (v == null ? "–" : v.toFixed(2));
 
@@ -889,16 +905,19 @@ async function selectRoom(id, scroll = true) {
 
 async function loadHistory() {
   if (!state.selected) return;
+  // An earlier window: from midnight to midnight, also across a DST change (a 23 or 25 hour day).
+  const hours = state.end == null ? state.hours : Math.round((state.end - snapMidnight(state.end - state.hours * 3600)) / 3600);
+  const win = `hours=${hours}${state.end == null ? "" : `&to=${state.end}`}`;
   $("room-chart").classList.add("loading"); // refetch keeps the frame
   try {
     if (state.selected === "__outdoor") {
       const o = state.status?.outdoor;
       if (!o) return;
-      const sh = await api(`/api/sensor-history?key=${encodeURIComponent(o.key)}&hours=${state.hours}`);
+      const sh = await api(`/api/sensor-history?key=${encodeURIComponent(o.key)}&${win}`);
       state.history = { room: { id: "__outdoor", name: `Outside · ${o.name}`, sensorOnly: true, priceOnly: false, minTemp: 0, maxTemp: 0 },
                         from: sh.from, to: sh.to, temperatures: sh.temperatures, decisions: [], events: [], prices: sh.prices, wifi: sh.wifi };
     } else {
-      state.history = await api(`/api/rooms/${encodeURIComponent(state.selected)}/history?hours=${state.hours}`);
+      state.history = await api(`/api/rooms/${encodeURIComponent(state.selected)}/history?${win}`);
     }
     if (!state.mixAt || Date.now() - state.mixAt > 5 * 60_000) {
       try { state.mix = await api("/api/power-mix"); state.mixAt = Date.now(); } catch { /* optional */ }
@@ -1121,7 +1140,9 @@ function renderDetail() {
   // chart looks back - the room chart is also where the coming prices are shown.
   const t0 = h.from;
   const lastPrice = h.prices.length ? h.prices[h.prices.length - 1][0] + 900 : h.to;
-  const t1 = Math.max(h.to, Math.min(h.to + (h.to - h.from), lastPrice));
+  // An earlier window (the arrows): just that window - no plan, bookings or prices ahead.
+  const live = state.end == null;
+  const t1 = live ? Math.max(h.to, Math.min(h.to + (h.to - h.from), lastPrice)) : h.to;
   // A thermostat's built-in sensor reads low after a Wi-Fi-off night and catches up within ~15 min:
   // those readings are left out, so the dotted estimate across the night ends at a settled reading.
   const isThermostatRoom = (state.status?.rooms?.find((r) => r.id === room.id)?.plugs || []).some((p) => p.thermostat);
@@ -1132,7 +1153,7 @@ function renderDetail() {
   const targets = decisions.map((d) => [d[0], d[3], !!d[4], !!d[5]]);
   // Ahead of now the target comes from the room's plan, so the line doesn't seem to stop at the last
   // decision (an off period has no target: a gap, then the line where heating resumes).
-  const roomPlan = state.status?.rooms?.find((r) => r.id === room.id)?.plan || [];
+  const roomPlan = live ? state.status?.rooms?.find((r) => r.id === room.id)?.plan || [] : [];
   const lastDecision = decisions.length ? decisions[decisions.length - 1][0] : h.to;
   const step = Math.min(900, tick);  // within stepPath's gap limit, so the steps join up
   for (const seg of roomPlan) {
@@ -1156,7 +1177,7 @@ function renderDetail() {
   const segs = heatingSegments(decisions, tick, h.to);
   const wifi = h.wifi && (h.wifi.seen.length || h.wifi.planned.length) ? h.wifi : null;
   // Bookings still known to the server (coming or under way), for the band and the tooltip.
-  const bookings = (state.status?.rooms?.find((r) => r.id === room.id)?.bookings || []).filter((b) => b.until > t0 && b.warmupFrom < t1);
+  const bookings = (live ? state.status?.rooms?.find((r) => r.id === room.id)?.bookings || [] : []).filter((b) => b.until > t0 && b.warmupFrom < t1);
   renderLegend(room, segs, wifi, targets.some((p) => p[3] && p[1] != null), coast.length > 0, hasFloor);
 
   const W = host.clientWidth, m = { l: 40, r: 8 };
@@ -1296,7 +1317,7 @@ function renderDetail() {
   }
 
   // Planned heating ahead (lighter): what the planner intends for the coming hours.
-  const plan = (state.status?.rooms || []).find((x) => x.id === room.id)?.plan || [];
+  const plan = live ? (state.status?.rooms || []).find((x) => x.id === room.id)?.plan || [] : [];
   for (const s of plan) {
     const cat = { heat: "comfort", keep: "comfort", booked: "comfort", away: "safety", preheat: "price", boost: "price", night: "price" }[s.kind];
     if (!cat) continue;  // off / coast: nothing planned
@@ -1466,13 +1487,47 @@ function retrySoon() {
   retryTimer = setTimeout(() => { retryTimer = null; refreshStatus(); }, 5000);
 }
 
-// The room chart's own range buttons only (cost and usage have theirs).
+// The room chart's own range buttons only (cost and usage have theirs). A new range keeps the
+// window's end, so an earlier day can be seen as 24 h or as the week up to it.
 document.querySelectorAll("#detail-range button").forEach((b) =>
   b.addEventListener("click", () => {
     document.querySelectorAll("#detail-range button").forEach((x) => x.classList.toggle("active", x === b));
     state.hours = Number(b.dataset.hours);
+    renderWhen();
     loadHistory();
   }));
+
+// Back and forward in time: whole days. From now, back is yesterday (or the days up to last midnight);
+// then each step is the chosen range. Forward past today is the live chart again.
+function stepTime(dir) {
+  const now = Date.now() / 1000;
+  const span = state.hours * 3600;
+  if (dir < 0) state.end = state.end == null ? localMidnight(now) : snapMidnight(state.end - span);
+  else if (state.end != null) state.end = snapMidnight(state.end + span) > now ? null : snapMidnight(state.end + span);
+  renderWhen();
+  loadHistory();
+}
+// "Yesterday · Tue 25 Nov", "Mon 24 Nov", or "Wed 19 Nov – Tue 25 Nov" for longer ranges; hidden when live.
+function renderWhen() {
+  const live = state.end == null;
+  $("detail-when").hidden = live;
+  $("detail-forward").disabled = live;
+  if (live) return;
+  const day = (t) => fmt({ weekday: "short", day: "numeric", month: "short" }).format(t * 1000);
+  const from = snapMidnight(state.end - state.hours * 3600);
+  const yesterday = state.hours === 24 && from === snapMidnight(localMidnight(Date.now() / 1000) - 86400);
+  $("detail-when-text").textContent = state.hours === 24 ? `${yesterday ? "Yesterday · " : ""}${day(from)}` : `${day(from)} – ${day(state.end - 1)}`;
+}
+$("detail-back").addEventListener("click", () => stepTime(-1));
+$("detail-forward").addEventListener("click", () => stepTime(1));
+$("detail-now").addEventListener("click", () => { state.end = null; renderWhen(); loadHistory(); });
+// The arrow keys too, on the dashboard, when not typing.
+document.addEventListener("keydown", (e) => {
+  if ($("view-dashboard").hidden || !state.selected || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") { e.preventDefault(); stepTime(-1); }
+  else if (e.key === "ArrowRight" && state.end != null) { e.preventDefault(); stepTime(1); }
+});
 
 let resizeTimer;
 window.addEventListener("resize", () => {

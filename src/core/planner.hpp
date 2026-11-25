@@ -17,6 +17,8 @@ namespace hb {
 enum class Reason {
     AboveMax,               // at or above the room's hard maximum
     StaleDataLimp,          // temperature unknown/old: bounded duty cycle
+    EstimateHeating,        // no fresh reading, but an estimate from the last one: below target, heating
+    EstimateOff,            // no fresh reading, but an estimate from the last one: at target, off
     ManualOn,
     ManualOff,
     FrostProtection,        // manual OFF overridden: below frost temperature
@@ -147,6 +149,11 @@ struct PlannerInput {
     // sizes the heat stored for an off period with a floor, as the plan's expected coast does.
     std::optional<double> coolingRate;
     std::shared_ptr<const OutdoorForecast> forecast;  // outdoor temperature ahead, if known
+    // The temperature now, estimated from the last reading (not fresh, but recent) with the learned
+    // rates and what heatbrain did since: used instead of limp mode while the sensor is quiet.
+    std::optional<double> estimate;
+    // How far this room keeps warming after the heat goes off (learned): heating stops that much earlier.
+    std::optional<double> overshoot;
 };
 
 // Everything a decision was based on, for the decision log.
@@ -167,6 +174,8 @@ struct DecisionInputs {
     std::optional<double> warmupTo;  // warming up: the target of the period ahead (`target` is the curve)
     std::optional<double> coastAbove;  // an off period with a floor (or storing heat for one: then `warmupTo` is the level)
     bool storing = false;  // the warm-up is heat stored for an off period, not a warmer period
+    std::optional<double> estimate;  // no fresh reading: the temperature estimated from the last one
+    std::optional<double> overshoot;  // learned rise after switching off: heating stops that much early
 };
 
 struct Decision {

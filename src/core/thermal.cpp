@@ -85,6 +85,16 @@ ThermalModel fitThermalModel(const std::vector<ThermalSample>& all) {
     return m;
 }
 
+double estimateTemperature(const ThermalModel& m, double last, Instant lastAt, Instant now,
+                           const std::vector<std::pair<Instant, Instant>>& heating, double outdoor) {
+    double t = last;
+    for (Instant at = lastAt; at < now; at += std::chrono::minutes{1}) {
+        const bool on = std::any_of(heating.begin(), heating.end(), [&](const auto& s) { return at >= s.first && at < s.second; });
+        t += ((on ? m.gain : 0.0) - m.loss * (t - outdoor)) / 60.0;
+    }
+    return t;
+}
+
 WarmupEstimate estimateWarmup(const ThermalModel& m, double from, double target, double outdoor) {
     if (from >= target) return {minutes{0}, true};
     double hoursNeeded;
