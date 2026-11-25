@@ -491,6 +491,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 
 /* A dropdown that can show icons (a native <select> cannot): the room's sensor */
 .picker { position: relative; width: 300px; max-width: 100%; }
+[data-room] .picker { width: 293px; }  /* a room's dropdowns end where Never above and the switch points do */
 .picker-btn {
   width: 100%; height: var(--control-h); box-sizing: border-box; display: flex; align-items: center; gap: 7px;
   padding: 0 32px 0 8px; text-align: left; font: inherit; font-weight: 400; color: var(--ink);
@@ -568,7 +569,7 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 /* Delete icons sit at the right edge, in line with the card-level ones */
 .sched-row > .row-delete { margin-left: auto; }
 /* The program's mode: wide enough for "Off, stay above" next to the chevron, the same on every row. */
-.sched-row select { width: 172px; }
+.sched-row select { width: 175px; }  /* with the 110 px time: ends where Never above does */
 .timeline { display: flex; height: 26px; border-radius: 8px; overflow: hidden; margin-top: 10px; border: 1px solid var(--border); }
 .timeline div { display: grid; place-items: center; font-size: 11px; font-weight: 600; color: #fff; min-width: 0; overflow: hidden; white-space: nowrap; padding: 0 2px; }
 .timeline .tl-off { background: repeating-linear-gradient(135deg, var(--surface-2) 0 6px, var(--grid) 6px 12px); color: var(--ink-2) !important; }
