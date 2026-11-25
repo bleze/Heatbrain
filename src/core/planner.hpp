@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "core/price.hpp"
+#include "core/duty.hpp"
 #include "core/forecast.hpp"
 #include "core/room.hpp"
 #include "core/thermal.hpp"
@@ -154,6 +155,8 @@ struct PlannerInput {
     std::optional<double> estimate;
     // How far this room keeps warming after the heat goes off (learned): heating stops that much earlier.
     std::optional<double> overshoot;
+    // How much this room usually heats per period (learned): limp mode's share when nothing is known.
+    std::optional<OfflineDuty> duty;
 };
 
 // Everything a decision was based on, for the decision log.

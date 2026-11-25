@@ -857,3 +857,41 @@ TEST_CASE("Learned overshoot: heating stops that much earlier, but the band neve
     keep.overshoot = 0.3;
     CHECK_FALSE(decide(keep, room).on);
 }
+
+TEST_CASE("Limp mode heats what the room usually does in such a period, once that is learned") {
+    // 19 °C from 07:00; no temperature at all.
+    OfflineDuty duty;
+    duty.learned = true;
+    duty.heat = 0.5;
+    duty.byTarget[OfflineDuty::key(false, 19.0)] = 0.25;  // 15 min an hour at 19 °C
+    int onMinutes = 0;
+    for (int m = 0; m < 60; m += 5) {
+        auto in = input(at(12, m), std::nullopt);
+        in.duty = duty;
+        const auto d = decide(in);
+        CHECK(d.reason == Reason::StaleDataLimp);
+        if (d.on) onMinutes += 5;
+    }
+    CHECK(onMinutes == 15);
+
+    // Never more than 45 minutes an hour, however much the room usually heats.
+    duty.byTarget[OfflineDuty::key(false, 19.0)] = 0.95;
+    auto in = input(at(12, 50), std::nullopt);
+    in.duty = duty;
+    CHECK_FALSE(decide(in).on);
+    CHECK_THAT(decide(in).detail, ContainsSubstring("45 min ON / 15 min OFF"));
+
+    // Not learned: the configured cycle (10 on, 50 off).
+    duty.learned = false;
+    in.duty = duty;
+    CHECK_THAT(decide(in).detail, ContainsSubstring("10 min ON / 50 min OFF"));
+
+    // Set in the config: used as is.
+    auto room = bedroom();
+    room.strategy.limpOn = minutes{20};
+    room.strategy.limpOff = minutes{40};
+    room.strategy.limpConfigured = true;
+    duty.learned = true;
+    in.duty = duty;
+    CHECK_THAT(decide(in, room).detail, ContainsSubstring("20 min ON / 40 min OFF"));
+}

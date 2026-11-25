@@ -500,6 +500,12 @@ TickResult Controller::tick(Instant now, bool apply) {
                 }
             }
         }
+        // No usable temperature at all (no estimate either): limp mode heats as much as the room
+        // usually does in such a period, learned from the last week.
+        if (!room.priceOnly && !in.estimate &&
+            !(in.temperature && in.measuredAt && now - *in.measuredAt <= room.strategy.staleAfter)) {
+            if (const auto duty = learnedDuty(room.id, now); duty.learned) in.duty = duty;
+        }
         // How far the room keeps warming after the heat goes off: heating stops that much earlier.
         // Not for a thermostat (it regulates itself) or a price-only room (no temperature).
         if (!room.priceOnly && room.thermostat.empty()) in.overshoot = learnedOvershoot(room, now);
@@ -823,6 +829,7 @@ OfflineDuty Controller::learnedDuty(const std::string& roomId, Instant now) cons
     constexpr int kEnough = 36;  // 3 hours of 5-minute decisions
     if (total[0] >= kEnough) duty.heat = std::min(0.9, static_cast<double>(on[0]) / total[0]);
     if (total[1] >= kEnough) duty.keep = std::min(0.9, static_cast<double>(on[1]) / total[1]);
+    duty.learned = total[0] >= kEnough || total[1] >= kEnough;
     constexpr int kEnoughForTarget = 12;  // an hour of decisions with that target
     for (const auto& [k, c] : perTarget) {
         if (c.second >= kEnoughForTarget) duty.byTarget[k] = std::min(0.9, static_cast<double>(c.first) / c.second);

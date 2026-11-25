@@ -47,6 +47,7 @@ struct Strategy {
     std::chrono::minutes staleAfter{30};      // older temperature readings are not trusted
     std::chrono::minutes limpOn{10};          // duty cycle when the temperature is unknown
     std::chrono::minutes limpOff{50};
+    bool limpConfigured = false;  // set in the config: used as is (else what the room usually heats)
 };
 
 // Rooms without a temperature sensor: run the cheapest hours of each day.

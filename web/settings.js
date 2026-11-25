@@ -700,13 +700,10 @@
     const st = (room.strategy ||= {});
     const ag = el("div", { class: "form-grid" }, adv);
     field(ag, "Peak coasting", num(st, "peakAllowedDrop", { step: 0.1, placeholder: "1.0", unit: "−°C" }), { hint: "below target in expensive hours" });
-    field(ag, "Pre-heat", num(st, "preheatBoost", { step: 0.1, placeholder: "1.0", unit: "+°C" }), { hint: "above target before a peak" });
-    field(ag, "Peak look-ahead", num(st, "preheatMinutes", { step: 15, placeholder: "180", unit: "min" }), { hint: "how early to start pre-heating" });
+    // Worked out by heatbrain now (still read from the config file if set there): how much and how early
+    // to pre-heat (from the learned rates), when a reading is too old, and limp mode's share.
     field(ag, "Cheap boost", num(st, "cheapBoost", { step: 0.1, placeholder: "0.5", unit: "+°C" }), { hint: "extra in the cheapest hours" });
     field(ag, "Hysteresis", num(st, "hysteresis", { step: 0.1, placeholder: "0.3", unit: "±°C" }), { hint: "avoids rapid on/off" });
-    field(ag, "Stale after", num(st, "staleMinutes", { step: 5, placeholder: "30", unit: "min" }), { hint: "older readings are not trusted" });
-    field(ag, "Limp mode ON", num(st, "limpOnMinutes", { step: 5, min: 0, placeholder: "10", unit: "min" }), { hint: "when the temperature is unknown" });
-    field(ag, "Limp mode OFF", num(st, "limpOffMinutes", { step: 5, placeholder: "50", unit: "min" }), { hint: "then off for this long" });
   }
 
   // Cool -> warm ramp through nearby stops only (blending blue straight into amber passes
@@ -1295,11 +1292,25 @@
     const mh = sectionHead(mods, "Your sensors", "thermo", "violet");
     // One time range for all module charts, like the room chart's (remembered in this browser).
     if (!S.moduleDays) { try { S.moduleDays = Number(localStorage.getItem("hb.moduleDays")) || 30; } catch { S.moduleDays = 30; } }
-    const rg = el("div", { class: "range", role: "group", "aria-label": "Sensor chart range" }, mh);
+    // Back and forward in time like the room chart: whole days, the range keeps the window's end.
+    const nav = el("div", { class: "time-nav" }, mh);
+    if (S.moduleEnd != null) {
+      const when = el("span", { class: "time-when" }, nav);
+      el("span", {}, when, periodLabel(S.moduleEnd, S.moduleDays * 24));
+      el("button", { type: "button" }, when, "Now").addEventListener("click", () => { S.moduleEnd = null; render(); });
+    }
+    const back = el("button", { type: "button", class: "step", title: "Earlier", "aria-label": "Earlier" }, nav);
+    back.appendChild(icon("left"));
+    back.addEventListener("click", () => { S.moduleEnd = stepEnd(S.moduleEnd, S.moduleDays * 24, -1); render(); });
+    const rg = el("div", { class: "range", role: "group", "aria-label": "Sensor chart range" }, nav);
     for (const [d, label] of [[1, "24 h"], [2, "2 days"], [7, "7 days"], [30, "30 days"], [91, "3 months"], [365, "1 year"]]) {
       const b = el("button", { type: "button", class: S.moduleDays === d ? "active" : "" }, rg, label);
       b.addEventListener("click", () => { S.moduleDays = d; try { localStorage.setItem("hb.moduleDays", String(d)); } catch { /* private mode */ } render(); });
     }
+    const fwd = el("button", { type: "button", class: "step", title: "Later", "aria-label": "Later" }, nav);
+    fwd.appendChild(icon("right"));
+    fwd.disabled = S.moduleEnd == null;
+    fwd.addEventListener("click", () => { S.moduleEnd = stepEnd(S.moduleEnd, S.moduleDays * 24, 1); render(); });
     loadBatteries();
     // Indoor modules by name (Netatmo first, then the thermostats' own probes), the outdoor ones last.
     const rank = (s) => (s.kind === "outdoor" ? 2 : s.key.startsWith("devi:") ? 1 : 0);
@@ -1335,11 +1346,11 @@
       if (s.temperature != null) chip("", "thermo", `${s.temperature.toFixed(1)}°C`);
       if (!s.reachable) chip("error", "alert", "offline");
       else if (s.ageMinutes != null) chip("", "clock", `${s.ageMinutes} min ago`);
-      loadSensorDays(s.key);
+      loadSensorDays(s.key, S.moduleEnd);
       const detailed = S.moduleDays <= 7;
-      if (detailed) loadSensorReadings(s.key, S.moduleDays);
-      sensorYear(card, s, S.sensorDays?.[s.key]?.days || [], s.battery != null ? bh : null, S.moduleDays,
-        detailed ? S.sensorReadings?.[`${s.key}|${S.moduleDays}`] : null);
+      if (detailed) loadSensorReadings(s.key, S.moduleDays, S.moduleEnd);
+      sensorYear(card, s, S.sensorDays?.[`${s.key}|${S.moduleEnd ?? ""}`]?.days || [], s.battery != null ? bh : null, S.moduleDays,
+        detailed ? S.sensorReadings?.[`${s.key}|${S.moduleDays}|${S.moduleEnd ?? ""}`] : null, S.moduleEnd);
     }
   }
 
@@ -1469,22 +1480,22 @@
   const co2Class = (ppm) => (ppm >= co2Limit() ? "error" : ppm >= 1000 ? "warn" : "ok");
 
   // A module's daily summary (/api/sensor-days), fetched once per 10 minutes.
-  function loadSensorDays(key) {
+  function loadSensorDays(key, end) {
     S.sensorDays ||= {};
-    const c = S.sensorDays[key];
+    const id = `${key}|${end ?? ""}`, c = S.sensorDays[id];
     if (c && (c.loading || Date.now() - c.at < 10 * 60_000)) return;
-    S.sensorDays[key] = { ...(c || {}), loading: true, at: Date.now() };
-    api(`/api/sensor-days?key=${encodeURIComponent(key)}`)
-      .then((r) => { S.sensorDays[key] = { days: r.days, at: Date.now() }; render(); })
-      .catch(() => { S.sensorDays[key] = { days: c?.days || [], at: Date.now() }; });
+    S.sensorDays[id] = { ...(c || {}), loading: true, at: Date.now() };
+    api(`/api/sensor-days?key=${encodeURIComponent(key)}${end == null ? "" : `&to=${end}`}`)
+      .then((r) => { S.sensorDays[id] = { days: r.days, at: Date.now() }; render(); })
+      .catch(() => { S.sensorDays[id] = { days: c?.days || [], at: Date.now() }; });
   }
   // The detailed readings for the short ranges (/api/sensor-history), fetched once per 5 minutes.
-  function loadSensorReadings(key, days) {
+  function loadSensorReadings(key, days, end) {
     S.sensorReadings ||= {};
-    const id = `${key}|${days}`, c = S.sensorReadings[id];
+    const id = `${key}|${days}|${end ?? ""}`, c = S.sensorReadings[id];
     if (c && (c.loading || Date.now() - c.at < 5 * 60_000)) return;
     S.sensorReadings[id] = { ...(c || {}), loading: true, at: Date.now() };
-    api(`/api/sensor-history?key=${encodeURIComponent(key)}&hours=${days * 24}`)
+    api(`/api/sensor-history?key=${encodeURIComponent(key)}&${windowQuery(end, days * 24)}`)
       .then((r) => { S.sensorReadings[id] = { temps: r.temperatures || [], hum: r.humidity || [], co2: r.co2 || [], at: Date.now() }; render(); })
       .catch(() => { S.sensorReadings[id] = { ...(c || {}), at: Date.now() }; });
   }
@@ -1499,11 +1510,13 @@
   // time axis. Short ranges (24 h, 2 or 7 days) draw the detailed readings, longer ones the daily summaries.
   // A quarter of the range is left ahead of today for the battery's projection.
   let plotClips = 0;  // unique clipPath ids across all module cards
-  function sensorYear(card, s, allDays, battery, rangeDays, readings) {
+  function sensorYear(card, s, allDays, battery, rangeDays, readings, end = null) {
     const host = el("div", { class: "module-year" }, card);
     const W = Math.max(260, card.clientWidth - 28), m = { l: 34, r: 6 };
-    const now = Date.now() / 1000;
-    const t0 = now - rangeDays * 86400, t1 = now + (rangeDays / 4) * 86400;  // 24 h: 6 h ahead
+    // Live: up to now and a quarter of the range ahead (24 h: 6 h). An earlier window: just that window.
+    const live = end == null;
+    const now = live ? Date.now() / 1000 : end;
+    const t0 = live ? now - rangeDays * 86400 : snapMidnight(end - rangeDays * 86400), t1 = live ? now + (rangeDays / 4) * 86400 : end;
     const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
     const days = allDays.filter((d) => d[0] + 86400 > t0);
     // Ticks: every 3 h (24 h), 6 h (2 days), every day (7), every week (30), every month (3 months, 1 year).
@@ -1540,7 +1553,7 @@
       const y = (v) => top + (1 - (v - yLo) / (yHi - yLo)) * h;
       drawNights(svg, x, dark, top, top + h);
       // Ahead of now: the same faint wash as on the room and price charts.
-      el("rect", { x: x(now), y: top, width: x(t1) - x(now), height: h, fill: "var(--grid)", opacity: 0.35 }, svg);
+      if (live) el("rect", { x: x(now), y: top, width: x(t1) - x(now), height: h, fill: "var(--grid)", opacity: 0.35 }, svg);
       for (const v of [yLo, yHi]) {
         el("line", { class: "grid", x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }, svg);
         el("text", { x: m.l - 5, y: y(v) + 4, "text-anchor": "end" }, svg, yFmt(v));
@@ -1549,7 +1562,7 @@
         el("line", { class: "grid", x1: x(t), x2: x(t), y1: top, y2: top + h, opacity: 0.5 }, svg);
         if (i % labelEvery === 0) el("text", { x: x(t), y: top + h + 12, "text-anchor": "middle" }, svg, fmtTick(t));
       });
-      el("line", { class: "now", x1: x(now), x2: x(now), y1: top, y2: top + h }, svg);
+      if (live) el("line", { class: "now", x1: x(now), x2: x(now), y1: top, y2: top + h }, svg);
       // The data stays inside the plot: the svg shows overflow (for labels), and series can start
       // before the range (the battery's daily samples) or run past it.
       const clipId = `plot-clip-${++plotClips}`;
@@ -1643,7 +1656,7 @@
         if (pts.length && pts[pts.length - 1][0] < now) pts.push([now, pts[pts.length - 1][1]]);
         if (pts.length) el("path", { d: path(pts, y), class: "batt-line" }, svg);
         if (samples.length === 1) el("circle", { cx: x(at(samples[0][0])), cy: y(samples[0][1]), r: 2.5, class: "batt-dot" }, svg);
-        if (left != null && samples.length) {
+        if (live && left != null && samples.length) {
           // Dotted from the last level to 5 %, as far as the axis goes.
           const [lt, lp] = samples[samples.length - 1];
           const tEmpty = lt + left * 86400;

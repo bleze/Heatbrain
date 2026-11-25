@@ -483,7 +483,8 @@ void WebServer::routes() {
     s.Get("/api/sensor-days", [this](const httplib::Request& req, httplib::Response& res) {
         if (!req.has_param("key")) return sendError(res, 400, "key missing");
         History history(ctx_.dataDir / "history.db");
-        const Instant to = floor<seconds>(system_clock::now()) + days{1};
+        // Up to now, or ?to=<epoch seconds> for an earlier window.
+        const Instant to = historyWindow(req, 0).to + days{1};
         json days = json::array();
         for (const auto& d : history.sensorDays(req.get_param_value("key"), to - std::chrono::days{400}, to)) {
             days.push_back({epoch(d.day), d.minTemp, d.avgTemp, d.maxTemp, d.avgHumidity ? json(*d.avgHumidity) : json(nullptr),

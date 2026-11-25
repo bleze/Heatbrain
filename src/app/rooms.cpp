@@ -55,6 +55,7 @@ Strategy parseStrategy(const json& j) {
     s.staleAfter = minutes{j.value("staleMinutes", s.staleAfter.count())};
     s.limpOn = minutes{j.value("limpOnMinutes", s.limpOn.count())};
     s.limpOff = minutes{j.value("limpOffMinutes", s.limpOff.count())};
+    s.limpConfigured = j.contains("limpOnMinutes") || j.contains("limpOffMinutes");
     if (s.hysteresis < 0 || s.hysteresis > 2) throw std::runtime_error("strategy.hysteresis must be 0..2");
     if (s.staleAfter < minutes{10}) throw std::runtime_error("strategy.staleMinutes must be at least 10");
     return s;

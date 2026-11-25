@@ -72,6 +72,7 @@ const dayShort = (ts) => fmt({ weekday: "short", day: "numeric" }).format(ts * 1
 const localHour = (ts) => Number(fmt({ hour: "2-digit", hourCycle: "h23" }).format(ts * 1000));
 // The local midnight that starts ts's day.
 function localMidnight(ts) {
+  ts = Math.floor(ts);  // whole seconds: Date.now() / 1000 has milliseconds, and midnights are compared
   const parts = (t) => Object.fromEntries(fmt({ hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
     .formatToParts(t * 1000).map((x) => [x.type, Number(x.value)]));
   const p = parts(ts);
@@ -82,6 +83,28 @@ function localMidnight(ts) {
 }
 // The midnight nearest to ts (a day's step in seconds lands an hour off across a DST change).
 const snapMidnight = (ts) => localMidnight(ts + 12 * 3600);
+// Back (dir -1) or forward (+1) from a window ending at `end` (null: live, up to now) by `hours`:
+// whole days. From live, back is the days up to last midnight; forward past today is live again.
+function stepEnd(end, hours, dir) {
+  const now = Date.now() / 1000;
+  if (dir < 0) return end == null ? localMidnight(now) : snapMidnight(end - hours * 3600);
+  if (end == null) return null;
+  const next = snapMidnight(end + hours * 3600);
+  return next > now ? null : next;
+}
+// "Yesterday · Wed 25 Nov", "Mon 23 Nov", or "Thu 19 Nov – Wed 25 Nov" for a window of `hours` ending at `end`.
+function periodLabel(end, hours) {
+  const day = (t) => fmt({ weekday: "short", day: "numeric", month: "short" }).format(t * 1000);
+  const from = snapMidnight(end - hours * 3600);
+  if (hours > 24) return `${day(from)} – ${day(end - 1)}`;
+  const yesterday = from === snapMidnight(localMidnight(Date.now() / 1000) - 86400);
+  return `${yesterday ? "Yesterday · " : ""}${day(from)}`;
+}
+// The query for a window: whole days (23 or 25 hours across a DST change) when it ends at a midnight.
+function windowQuery(end, hours) {
+  if (end == null) return `hours=${hours}`;
+  return `hours=${Math.round((end - snapMidnight(end - hours * 3600)) / 3600)}&to=${end}`;
+}
 const temp = (v) => (v == null ? "–" : `${v.toFixed(1)}°`);
 const price = (v) => (v == null ? "–" : v.toFixed(2));
 
@@ -905,9 +928,7 @@ async function selectRoom(id, scroll = true) {
 
 async function loadHistory() {
   if (!state.selected) return;
-  // An earlier window: from midnight to midnight, also across a DST change (a 23 or 25 hour day).
-  const hours = state.end == null ? state.hours : Math.round((state.end - snapMidnight(state.end - state.hours * 3600)) / 3600);
-  const win = `hours=${hours}${state.end == null ? "" : `&to=${state.end}`}`;
+  const win = windowQuery(state.end, state.hours);
   $("room-chart").classList.add("loading"); // refetch keeps the frame
   try {
     if (state.selected === "__outdoor") {
@@ -1500,10 +1521,7 @@ document.querySelectorAll("#detail-range button").forEach((b) =>
 // Back and forward in time: whole days. From now, back is yesterday (or the days up to last midnight);
 // then each step is the chosen range. Forward past today is the live chart again.
 function stepTime(dir) {
-  const now = Date.now() / 1000;
-  const span = state.hours * 3600;
-  if (dir < 0) state.end = state.end == null ? localMidnight(now) : snapMidnight(state.end - span);
-  else if (state.end != null) state.end = snapMidnight(state.end + span) > now ? null : snapMidnight(state.end + span);
+  state.end = stepEnd(state.end, state.hours, dir);
   renderWhen();
   loadHistory();
 }
@@ -1513,10 +1531,7 @@ function renderWhen() {
   $("detail-when").hidden = live;
   $("detail-forward").disabled = live;
   if (live) return;
-  const day = (t) => fmt({ weekday: "short", day: "numeric", month: "short" }).format(t * 1000);
-  const from = snapMidnight(state.end - state.hours * 3600);
-  const yesterday = state.hours === 24 && from === snapMidnight(localMidnight(Date.now() / 1000) - 86400);
-  $("detail-when-text").textContent = state.hours === 24 ? `${yesterday ? "Yesterday · " : ""}${day(from)}` : `${day(from)} – ${day(state.end - 1)}`;
+  $("detail-when-text").textContent = periodLabel(state.end, state.hours);
 }
 $("detail-back").addEventListener("click", () => stepTime(-1));
 $("detail-forward").addEventListener("click", () => stepTime(1));

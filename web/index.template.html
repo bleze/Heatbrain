@@ -50,6 +50,8 @@
     <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="m13.5 6.5 4 4"/></symbol>
     <symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
     <symbol id="i-question" viewBox="0 0 24 24"><path d="M8.8 9a3.2 3.2 0 0 1 6.4.6c0 2.2-3.2 2.6-3.2 4.6"/><path d="M12 18.2v.01"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
@@ -110,18 +112,18 @@
         <h2><span class="badge badge-violet"><svg class="icon"><use href="#i-thermo"/></svg></span><span id="detail-title"></span>
           <span class="heatloss-note" id="detail-heatloss"></span></h2>
         <div class="time-nav">
-          <button type="button" class="step" id="detail-back" title="Earlier (←)" aria-label="Earlier">‹</button>
+          <span class="time-when" id="detail-when" hidden>
+            <span id="detail-when-text"></span>
+            <button type="button" id="detail-now">Now</button>
+          </span>
+          <button type="button" class="step" id="detail-back" title="Earlier (←)" aria-label="Earlier"><svg class="icon"><use href="#i-left"/></svg></button>
           <div class="range" role="group" aria-label="Time range" id="detail-range">
             <button data-hours="24" class="active">24 h</button>
             <button data-hours="48">2 days</button>
             <button data-hours="72">3 days</button>
             <button data-hours="168">7 days</button>
           </div>
-          <button type="button" class="step" id="detail-forward" title="Later (→)" aria-label="Later" disabled>›</button>
-        </div>
-        <div class="time-when" id="detail-when" hidden>
-          <span id="detail-when-text"></span>
-          <button type="button" id="detail-now">Now</button>
+          <button type="button" class="step" id="detail-forward" title="Later (→)" aria-label="Later" disabled><svg class="icon"><use href="#i-right"/></svg></button>
         </div>
       </div>
       <div class="legend" id="legend"></div>

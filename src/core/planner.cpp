@@ -9,6 +9,9 @@
 
 namespace hb {
 
+// How far ahead a room with learned rates looks for expensive hours to pre-heat for.
+constexpr std::chrono::minutes kLearnedLookAhead{8 * 60};
+
 using namespace std::chrono;
 
 namespace {
@@ -311,7 +314,10 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 
     if (room.priceOnly) return decidePriceOnly(room, in, prices, tz, inputs);
 
-    const PriceOutlook outlook = priceOutlook(prices, in.now, s.preheatWindow);
+    // Learned rooms look as far ahead as warming up can take (a concrete floor: hours): when to start
+    // is worked out from the room's rates, so a long look-ahead does not mean starting early.
+    const bool learned = in.thermal && in.thermal->usable();
+    const PriceOutlook outlook = priceOutlook(prices, in.now, learned ? std::max(s.preheatWindow, kLearnedLookAhead) : s.preheatWindow);
     inputs.price = outlook.current;
     inputs.medianPrice = outlook.median;
     inputs.priceExpensive = outlook.expensive;
@@ -492,13 +498,22 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     }
     //    Otherwise a bounded duty cycle, never continuous heat.
     if (!fresh) {
-        const auto cycle = (s.limpOn + s.limpOff).count();
+        // As much as the room usually heats in such a period (learned), at most 45 min an hour;
+        // else the configured cycle (10 on, 50 off).
+        minutes onFor = s.limpOn, offFor = s.limpOff;
+        if (in.duty && in.duty->learned && !s.limpConfigured) {
+            const double share = std::clamp(in.duty->forRun(mode == ProgramMode::Keep, target), 0.0, 0.75);
+            onFor = minutes{static_cast<int>(std::lround(share * 12)) * 5};  // whole 5 minutes of the hour
+            offFor = minutes{60} - onFor;
+        }
+        const auto cycle = (onFor + offFor).count();
         const auto pos = cycle > 0 ? duration_cast<minutes>(in.now.time_since_epoch()).count() % cycle : 0;
-        const bool on = s.limpOn.count() > 0 && pos < s.limpOn.count();
+        const bool on = onFor.count() > 0 && pos < onFor.count();
         const std::string why = !in.temperature ? "No temperature reading"
                                                 : std::format("Temperature is {} min old", *inputs.temperatureAgeMinutes);
         return make(on, Reason::StaleDataLimp,
-                    std::format("{}: limp mode {} min ON / {} min OFF", why, s.limpOn.count(), s.limpOff.count()),
+                    std::format("{}: limp mode {} min ON / {} min OFF{}", why, onFor.count(), offFor.count(),
+                                onFor != s.limpOn || offFor != s.limpOff ? " (what the room usually heats)" : ""),
                     inputs);
     }
 
@@ -544,10 +559,9 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         std::string why = outside ? std::format(", +{:.1f}° as it will be {} outside", boost, temp(*outside)) : "";
         bool due = true;
         if (in.thermal && in.thermal->usable()) {
-            // Learned: just enough to coast through the stretch, at most twice the boost setting, and
+            // Learned: just enough to coast through the stretch (the room's max caps it below), and
             // started only as early as heating that far takes (stored heat leaks away).
-            const double needed = neededPreheat(*in.thermal, target, s.peakAllowedDrop, outside.value_or(5.0), peak, peakEnd);
-            boost = std::min(needed, 2 * s.preheatBoost);
+            boost = neededPreheat(*in.thermal, target, s.peakAllowedDrop, outside.value_or(5.0), peak, peakEnd);
             const auto lead = estimateWarmup(*in.thermal, t, std::min(target + boost, room.maxTemp - h),
                                              in.outdoorTemp.value_or(outside.value_or(5.0)));
             due = boost > 0.05 && peak - in.now <= lead.duration;
