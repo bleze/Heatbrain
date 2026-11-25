@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <format>
 #include <future>
 #include <stdexcept>
@@ -69,7 +70,61 @@ std::string slugOf(std::string_view s) {
     return out.substr(0, 40);
 }
 
+bool isHeatbrainUrl(const json& u) {
+    return u.is_string() && u.get<std::string>().find("/api/push/shelly") != std::string::npos;
+}
+
+// A query parameter of a heatbrain push URL, decoded ("%20" and "+").
+std::string queryParam(std::string_view url, std::string_view key) {
+    const auto q = url.find('?');
+    if (q == std::string_view::npos) return {};
+    std::string_view rest = url.substr(q + 1);
+    while (!rest.empty()) {
+        const auto amp = rest.find('&');
+        const std::string_view kv = rest.substr(0, amp);
+        const auto eq = kv.find('=');
+        if (eq != std::string_view::npos && kv.substr(0, eq) == key) {
+            std::string out;
+            const std::string_view v = kv.substr(eq + 1);
+            for (size_t i = 0; i < v.size(); ++i) {
+                if (v[i] == '+') {
+                    out += ' ';
+                } else if (v[i] == '%' && i + 2 < v.size() && std::isxdigit(static_cast<unsigned char>(v[i + 1])) &&
+                           std::isxdigit(static_cast<unsigned char>(v[i + 2]))) {
+                    out += static_cast<char>(std::stoi(std::string(v.substr(i + 1, 2)), nullptr, 16));
+                    i += 2;
+                } else {
+                    out += v[i];
+                }
+            }
+            return out;
+        }
+        if (amp == std::string_view::npos) break;
+        rest = rest.substr(amp + 1);
+    }
+    return {};
+}
+
 }  // namespace
+
+void applyShellyHooks(DiscoveredShelly& d, std::string_view body) {
+    try {
+        const json j = json::parse(body);
+        const json& r = j.contains("result") ? j["result"] : j;
+        if (!r.contains("hooks")) return;
+        for (const auto& h : r["hooks"]) {
+            if (!h.contains("urls")) continue;
+            for (const auto& u : h["urls"]) {
+                if (!isHeatbrainUrl(u)) continue;
+                const std::string url = u.get<std::string>();
+                if (d.pushId.empty()) d.pushId = queryParam(url, "id");
+                if (d.pushName.empty()) d.pushName = queryParam(url, "name");
+            }
+        }
+    } catch (const std::exception&) {
+        // not readable: treated as not set up
+    }
+}
 
 std::optional<DiscoveredShelly> parseShellyInfo(std::string_view host, std::string_view body) {
     json j;
@@ -147,6 +202,8 @@ std::vector<DiscoveredShelly> discoverShelly(std::string_view subnet, HttpClient
                 try {
                     const auto st = http.get("http://" + host + "/rpc/Shelly.GetStatus");
                     if (st.status == 200) applyShellyStatus(*d, st.body);
+                    const auto hooks = http.get("http://" + host + "/rpc/Webhook.List");
+                    if (hooks.status == 200) applyShellyHooks(*d, hooks.body);
                 } catch (const std::exception&) {
                     // gone back to sleep: listed without readings
                 }
@@ -200,23 +257,29 @@ ShellySetupResult setupShelly(HttpClient& http, std::string_view host, std::stri
     applyShellyStatus(*d, status.dump());
     if (!d->sensor) throw std::runtime_error(std::format("The Shelly at {} ({}) has no temperature sensor", host, d->model));
 
+    const json hooks = rpc(http, host, "Webhook.List");
+    applyShellyHooks(*d, hooks.dump());
+
     std::string label(name);
-    if (label.empty()) label = d->name.empty() ? d->id : d->name;
+    if (label.empty()) label = !d->pushName.empty() ? d->pushName : !d->name.empty() ? d->name : d->id;
     d->name = label;
-    // The device's own id: unique and stays the same when the name changes, so a room keeps its sensor.
-    std::string id = slugOf(d->id);
+    // Already reporting to heatbrain: the same id, so it stays the same sensor (and a room keeps it).
+    // Otherwise the device's own id: unique and stays the same when the name changes.
+    std::string id = slugOf(d->pushId);
+    if (id.empty()) id = slugOf(d->id);
     if (id.empty()) id = slugOf(label);
     if (id.empty()) id = "shelly";
     d->id = id;
+    d->pushId = id;
+    d->pushName = label;
 
     // Replace what heatbrain set up before (a new name or a new heatbrain address).
     ShellySetupResult out;
-    const json hooks = rpc(http, host, "Webhook.List");
     if (hooks.contains("hooks")) {
         for (const auto& h : hooks["hooks"]) {
             bool ours = false;
             if (h.contains("urls")) {
-                for (const auto& u : h["urls"]) ours = ours || (u.is_string() && u.get<std::string>().find("/api/push/shelly") != std::string::npos);
+                for (const auto& u : h["urls"]) ours = ours || isHeatbrainUrl(u);
             }
             if (ours && h.contains("id")) {
                 rpc(http, host, "Webhook.Delete", json{{"id", h["id"]}});

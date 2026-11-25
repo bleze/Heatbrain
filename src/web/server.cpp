@@ -604,15 +604,26 @@ void WebServer::routes() {
         if (d.temperature) j["temperature"] = *d.temperature;
         if (d.humidity) j["humidity"] = *d.humidity;
         if (d.battery) j["battery"] = *d.battery;
+        if (!d.pushId.empty()) j["pushId"] = d.pushId;
+        if (!d.pushName.empty()) j["pushName"] = d.pushName;
         return j;
     };
-    s.Post("/api/shelly/discover", [shellyJson](const httplib::Request& req, httplib::Response& res) {
+    // One scan for everything heatbrain can find on the network: Tasmota plugs and Shellys together.
+    s.Post("/api/discover", [shellyJson](const httplib::Request& req, httplib::Response& res) {
         const json body = parseBody(req);
+        const std::string subnet = body.value("subnet", std::string());
         HttplibClient probe(milliseconds{1500}, milliseconds{2000});
         try {
-            json out = json::array();
-            for (const auto& d : discoverShelly(body.value("subnet", std::string()), probe)) out.push_back(shellyJson(d));
-            sendJson(res, out);
+            auto shellys = std::async(std::launch::async, [&] { return discoverShelly(subnet, probe); });
+            json tasmota = json::array();
+            for (const auto& d : discoverTasmota(subnet, probe)) {
+                json j{{"host", d.host}, {"deviceName", d.deviceName}, {"model", d.model}, {"firmware", d.firmware}, {"hardware", d.hardware}};
+                if (d.on) j["on"] = *d.on;
+                tasmota.push_back(j);
+            }
+            json shelly = json::array();
+            for (const auto& d : shellys.get()) shelly.push_back(shellyJson(d));
+            sendJson(res, json{{"tasmota", tasmota}, {"shelly", shelly}});
         } catch (const std::exception& e) {
             sendError(res, 400, e.what());
         }
@@ -769,17 +780,6 @@ void WebServer::routes() {
         }
     });
 
-    s.Post("/api/discover", [](const httplib::Request& req, httplib::Response& res) {
-        const json body = parseBody(req);
-        HttplibClient probe(milliseconds{1500}, milliseconds{2000});
-        json out = json::array();
-        for (const auto& d : discoverTasmota(body.value("subnet", std::string()), probe)) {
-            json j{{"host", d.host}, {"deviceName", d.deviceName}, {"model", d.model}, {"firmware", d.firmware}, {"hardware", d.hardware}};
-            if (d.on) j["on"] = *d.on;
-            out.push_back(j);
-        }
-        sendJson(res, out);
-    });
 
     s.Post("/api/notify/test", [this](const httplib::Request&, httplib::Response& res) {
         HttplibClient http;

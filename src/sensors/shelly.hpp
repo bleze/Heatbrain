@@ -29,12 +29,16 @@ struct DiscoveredShelly {
     bool sensor = false;  // has a temperature sensor
     std::optional<double> temperature, humidity;
     std::optional<int> battery;
+    // Already reporting to heatbrain (its webhooks call /api/push/shelly): under this id and name.
+    std::string pushId, pushName;
 };
 
 // Parses a GET /shelly answer; nullopt when it is not a Shelly.
 std::optional<DiscoveredShelly> parseShellyInfo(std::string_view host, std::string_view body);
 // Adds temperature/humidity/battery from a Shelly.GetStatus result.
 void applyShellyStatus(DiscoveredShelly& d, std::string_view body);
+// Finds heatbrain's webhooks in a Webhook.List result and notes the id/name they report under.
+void applyShellyHooks(DiscoveredShelly& d, std::string_view body);
 
 // Probes every address of a /24 network ("192.168.1.0/24" or "192.168.1") for Shellys.
 std::vector<DiscoveredShelly> discoverShelly(std::string_view subnet, HttpClient& http);
@@ -48,7 +52,8 @@ struct ShellySetupResult {
 };
 
 // Installs heatbrain's two webhooks on the Shelly at host (replacing any earlier ones from heatbrain)
-// and returns its current readings. Throws std::runtime_error with a readable message.
+// and returns its current readings. A Shelly already reporting to heatbrain keeps its id (and its name
+// when none is given), so it stays the same sensor - also one set up by hand. Throws std::runtime_error with a readable message.
 ShellySetupResult setupShelly(HttpClient& http, std::string_view host, std::string_view base, std::string_view name);
 
 }  // namespace hb

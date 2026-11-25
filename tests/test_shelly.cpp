@@ -61,7 +61,7 @@ TEST_CASE("Shelly setup: replaces heatbrain's earlier webhooks and adds one for 
     };
     const auto r = setupShelly(http, "192.168.1.42", "http://192.168.1.10:8090/", "Shed");
     CHECK(r.removed == 1);
-    CHECK(r.device.id == "shellyhtg3-84fce63ad204");
+    CHECK(r.device.id == "shed");  // as heatbrain set it up before: the same sensor
     CHECK(r.device.name == "Shed");
     CHECK(*r.device.temperature == 7.4);
 
@@ -73,10 +73,10 @@ TEST_CASE("Shelly setup: replaces heatbrain's earlier webhooks and adds one for 
     REQUIRE(created.size() == 2);
     CHECK(created[0]["event"] == "temperature.change");
     CHECK(created[0]["urls"][0] ==
-          "http://192.168.1.10:8090/api/push/shelly?id=shellyhtg3-84fce63ad204&name=Shed&temp=${ev.tC}");
+          "http://192.168.1.10:8090/api/push/shelly?id=shed&name=Shed&temp=${ev.tC}");
     CHECK(created[1]["event"] == "humidity.change");
     CHECK(created[1]["urls"][0] ==
-          "http://192.168.1.10:8090/api/push/shelly?id=shellyhtg3-84fce63ad204&name=Shed&hum=${ev.rh}");
+          "http://192.168.1.10:8090/api/push/shelly?id=shed&name=Shed&hum=${ev.rh}");
 }
 
 TEST_CASE("Shelly setup: a sleeping, password protected or sensorless Shelly gives a readable reason") {
@@ -95,4 +95,32 @@ TEST_CASE("Shelly setup: a sleeping, password protected or sensorless Shelly giv
         return {200, R"({"id":1,"result":{"switch:0":{"output":false}}})"};
     };
     CHECK_THROWS(setupShelly(http, "192.168.1.42", "http://hb", "Shed"));
+}
+
+TEST_CASE("Shelly set up by hand: the scan recognises it and Set up again keeps it the same sensor") {
+    DiscoveredShelly d;
+    applyShellyHooks(d, R"({"hooks":[{"id":1,"event":"temperature.change",
+        "urls":["http://192.168.1.10:8090/api/push/shelly?id=shed&name=The%20shed&temp=${ev.tC}"]}],"rev":2})");
+    CHECK(d.pushId == "shed");
+    CHECK(d.pushName == "The shed");
+
+    test::FakeHttp http;
+    std::vector<json> created;
+    http.requestHandler = [&](const HttpRequest& r) -> HttpResponse {
+        if (r.url.ends_with("/shelly")) return {200, kHtG3Info};
+        const json call = json::parse(r.body);
+        if (call["method"] == "Shelly.GetStatus") return {200, json{{"id", 1}, {"result", json::parse(kHtG3Status)}}.dump()};
+        if (call["method"] == "Webhook.List") {
+            return {200, R"({"id":1,"result":{"hooks":[{"id":1,"event":"temperature.change",
+                "urls":["http://192.168.1.10:8090/api/push/shelly?id=shed&name=The%20shed&temp=${ev.tC}"]}]}})"};
+        }
+        if (call["method"] == "Webhook.Create") created.push_back(call["params"]);
+        return {200, R"({"id":1,"result":{}})"};
+    };
+    const auto r = setupShelly(http, "192.168.1.42", "http://192.168.1.10:8090", "");
+    CHECK(r.removed == 1);
+    CHECK(r.device.id == "shed");
+    CHECK(r.device.name == "The shed");
+    REQUIRE(created.size() == 2);
+    CHECK(created[0]["urls"][0] == "http://192.168.1.10:8090/api/push/shelly?id=shed&name=The%20shed&temp=${ev.tC}");
 }
