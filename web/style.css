@@ -34,6 +34,9 @@
   --warm-edge: rgba(232, 89, 12, 0.45);
   --cool-tint: rgba(42, 120, 214, 0.06);
   --band: rgba(98, 80, 214, 0.08);
+  --night: rgba(40, 52, 110, 0.07);   /* chart night shade */
+  --night-key: rgba(40, 52, 110, 0.28);
+  --sun-ink: #a86f00;       /* sunrise/sunset times: the solar colour, dark enough for small text */
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%2352514e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 @media (prefers-color-scheme: dark) {
@@ -62,6 +65,9 @@
     --warm-edge: rgba(250, 120, 40, 0.55);
     --cool-tint: rgba(57, 135, 229, 0.07);
     --band: rgba(144, 133, 233, 0.12);
+    --night: rgba(0, 0, 0, 0.32);
+    --night-key: rgba(120, 130, 190, 0.35);
+    --sun-ink: #e0a020;
     --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23c3c2b7' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   }
 }
@@ -91,6 +97,9 @@
   --warm-edge: rgba(250, 120, 40, 0.55);
   --cool-tint: rgba(57, 135, 229, 0.07);
   --band: rgba(144, 133, 233, 0.12);
+  --night: rgba(0, 0, 0, 0.32);
+  --night-key: rgba(120, 130, 190, 0.35);
+  --sun-ink: #e0a020;
 }
 
 * { box-sizing: border-box; }
@@ -102,6 +111,9 @@ body {
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 main { max-width: 1200px; margin: 0 auto; padding: 0 16px 96px; }
+/* The dashboard may grow on wide screens so more room cards share a row: 2200 px fits 7 cards
+   of 280 px (6 rooms + Outdoor). Settings and Help keep 1200 px, where long lines read badly. */
+#view-dashboard, body:has(#view-dashboard:not([hidden])) .top { max-width: 2200px; }
 h2 { font-size: 16px; margin: 0; font-weight: 600; display: flex; align-items: center; gap: 10px; }
 h3 { font-size: 14px; margin: 24px 0 8px; font-weight: 600; }
 a { color: var(--accent); }
@@ -716,6 +728,17 @@ a.chip { text-decoration: none; }
 .chart .coast-floor-label { fill: var(--target); font-size: 10.5px; font-weight: 600; }
 .chart .coast-floor-label.short { fill: var(--warning); }
 .sched-warn { flex-basis: 100%; margin: -2px 0 0; color: var(--warning); }
+/* Night (sunset to sunrise): a faint blue-grey shade behind the data; the key is the same colour, stronger. */
+.chart .night { fill: var(--night); }
+.legend .key-night { background: var(--night-key); }
+/* Sunrise / sunset: the power mix's solar colour, so "sun" reads the same in both cards. A surface-coloured
+   halo keeps the mark and its time readable where a line passes behind. */
+.chart .sun-mark { pointer-events: none; }
+.chart .sun-disc { fill: var(--mix-solar); stroke: var(--surface); stroke-width: 1.5; paint-order: stroke; }
+.chart .sun-horizon { stroke: var(--mix-solar); stroke-width: 1.5; stroke-linecap: round; }
+.chart .sun-arrow { fill: none; stroke: var(--mix-solar); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.chart .sun-label { fill: var(--sun-ink); font-size: 10.5px; font-weight: 600;
+  stroke: var(--surface); stroke-width: 3; paint-order: stroke; }
 .chart .booking-band { fill: var(--accent); fill-opacity: 0.08; }
 .chart .booking-band.warm { fill-opacity: 0.04; }
 .chart .booking-label { fill: var(--accent); font-size: 10.5px; font-weight: 600; }

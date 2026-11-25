@@ -159,6 +159,90 @@ function drawTimeAxis(g, x, ticks, top, bottom, labelY) {
   }
 }
 
+// ---------------------------------------------------------------------------------------
+// Sunrise and sunset at the forecast's location (Settings -> Weather forecast, else the Netatmo
+// station), for night shading on the charts. The sunrise equation (as on Wikipedia, about a minute
+// off), with -0.833° for refraction and the sun's radius.
+// ---------------------------------------------------------------------------------------
+function sunDay(t, lat, lon) {
+  const rad = Math.PI / 180;
+  const n = Math.round(t / 86400 + 2440587.5 - 2451545 + 0.0008);
+  const J = n - lon / 360;
+  const M = (357.5291 + 0.98560028 * J) % 360;
+  const C = 1.9148 * Math.sin(M * rad) + 0.02 * Math.sin(2 * M * rad) + 0.0003 * Math.sin(3 * M * rad);
+  const L = (M + C + 180 + 102.9372) % 360;
+  const transit = 2451545 + J + 0.0053 * Math.sin(M * rad) - 0.0069 * Math.sin(2 * L * rad);
+  const sinD = Math.sin(L * rad) * Math.sin(23.4397 * rad), cosD = Math.cos(Math.asin(sinD));
+  const cosW = (Math.sin(-0.833 * rad) - Math.sin(lat * rad) * sinD) / (Math.cos(lat * rad) * cosD);
+  const unix = (j) => (j - 2440587.5) * 86400;
+  if (cosW > 1) return { n, rise: null, set: null };                            // the sun stays down
+  if (cosW < -1) return { n, rise: unix(transit - 0.5), set: unix(transit + 0.5), allDay: true };  // stays up
+  const w = Math.acos(cosW) / rad / 360;
+  return { n, rise: unix(transit - w), set: unix(transit + w) };
+}
+
+// Daylight periods [rise, set, real] around t0..t1 (a day either side, so nights at the edges are
+// whole), or null without a location. real is false where the sun doesn't set (no actual rise/set).
+function daylight(t0, t1) {
+  const f = state.status?.forecast;
+  if (!f || typeof f.latitude !== "number" || typeof f.longitude !== "number") return null;
+  const days = [];
+  for (let t = t0 - 86400; t <= t1 + 86400; t += 43200) {
+    const d = sunDay(t, f.latitude, f.longitude);
+    if (!days.some((x) => x.n === d.n)) days.push(d);
+  }
+  return days.filter((d) => d.rise != null).map((d) => [d.rise, d.set, !d.allDay]).sort((a, b) => a[0] - b[0]);
+}
+
+// The nights between t0 and t1: the gaps between daylight periods.
+function nights(t0, t1, days) {
+  const out = [];
+  let from = t0 - 86400;
+  for (const [rise, set] of days) {
+    if (rise > from) out.push([from, rise]);
+    from = Math.max(from, set);
+  }
+  out.push([from, t1 + 86400]);
+  return out.map(([a, b]) => [Math.max(a, t0), Math.min(b, t1)]).filter(([a, b]) => b > a);
+}
+
+// Night as a faint shade behind a panel.
+function drawNights(g, x, list, top, bottom) {
+  for (const [a, b] of list) el("rect", { class: "night", x: x(a), y: top, width: x(b) - x(a), height: bottom - top }, g);
+}
+
+// Sunrise and sunset marks in the solar colour along the top edge of a panel: a half sun on a horizon
+// with an arrow, up for sunrise and down for sunset. The time goes on the daylight side (right of a
+// sunrise, left of a sunset), when there is room before the next mark.
+function drawSunMarks(g, x, days, t0, t1, top) {
+  const marks = days.filter((d) => d[2]).flatMap(([r, s]) => [[r, true], [s, false]])
+    .filter(([t]) => t >= t0 && t <= t1).sort((a, b) => a[0] - b[0]);
+  const y = top + 11;  // the horizon line
+  marks.forEach(([t, rise], i) => {
+    const cx = x(t);
+    const grp = el("g", { class: "sun-mark" }, g);
+    el("path", { class: "sun-disc", d: `M${cx - 5},${y}A5,5 0 0 1 ${cx + 5},${y}Z` }, grp);
+    el("line", { class: "sun-horizon", x1: cx - 8, x2: cx + 8, y1: y + 0.5, y2: y + 0.5 }, grp);
+    // The arrow under the horizon: points up at sunrise, down at sunset.
+    const ay = y + 4.5, dy = rise ? -1 : 1;
+    el("path", { class: "sun-arrow", d: `M${cx - 3},${ay + 1.5 * dy}L${cx},${ay - 1.5 * dy}L${cx + 3},${ay + 1.5 * dy}` }, grp);
+    const neighbour = rise ? marks[i + 1] : marks[i - 1];
+    const room = neighbour ? Math.abs(x(neighbour[0]) - cx) : rise ? x(t1) - cx : cx - x(t0);
+    if (room > 60) {
+      el("text", { class: "sun-label", x: rise ? cx + 10 : cx - 10, y: y + 1, "text-anchor": rise ? "start" : "end" }, grp, hm(t));
+    }
+  });
+}
+
+// For the tooltip: "up · sets 16:02" or "down · rises 08:14".
+function sunRow(t, days) {
+  if (!days) return null;
+  const up = days.find(([r, s]) => t >= r && t < s);
+  if (up) return { label: "Sun", value: up[2] ? `up · sets ${hm(up[1])}` : "up all day", color: "var(--mix-solar)", box: true };
+  const next = days.find(([r]) => r > t);
+  return { label: "Sun", value: next ? `down · rises ${hm(next[0])}` : "down", color: "var(--night-key)", box: true };
+}
+
 function niceTicks(min, max, count) {
   const span = max - min || 1;
   const raw = span / count;
@@ -854,6 +938,10 @@ function renderElectricity({ t0, t1, now, prices, W, m, ticks }) {
   const H = bottom + 24;
   const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (W - m.l - m.r);
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": "Electricity price and power mix" }, host);
+  // Night shade on the price panel, as on the room chart (the power mix's full columns would hide
+  // it, and its solar share shows the daylight anyway).
+  const days = daylight(t0, t1);
+  if (showPrice && days) drawNights(svg, x, nights(t0, t1, days), priceTop, priceTop + panelH);
   if (t1 > now + 60) el("rect", { x: x(now), y: 18, width: x(t1) - x(now), height: bottom - 18, fill: "var(--grid)", opacity: 0.35 }, svg);
 
   if (showPrice) {
@@ -875,6 +963,7 @@ function renderElectricity({ t0, t1, now, prices, W, m, ticks }) {
     // The fill as an attribute: url(#id) in the stylesheet would resolve against style.css.
     el("path", { d: `${line}V${yP(plo)}H${x(prices[0][0])}Z`, fill: "url(#price-fill)", stroke: "none" }, svg);
     el("path", { class: "line", d: line, "stroke-width": 1.5 }, svg);
+    if (days) drawSunMarks(svg, x, days, t0, t1, priceTop);
   }
   if (mix.length) {
     // A 100 % column per hour; the label row doubles as its legend (direct labels, no extra legend).
@@ -926,6 +1015,8 @@ function renderElectricity({ t0, t1, now, prices, W, m, ticks }) {
       }
     }
     if (!rows.length) return hideTooltip();
+    const sun = sunRow(t, days);
+    if (sun) rows.push(sun);
     showTooltip(evt, dayHm(t), rows);
   });
 }
@@ -976,6 +1067,10 @@ function priceSummary() {
 function renderLegend(room, segs, wifi, booked, coasting, floor) {
   const host = $("legend");
   host.replaceChildren();
+  // First: a sensor-only room returns before the heating keys.
+  if (state.status?.forecast?.latitude != null) {
+    const n = el("span", {}, host); el("i", { class: "swatch key-night" }, n); n.appendChild(document.createTextNode("Night"));
+  }
   if (wifi) {
     const o = el("span", {}, host); el("i", { class: "key-wifi-on" }, o); o.appendChild(document.createTextNode("Wi-Fi on"));
     const s = el("span", {}, host); el("i", { class: "key-wifi-off" }, s); s.appendChild(document.createTextNode("Wi-Fi off"));
@@ -1071,6 +1166,10 @@ function renderDetail() {
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": `${room.name}: temperature and heating` }, host);
   const ticks = timeTicks(t0, t1, W - m.l - m.r);
 
+  // Night (sunset to sunrise): a faint shade over the whole chart, under everything else.
+  const days = daylight(t0, t1);
+  if (days) drawNights(svg, x, nights(t0, t1, days), tempTop, bottom);
+
   // The future: a faint wash with a label, so planned prices aren't mistaken for history.
   if (t1 > h.to + 60) {
     el("rect", { x: x(h.to), y: tempTop, width: x(t1) - x(h.to), height: bottom - tempTop, fill: "var(--grid)", opacity: 0.35 }, svg);
@@ -1153,6 +1252,7 @@ function renderDetail() {
     if (est) el("path", { class: "line-estimate", d: est }, svg);
     el("path", { class: "line", d }, svg);
     if (!temps.length) el("text", { class: "empty", x: W / 2, y: tempTop + tempH / 2, "text-anchor": "middle" }, svg, "No temperatures recorded yet");
+    if (days) drawSunMarks(svg, x, days, t0, t1, tempTop);
   }
 
   // Wi-Fi lane, read like the rest of the UI: on = a lit bar, off = the dark stripes "off" has in the
@@ -1258,6 +1358,8 @@ function renderDetail() {
     }
     const pi = lastAtOrBefore(prices, t);
     if (pi >= 0 && t - prices[pi][0] < 900) rows.push({ label: `${state.status?.currency || ""}/kWh`, value: price(prices[pi][1]) });
+    const sun = sunRow(t, days);
+    if (sun) rows.push(sun);
     showTooltip(evt, dayHm(t), rows);
   });
 
