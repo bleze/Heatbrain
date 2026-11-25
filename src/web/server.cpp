@@ -591,9 +591,34 @@ void WebServer::routes() {
         const auto hum = number({"hum", "rh", "humidity"}, 0, 100);
         const auto batt = number({"batt", "battery"}, 0, 100);
         if (!temp && !hum && !batt) return sendError(res, 400, "no temperature, humidity or battery in the request");
+        const auto now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
         PushRegistry::instance().put(id, req.get_param_value("name"), temp, hum,
-                                     batt ? std::optional<int>(static_cast<int>(*batt)) : std::nullopt,
-                                     std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()));
+                                     batt ? std::optional<int>(static_cast<int>(*batt)) : std::nullopt, now);
+        // Set up before heatbrain asked for the battery level: add it to the Shelly's webhooks now, while
+        // it is awake waiting for this answer (a battery Shelly sleeps otherwise, so Set up needs its
+        // button pressed). Best effort, at most once an hour per sensor; IPv4 senders only.
+        if (!req.has_param("battery") && !req.has_param("batt") && req.remote_addr.find(':') == std::string::npos) {
+            static std::mutex triedMutex;
+            static std::map<std::string, Instant> tried;
+            bool go = false;
+            {
+                std::lock_guard lock(triedMutex);
+                const auto it = tried.find(id);
+                go = it == tried.end() || now - it->second > hours{1};
+                if (go) tried[id] = now;
+            }
+            if (go) {
+                try {
+                    HttplibClient http(milliseconds{1000}, milliseconds{2000});
+                    if (const int n = addShellyBattery(http, req.remote_addr); n > 0) {
+                        log::info("Shelly {} at {}: its reports now include the battery level ({} webhooks updated)", id, req.remote_addr, n);
+                    }
+                } catch (const std::exception& e) {
+                    log::info("Shelly {} at {}: could not add the battery level while it reported ({}) - Set up in Settings does it",
+                              id, req.remote_addr, e.what());
+                }
+            }
+        }
         sendJson(res, json{{"ok", true}});
     };
     s.Get("/api/push/shelly", pushHandler);

@@ -59,4 +59,10 @@ struct ShellySetupResult {
 // when none is given), so it stays the same sensor - also one set up by hand. Throws std::runtime_error with a readable message.
 ShellySetupResult setupShelly(HttpClient& http, std::string_view host, std::string_view base, std::string_view name);
 
+// Adds the battery level to heatbrain's webhooks on the Shelly at host, where they don't send it yet
+// (set up before heatbrain asked for it). Leaves everything else as it is. For the moment a battery
+// Shelly is awake anyway: while it reports to heatbrain. Returns how many webhooks it changed; throws
+// std::runtime_error when the Shelly can't be reached or refuses.
+int addShellyBattery(HttpClient& http, std::string_view host);
+
 }  // namespace hb

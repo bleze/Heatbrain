@@ -124,3 +124,28 @@ TEST_CASE("Shelly set up by hand: the scan recognises it and Set up again keeps 
     REQUIRE(created.size() == 2);
     CHECK(created[0]["urls"][0] == "http://192.168.1.10:8090/api/push/shelly?id=shed&name=The%20shed&temp=${ev.tC}&battery=${status[\"devicepower:0\"].battery.percent}");
 }
+
+TEST_CASE("Shelly: heatbrain's webhooks get the battery level added while the Shelly reports (no button press)") {
+    test::FakeHttp http;
+    std::vector<json> updates;
+    http.requestHandler = [&](const HttpRequest& r) -> HttpResponse {
+        CHECK(r.url == "http://192.168.1.42/rpc");
+        const json call = json::parse(r.body);
+        if (call["method"] == "Webhook.List") {
+            return {200, R"({"id":1,"result":{"hooks":[
+                {"id":1,"event":"temperature.change","urls":["http://hb:8090/api/push/shelly?id=shed&name=Shed&temp=${ev.tC}"]},
+                {"id":2,"event":"humidity.change","urls":["http://hb:8090/api/push/shelly?id=shed&name=Shed&hum=${ev.rh}&battery=${status[\"devicepower:0\"].battery.percent}"]},
+                {"id":3,"event":"temperature.change","urls":["http://example.org/other?t=${ev.tC}"]}],"rev":5}})"};
+        }
+        if (call["method"] == "Webhook.Update") updates.push_back(call["params"]);
+        return {200, R"({"id":1,"result":{"rev":6}})"};
+    };
+    CHECK(addShellyBattery(http, "192.168.1.42") == 1);  // only the one without it; not someone else's
+    REQUIRE(updates.size() == 1);
+    CHECK(updates[0]["id"] == 1);
+    CHECK(updates[0]["urls"][0] ==
+          "http://hb:8090/api/push/shelly?id=shed&name=Shed&temp=${ev.tC}&battery=${status[\"devicepower:0\"].battery.percent}");
+
+    http.requestHandler = [](const HttpRequest&) -> HttpResponse { throw HttpError("timeout"); };
+    CHECK_THROWS(addShellyBattery(http, "192.168.1.42"));
+}

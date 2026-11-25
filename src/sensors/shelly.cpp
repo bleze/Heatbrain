@@ -305,4 +305,27 @@ ShellySetupResult setupShelly(HttpClient& http, std::string_view host, std::stri
     return out;
 }
 
+int addShellyBattery(HttpClient& http, std::string_view host) {
+    const json hooks = rpc(http, host, "Webhook.List");
+    int changed = 0;
+    if (!hooks.contains("hooks")) return 0;
+    for (const auto& h : hooks["hooks"]) {
+        if (!h.contains("id") || !h.contains("urls") || !h["urls"].is_array()) continue;
+        json urls = json::array();
+        bool update = false;
+        for (const auto& u : h["urls"]) {
+            if (isHeatbrainUrl(u) && u.get<std::string>().find("battery=") == std::string::npos) {
+                urls.push_back(u.get<std::string>().append(kShellyBatteryToken));
+                update = true;
+            } else {
+                urls.push_back(u);
+            }
+        }
+        if (!update) continue;
+        rpc(http, host, "Webhook.Update", json{{"id", h["id"]}, {"urls", urls}});
+        ++changed;
+    }
+    return changed;
+}
+
 }  // namespace hb
