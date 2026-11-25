@@ -859,7 +859,8 @@ function renderElectricity({ t0, t1, now, prices, W, m, ticks }) {
   if (showPrice) {
     el("text", { class: "panel-label", x: m.l, y: priceTop - 8 }, svg, `Price ${state.status?.currency || ""}/kWh`);
     const pv = prices.map((p) => p[1]);
-    const pTicks = niceTicks(Math.min(0, ...pv), Math.max(...pv), 2);
+    // About 4 steps: the axis ends just above the highest price (2 steps made 5.2 a 0-10 axis).
+    const pTicks = niceTicks(Math.min(0, ...pv), Math.max(...pv), 4);
     const plo = pTicks[0], phi = pTicks[pTicks.length - 1];
     const yP = (v) => priceTop + (1 - (v - plo) / (phi - plo)) * panelH;
     for (const v of pTicks) {
