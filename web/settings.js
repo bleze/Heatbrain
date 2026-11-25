@@ -277,6 +277,8 @@
     velux: { label: "VELUX ACTIVE", icon: "velux" },
     devi: { label: "DEVI thermostat", icon: "devi" },
     shelly: { label: "Shelly", icon: "shelly" },
+    sonoff: { label: "Sonoff plug", icon: "sonoff" },
+    plug: { label: "Plug", icon: "plug" },
   };
   const sourceOf = (key) => (key || "").split(":")[0];
   const sourceInfo = (src) => SOURCES[src] || { label: src, icon: "thermo" };
@@ -314,13 +316,13 @@
 
   // A dropdown that can show icons (a native select cannot): plain choices first, then a heading
   // per source. Keyboard: arrows open it and move, Enter or Space picks, Esc closes.
-  function sensorPicker({ value, plain, groups, onPick }) {
+  function sensorPicker({ value, plain, groups, onPick, placeholder = "— choose a sensor —" }) {
     const wrap = el("div", { class: "picker" });
     const all = [...plain.map((p) => ({ ...p, source: null })), ...groups.flatMap((g) => g.items.map((it) => ({ ...it, source: g.source })))];
     const cur = all.find((o) => o.value === value);
     const b = el("button", { type: "button", class: "picker-btn", "aria-haspopup": "listbox", "aria-expanded": "false" }, wrap);
     if (cur?.source) b.appendChild(sourceIcon(cur.source));
-    el("span", { class: "lbl" }, b, cur ? `${cur.label}${cur.temp != null ? ` · ${cur.temp.toFixed(1)}°` : ""}` : value ? `${value} (not found)` : "— choose a sensor —");
+    el("span", { class: "lbl" }, b, cur ? `${cur.label}${cur.temp != null ? ` · ${cur.temp.toFixed(1)}°` : ""}` : value ? `${value} (not found)` : placeholder);
     if (cur?.source) el("span", { class: "src-tag" }, b, sourceInfo(cur.source).label);
     let pop = null, active = -1, opts = [];
     const outside = (e) => { if (!wrap.contains(e.target)) close(false); };
@@ -441,6 +443,60 @@
       : (state.status?.sensors || []).length ? "" : "No sensors yet: set up Netatmo on the Sensors tab" });
   }
 
+  // What heats the room, in the same kind of dropdown as its sensor: plugs (one dropdown per plug,
+  // and one to add another) or a thermostat (then heatbrain sets its setpoint instead of switching).
+  function heaterField(g, room, nameAfter) {
+    const plugs = S.cfg.plugs || [], stats = S.cfg.thermostats || [];
+    const chosen = room.thermostat ? [] : (room.plugs || []).filter((id) => plugs.some((p) => p.id === id));
+    const usedBy = (id) => S.cfg.rooms.find((r) => r !== room && !r.thermostat && (r.plugs || []).includes(id))?.name;
+    const plugItem = (p) => ({ value: `plug:${p.id}`, label: `${p.name || p.id}${usedBy(p.id) ? ` (also ${usedBy(p.id)})` : ""}`, sonoff: isSonoff(p) });
+    // Free plugs (not yet in this room, except `keep`), by kind; thermostats when the room has at most one plug.
+    const groupsFor = (keep, withStats) => {
+      const free = plugs.filter((p) => p.id === keep || !chosen.includes(p.id)).map(plugItem);
+      const gs = [];
+      if (free.some((i) => i.sonoff)) gs.push({ source: "sonoff", items: free.filter((i) => i.sonoff) });
+      if (free.some((i) => !i.sonoff)) gs.push({ source: "plug", items: free.filter((i) => !i.sonoff) });
+      if (withStats && stats.length) gs.push({ source: "devi", items: stats.map((t) => ({ value: `stat:${t.id}`, label: t.name || t.id })) });
+      return gs;
+    };
+    const pickDevice = (v, replacing) => {
+      if (v.startsWith("stat:")) {
+        const t = stats.find((x) => x.id === v.slice(5));
+        room.thermostat = t.id; delete room.plugs; delete room.priceOnly;
+        if (!room.sensor) room.sensor = `devi:${t.id}`;
+        nameAfter(t.name || t.id);
+      } else {
+        const id = v.slice(5);
+        delete room.thermostat;
+        room.plugs = (room.plugs || []).filter((x) => x !== replacing);
+        if (!room.plugs.includes(id)) room.plugs.push(id);
+        nameAfter(plugs.find((p) => p.id === id)?.name || id);
+      }
+      changed(); render();
+    };
+    const col = el("div", { style: "display:flex;flex-direction:column;gap:6px" });
+    const remove = { value: "-", label: "None (remove)" };
+    if (room.thermostat) {
+      col.appendChild(sensorPicker({ value: `stat:${room.thermostat}`, plain: [remove], groups: groupsFor(null, true),
+        onPick: (v) => { if (v === "-") { delete room.thermostat; changed(); render(); } else pickDevice(v); } }));
+    } else {
+      for (const id of chosen) {
+        col.appendChild(sensorPicker({ value: `plug:${id}`, plain: [remove], groups: groupsFor(id, chosen.length === 1),
+          onPick: (v) => {
+            if (v === "-") { room.plugs = room.plugs.filter((x) => x !== id); changed(); render(); } else pickDevice(v, id);
+          } }));
+      }
+      const more = groupsFor(null, !chosen.length);
+      if (more.length) {
+        col.appendChild(sensorPicker({ value: "", plain: [], groups: more, onPick: (v) => pickDevice(v),
+          placeholder: chosen.length ? "+ another plug" : "— choose a plug or thermostat —" }));
+      }
+    }
+    field(g, room.thermostat ? "Thermostat" : chosen.length > 1 ? "Plugs" : "Heated by", col, {
+      hint: !plugs.length && !stats.length ? "add plugs (or a thermostat) on the Heaters tab first"
+        : room.thermostat ? "heatbrain sets its setpoint" : chosen.length > 1 ? "switched together" : "" });
+  }
+
   function renderRoom(list, room, idx) {
     const c = el("div", { class: "card", style: "margin:0;background:var(--surface-2)", "data-room": room.id }, list);
     if (S.scrollToRoom === room.id) {
@@ -503,44 +559,9 @@
     down.title = "Move down (later on the dashboard)"; down.disabled = idx === S.cfg.rooms.length - 1;
     confirmBtn(right, "", "trash", "Delete room?", () => { S.cfg.rooms.splice(idx, 1); changed(); render(); }, "ghost danger");
 
-    // Plugs, or a thermostat (then heatbrain sets its setpoint instead of switching)
-    const plugsRow = el("div", { class: "row", style: "margin-top:12px" }, c);
-    el("span", { class: "muted" }, plugsRow, room.thermostat ? "Thermostat:" : "Plugs:");
-    const plugs = room.thermostat ? [] : S.cfg.plugs || [];
-    if (!room.thermostat && !plugs.length && !(S.cfg.thermostats || []).length) el("span", { class: "hint" }, plugsRow, "add plugs (or a thermostat) on the Heating tab first");
-    for (const t of S.cfg.thermostats || []) {
-      const on = room.thermostat === t.id;
-      if (!on && room.plugs?.length) continue;  // plugs chosen: no thermostat pills
-      const pill = el("button", { type: "button", class: `pick${on ? " on" : ""}`, "aria-pressed": on }, plugsRow);
-      if (on) pill.appendChild(icon("check"));
-      pill.appendChild(icon("devi"));  // thermostats are DEVIreg Smart: their mark, as on the Heaters tab
-      pill.appendChild(document.createTextNode(t.name || t.id));
-      pill.addEventListener("click", (e) => {
-        e.preventDefault();
-        if (on) delete room.thermostat;
-        else { room.thermostat = t.id; delete room.plugs; delete room.priceOnly; if (!room.sensor) room.sensor = `devi:${t.id}`; nameAfter(t.name || t.id); }
-        changed(); render();
-      });
-    }
-    for (const p of plugs) {
-      // Pick several from a list: selectable pills (on/off settings use switches). Sonoff plugs carry
-      // the Sonoff mark (from the saved model or name now, from the plug's status once it arrives).
-      const on = (room.plugs || []).includes(p.id);
-      const pill = el("button", { type: "button", class: `pick${on ? " on" : ""}`, "aria-pressed": on, "data-plug": p.id }, plugsRow);
-      if (on) pill.appendChild(icon("check"));
-      const mark = isSonoff(p) ? icon("sonoff") : on ? null : icon("plug");
-      if (mark) { mark.classList.add("plug-mark"); pill.appendChild(mark); }
-      pill.appendChild(document.createTextNode(p.name || p.id));
-      pill.addEventListener("click", (e) => {
-        e.preventDefault();
-        room.plugs = (room.plugs || []).filter((x) => x !== p.id);
-        if (!on) { room.plugs.push(p.id); nameAfter(p.name || p.id); }
-        changed(); render();
-      });
-    }
-
     if (room.priceOnly) {
       const g = el("div", { class: "form-grid room-fields" }, c);
+      heaterField(g, room, nameAfter);
       sensorField(g, room);
       const ch = field(g, "Cheapest hours per day", num(room.priceOnly, "hoursPerDay", { min: 0, max: 24, step: 1, unit: "h" }), { hint: "heats only in those hours" });
       helpButton(ch.querySelector("span"), "priceOnly", g);
@@ -556,6 +577,7 @@
     }
 
     const g = el("div", { class: "form-grid room-fields" }, c);
+    heaterField(g, room, nameAfter);
     sensorField(g, room);
     const nb = field(g, "Never below", num(room, "minTemp", { step: 0.5, unit: "°C" }), { hint: "heats whatever the price" });
     helpButton(nb.querySelector("span"), "limits", g);
@@ -744,7 +766,7 @@
   }
 
   // One scan for everything heatbrain can find on the network (Sonoff/Tasmota plugs, Shellys),
-  // at the top of both the Plugs and the Sensors tab: the same results on both.
+  // at the top of both the Heaters and the Sensors tab: the same results on both.
   function renderFindDevices(body) {
     const disc = el("section", { class: "card" }, body);
     sectionHead(disc, "Find devices", "search", "violet",
