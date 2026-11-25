@@ -486,7 +486,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 /* Sonoff: a white wordmark used as a mask, so it takes the badge's colour (grey, or white when on) */
 .icon[data-icon="sonoff"] { stroke: none; }
 /* A wordmark: a wider badge, so its letters stay readable */
-.badge.src-badge.src-sonoff { width: 50px; }
+.badge.src-badge.src-sonoff, .badge.src-badge.wide { width: 50px; }
 .badge.src-badge .icon[data-icon="sonoff"] { width: 40px !important; height: 11.3px !important; }
 
 /* A dropdown that can show icons (a native <select> cannot): the room's sensor */

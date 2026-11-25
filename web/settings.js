@@ -781,7 +781,9 @@
     for (const d of shellys) {
       const r = el("div", { class: "item-head", style: "flex-wrap:wrap;gap:8px" }, list);
       const info = el("div", { class: "row" }, r);
-      info.appendChild(icon("shelly"));
+      // The same box as a plug's Sonoff badge, so the names line up.
+      const sb = el("span", { class: "badge src-badge src-shelly wide" }, info);
+      sb.appendChild(icon("shelly"));
       el("b", {}, info, d.pushName || d.name || d.app || d.model);
       const read = [d.temperature != null ? `${d.temperature.toFixed(1)}°` : "", d.humidity != null ? `${Math.round(d.humidity)} %` : "", d.battery != null ? `battery ${d.battery} %` : ""].filter(Boolean).join(" · ");
       el("span", { class: "muted" }, info, `${d.host} · Shelly ${d.app || d.model}${d.gen ? ` Gen${d.gen}` : ""}${read ? ` · ${read}` : ""}`);
@@ -791,9 +793,14 @@
       else if (!d.sensor && !/HT/i.test(d.app || "")) why = "no temperature sensor";
       if (why) { el("span", { class: "muted" }, r, why); continue; }
       const act = el("div", { class: "row", style: "gap:8px" }, r);
-      if (d.pushId) { const ok = el("span", { class: "chip ok" }, act); ok.appendChild(icon("check")); ok.appendChild(document.createTextNode("added")); }
-      const nm = el("input", { type: "text", value: d.pushName || d.name || "", placeholder: "Name, e.g. Shed", style: "width:150px", autocomplete: "off" }, act);
-      btn(act, d.pushId ? "Set up again" : "Set up", "check", (b) => setUpShelly(b, d.host, nm.value.trim(), d, nm), d.pushId ? "" : "primary");
+      if (d.pushId) {
+        // Like a plug that is added: the chip last, in the same column. Set up again keeps its name.
+        btn(act, "Set up again", null, (b) => setUpShelly(b, d.host, "", d, null), "ghost");
+        const ok = el("span", { class: "chip ok" }, act); ok.appendChild(icon("check")); ok.appendChild(document.createTextNode("added"));
+      } else {
+        const nm = el("input", { type: "text", value: d.name || "", placeholder: "Name, e.g. Shed", style: "width:150px", autocomplete: "off" }, act);
+        btn(act, "Set up", "check", (b) => setUpShelly(b, d.host, nm.value.trim(), d, nm), "primary");
+      }
     }
   }
 
