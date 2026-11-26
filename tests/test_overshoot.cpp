@@ -36,6 +36,15 @@ TEST_CASE("Overshoot: the median rise after the heat goes off") {
     CHECK(*learnOvershoot(sw, temps) == Approx(0.3));
 }
 
+TEST_CASE("Overshoot: only the latest cycles count") {
+    std::vector<HeatSwitch> sw;
+    std::vector<std::pair<Instant, double>> temps;
+    for (int i = 0; i < 6; ++i) cycle(sw, temps, kStart + hours{3 * i}, 0.2);  // last week's radiator knob
+    for (int i = 6; i < 10; ++i) cycle(sw, temps, kStart + hours{3 * i}, 0.5);  // turned up since
+    REQUIRE(learnOvershoot(sw, temps));
+    CHECK(*learnOvershoot(sw, temps) == Approx(0.5));  // 4 of the latest 7 rose 0.5
+}
+
 TEST_CASE("Overshoot: switch-offs that can't tell are left out") {
     std::vector<HeatSwitch> sw;
     std::vector<std::pair<Instant, double>> temps;

@@ -30,8 +30,8 @@ enum class Reason {
     CheapBoost,             // among the cheapest slots: heat a little extra
     BelowTarget,
     TargetReached,
-    HoldOn,                 // inside the hysteresis band, keep heating
-    HoldOff,                // inside the hysteresis band, keep off
+    HoldOn,                 // inside the band (or the minimum on-time), keep heating
+    HoldOff,                // inside the band, keep off
     CheapHours,             // price-only room: among today's cheapest hours
     NotCheapHours,
     AvoidWindow,            // price-only room: in a configured no-heat window
@@ -121,7 +121,7 @@ struct CoastStep {
     Instant at;
     Instant until;
     double floor = 0;
-    double level = 0;   // needed at `at` (at most max - hysteresis)
+    double level = 0;   // needed at `at` (at most max - the band)
     double outdoor = 0; // assumed during the off period
     double atEnd = 0;   // where the room is expected at `until`, from `level`: below `floor` when max caps it
     bool fallsShort() const { return atEnd < floor - 0.05; }
@@ -137,7 +137,8 @@ struct PlannerInput {
     Instant now;
     std::optional<double> temperature;
     std::optional<Instant> measuredAt;
-    bool currentlyOn = false;  // the planner's previous decision (hysteresis)
+    bool currentlyOn = false;  // the planner's previous decision (the band)
+    std::optional<Instant> onSince;  // when it last switched on (the minimum on-time), if on
     std::optional<ManualOverride> override;
     std::optional<AwayMode> away;  // whole-house away/holiday mode
     std::optional<Booking> booking;  // this room booked (in effect now)

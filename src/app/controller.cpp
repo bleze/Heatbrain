@@ -111,10 +111,13 @@ Controller::Controller(const TimeZone& tz, PriceModel& prices, std::vector<std::
       rooms_(std::move(rooms)),
       overrides_(overrides),
       history_(history) {
-    // Continue hysteresis where the previous run left off.
+    // Continue the band (and the minimum on-time) where the previous run left off.
     if (history_) {
         for (const auto& r : rooms_) {
-            if (auto last = history_->lastDecision(r.id)) lastOn_[r.id] = last->on;
+            if (auto last = history_->lastDecision(r.id)) {
+                lastOn_[r.id] = last->on;
+                if (last->on) onSince_[r.id] = last->at;
+            }
         }
     }
 }
@@ -443,6 +446,9 @@ TickResult Controller::tick(Instant now, bool apply) {
         PlannerInput in;
         in.now = now;
         in.currentlyOn = prev != lastOn_.end() && prev->second;
+        if (in.currentlyOn) {
+            if (auto since = onSince_.find(room.id); since != onSince_.end()) in.onSince = since->second;
+        }
         const SensorReading* reading = room.sensor.empty() ? nullptr : findSensor(room.sensor);
         if (reading) {
             in.temperature = reading->temperature;
@@ -611,6 +617,8 @@ TickResult Controller::tick(Instant now, bool apply) {
         if (apply) {
             rr.plugs = room.thermostat.empty() ? applyToPlugs(room, rr.decision.on, now, result)
                                                : applyToThermostat(room, rr.decision, result);
+            if (rr.decision.on && !(lastOn_.contains(room.id) && lastOn_[room.id])) onSince_[room.id] = now;
+            if (!rr.decision.on) onSince_.erase(room.id);
             lastOn_[room.id] = rr.decision.on;
             if (history_) {
                 history_->recordDecision({now, room.id, rr.decision.on, rr.changed,

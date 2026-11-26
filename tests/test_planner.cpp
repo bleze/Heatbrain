@@ -152,8 +152,10 @@ TEST_CASE("Peak: coast down to target minus the allowed drop") {
     CHECK(tooCold.on);
     CHECK(tooCold.reason == Reason::BelowComfortDuringPeak);
 
-    // Hysteresis: once heating in the peak, continue a little past the floor.
-    CHECK(decide(input(at(18), 18.1, /*on=*/true)).on);
+    // The band: once heating in the peak, continue a little past the floor (the curve towards 20 at
+    // 21:00 makes it 19.1 - 1.0 at 18:00, so on until 18.2).
+    CHECK(decide(input(at(18), 18.15, /*on=*/true)).on);
+    CHECK_FALSE(decide(input(at(18), 18.25, /*on=*/true)).on);
     CHECK_FALSE(decide(input(at(18), 18.4, /*on=*/true)).on);
 }
 
@@ -169,7 +171,7 @@ TEST_CASE("Pre-heat before the peak when it's clearly cheaper now") {
     CHECK(done.reason == Reason::TargetReached);
 
     // Outside the 3 h look-ahead: normal thermostat.
-    CHECK(decide(input(at(10), 19.2)).reason == Reason::HoldOff);
+    CHECK(decide(input(at(10), 19.05)).reason == Reason::HoldOff);
 }
 
 TEST_CASE("Cheapest slots: heat a little extra") {
@@ -181,7 +183,7 @@ TEST_CASE("Cheapest slots: heat a little extra") {
     CHECK_FALSE(decide(input(at(3), 19.5, true), r).on);  // reached target + 0.5
 }
 
-TEST_CASE("Thermostat with hysteresis and the night band across midnight") {
+TEST_CASE("Thermostat: on 0.1 below the target, off 0.1 above, and the night band across midnight") {
     CHECK(decide(input(at(12), 18.6)).reason == Reason::BelowTarget);
     CHECK(decide(input(at(12), 19.4)).reason == Reason::TargetReached);
     CHECK(decide(input(at(12), 19.0, true)).reason == Reason::HoldOn);
@@ -270,8 +272,8 @@ TEST_CASE("Keep above: a floor only, ignores price, no pre-heat or boost") {
     CHECK(decide(input(at(18), 15.5), r).reason == Reason::KeepSatisfied);
     CHECK(decide(input(at(3), 15.5), r).reason == Reason::KeepSatisfied);    // cheapest hours: no boost
     CHECK(decide(input(at(15), 15.5), r).reason == Reason::KeepSatisfied);   // before the peak: no pre-heat
-    CHECK(decide(input(at(12), 15.1, /*on=*/true), r).on);                   // hysteresis while heating
-    CHECK_FALSE(decide(input(at(12), 15.3, /*on=*/true), r).on);
+    CHECK(decide(input(at(12), 15.05, /*on=*/true), r).on);                  // the band while heating
+    CHECK_FALSE(decide(input(at(12), 15.1, /*on=*/true), r).on);
     CHECK(decide(input(at(12), 15.0), r).inputs.mode == "keep");
 }
 
@@ -669,10 +671,10 @@ TEST_CASE("Coast: the level an off period with a floor needs, from cooling towar
     CHECK(c->until == at(21));
     CHECK(c->floor == 19.0);
     CHECK(c->level == Catch::Approx(5 + 14 * std::exp(0.2)).epsilon(1e-6));
-    // Never above max - hysteresis.
+    // Never above max - the band.
     const auto cold = nextCoast(room, tz(), at(15), 0.2, nullptr, -5.0);
     REQUIRE(cold);
-    CHECK(cold->level == Catch::Approx(room.maxTemp - room.strategy.hysteresis));
+    CHECK(cold->level == Catch::Approx(room.maxTemp - kHeatBand));
     // Not from inside the off period, not for a plain off, not further ahead than asked.
     CHECK_FALSE(nextCoast(room, tz(), at(18), 0.05, nullptr, 5.0));
     CHECK_FALSE(nextCoast(peakOffRoom(std::nullopt), tz(), at(15), 0.05, nullptr, 5.0));
@@ -750,12 +752,12 @@ TEST_CASE("Plan: an off period shows the expected coast, and heat stored before 
 TEST_CASE("Coast: when max caps the stored heat, the period stays off and the shortfall is told") {
     auto room = peakOffRoom(20.0);
     room.maxTemp = 22;
-    // At 0 outside, 4 h at 5 %/h: 24.4 needed, but at most 21.7 can be stored.
+    // At 0 outside, 4 h at 5 %/h: 24.4 needed, but at most 21.9 can be stored.
     const auto c = nextCoast(room, tz(), at(15), 0.05, nullptr, 0.0);
     REQUIRE(c);
-    CHECK(c->level == Catch::Approx(21.7));
+    CHECK(c->level == Catch::Approx(21.9));
     CHECK(c->fallsShort());
-    CHECK(c->atEnd == Catch::Approx(21.7 * std::exp(-0.2)));
+    CHECK(c->atEnd == Catch::Approx(21.9 * std::exp(-0.2)));
     room.maxTemp = 25;
     CHECK_FALSE(nextCoast(room, tz(), at(15), 0.05, nullptr, 0.0)->fallsShort());
 
@@ -789,7 +791,7 @@ TEST_CASE("A quiet sensor with an estimate: a plain thermostat on the estimate i
     CHECK_THAT(d.detail, ContainsSubstring("No reading for 65 min"));
     CHECK_THAT(d.detail, ContainsSubstring("estimated 17.6"));
 
-    // Heating: on until the estimate reaches the target (not target + hysteresis: it is a guess).
+    // Heating: on until the estimate reaches the target (not target + the band: it is a guess).
     in.currentlyOn = true;
     in.estimate = 18.9;
     CHECK(decide(in).reason == Reason::EstimateHeating);
@@ -800,7 +802,7 @@ TEST_CASE("A quiet sensor with an estimate: a plain thermostat on the estimate i
 
     // Off and within the band: stays off.
     in.currentlyOn = false;
-    in.estimate = 18.8;
+    in.estimate = 18.95;
     CHECK_FALSE(decide(in).on);
 
     // No price games on a guess: below target in the peak still heats, at target in the cheapest hours does not.
@@ -823,31 +825,43 @@ TEST_CASE("A quiet sensor with an estimate: a plain thermostat on the estimate i
     CHECK_FALSE(decide(night, room).on);
 }
 
-TEST_CASE("Learned overshoot: heating stops that much earlier, but the band never closes") {
-    // 19 °C from 07:00 (hysteresis 0.3): normally on until 19.3.
-    auto in = input(at(12, 5), 19.1, true);
+TEST_CASE("Learned overshoot: heating stops that much earlier, held on for the minimum on-time") {
+    // 19 °C from 07:00: on at 18.9, normally on until 19.1.
+    auto in = input(at(12, 5), 19.05, true);
     CHECK(decide(in).on);
     in.overshoot = 0.3;  // the room rises 0.3° after switching off
     auto d = decide(in);
-    CHECK_FALSE(d.on);  // stops at 19.0 instead of 19.3
+    CHECK_FALSE(d.on);  // stops at 18.8 instead of 19.1
     CHECK(d.reason == Reason::TargetReached);
     CHECK_THAT(d.detail, ContainsSubstring("0.3° early for the after-heat"));
     CHECK(d.inputs.overshoot == 0.3);
 
-    // Starting is unchanged: off at 18.8, on at 18.7.
+    // Starting is unchanged: off at 18.95, on at 18.9.
     in.currentlyOn = false;
-    in.temperature = 18.8;
+    in.temperature = 18.95;
     CHECK_FALSE(decide(in).on);
-    in.temperature = 18.7;
+    in.temperature = 18.9;
     CHECK(decide(in).on);
 
-    // A huge overshoot: still heats up to 0.1° above where it starts (18.7 -> 18.8).
+    // The stop may be below the start: heating then runs while it is at or below the start ...
     in.overshoot = 1.5;
     in.currentlyOn = true;
-    in.temperature = 18.75;
+    in.temperature = 18.85;
     CHECK(decide(in).on);
-    in.temperature = 18.8;
+    in.temperature = 18.95;
     CHECK_FALSE(decide(in).on);
+    // ... and at least 15 minutes from switching on.
+    in.onSince = in.now - minutes{5};
+    d = decide(in);
+    CHECK(d.on);
+    CHECK(d.reason == Reason::HoldOn);
+    CHECK_THAT(d.detail, ContainsSubstring("at least 15 min"));
+    in.onSince = in.now - minutes{15};
+    CHECK_FALSE(decide(in).on);
+    // The max still wins over the minimum on-time.
+    in.onSince = in.now - minutes{5};
+    in.temperature = 22.0;
+    CHECK(decide(in).reason == Reason::AboveMax);
 
     // Keep-above periods too.
     auto room = bedroom();
@@ -856,6 +870,8 @@ TEST_CASE("Learned overshoot: heating stops that much earlier, but the band neve
     CHECK(decide(keep, room).on);
     keep.overshoot = 0.3;
     CHECK_FALSE(decide(keep, room).on);
+    keep.onSince = keep.now - minutes{10};
+    CHECK(decide(keep, room).on);
 }
 
 TEST_CASE("Limp mode heats what the room usually does in such a period, once that is learned") {

@@ -105,7 +105,7 @@ std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, I
     // Newton cooling backwards from the floor at the end: T(h) = out + (T0 - out) e^(-loss h).
     const double hours = length / 60.0;
     c.level = c.floor <= c.outdoor ? c.floor : c.outdoor + (c.floor - c.outdoor) * std::exp(std::min(loss * hours, 50.0));
-    c.level = std::min(c.level, room.maxTemp - room.strategy.hysteresis);
+    c.level = std::min(c.level, room.maxTemp - kHeatBand);
     c.atEnd = c.level <= c.outdoor ? c.level : c.outdoor + (c.level - c.outdoor) * std::exp(-std::min(loss * hours, 50.0));
     return c;
 }
@@ -420,17 +420,27 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 
     const bool fresh = in.temperature && in.measuredAt && in.now - *in.measuredAt <= s.staleAfter;
     const double t = in.temperature.value_or(0.0);
-    const double h = s.hysteresis;
+    const double h = kHeatBand;
     const std::string currency = prices.currency;
     // The room keeps warming after the heat goes off (learned): stop that much before each "heat until"
-    // level, but always at least 0.1° above where heating starts, so the band never closes.
+    // level - below where heating starts, if the after-heat is that large. The minimum on-time keeps
+    // the relay from clicking every tick then: each start heats at least that long, the after-heat does the rest.
     const double early = std::clamp(in.overshoot.value_or(0.0), 0.0, 1.5);
     if (early >= 0.05) inputs.overshoot = early;
-    const auto stopAt = [&](double startAt, double until) { return std::max(startAt + 0.1, until - early); };
+    const auto stopAt = [&](double until) { return until - early; };
+    const bool minOnLeft = in.currentlyOn && in.onSince && in.now - *in.onSince < kMinHeatOn;
+    // Already heating: carry on below the stop, or for the rest of the minimum on-time.
+    const auto keepOn = [&](double until) { return in.currentlyOn && (t < stopAt(until) || minOnLeft); };
+    // ", on for at least 15 min" when only the minimum on-time keeps it on.
+    const auto minOnNote = [&](double until) {
+        return in.currentlyOn && t >= stopAt(until) && minOnLeft
+                   ? std::format(", on for at least {} min", kMinHeatOn.count())
+                   : std::string();
+    };
     // "…, 0.3° early for the after-heat" when that is what switched it off.
-    const auto earlyNote = [&](double startAt, double until) {
-        return in.currentlyOn && early >= 0.05 && t >= stopAt(startAt, until) && t < until
-                   ? std::format(", stopping {:.1f}° early for the after-heat", until - stopAt(startAt, until))
+    const auto earlyNote = [&](double until) {
+        return in.currentlyOn && early >= 0.05 && t >= stopAt(until) && t < until
+                   ? std::format(", stopping {:.1f}° early for the after-heat", early)
                    : std::string();
     };
 
@@ -485,7 +495,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 
     // 4. No trustworthy temperature.
     //    A recent last reading and learned rates: a plain thermostat on the estimate - no price
-    //    boosts on a guess, and only up to the target (not target + hysteresis).
+    //    boosts on a guess, and only up to the target (not target + the band).
     if (!fresh && in.estimate) {
         const double est = *in.estimate;
         inputs.estimate = est;
@@ -520,10 +530,10 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     // 5. "Keep above": a floor only - no pre-heating or boosting, price does not matter.
     if (mode == ProgramMode::Keep) {
         const std::string where = std::format("{} (keep above {} for {})", temp(t), temp(target), inputs.targetLabel);
-        if (t <= target - h || (in.currentlyOn && t < stopAt(target - h, target + h))) {
-            return make(true, Reason::KeepAbove, "Below the floor: " + where, inputs);
+        if (t <= target - h || keepOn(target + h)) {
+            return make(true, Reason::KeepAbove, "Below the floor: " + where + minOnNote(target + h), inputs);
         }
-        return make(false, Reason::KeepSatisfied, "Above the floor: " + where + earlyNote(target - h, target + h), inputs);
+        return make(false, Reason::KeepSatisfied, "Above the floor: " + where + earlyNote(target + h), inputs);
     }
 
     // 6. Hard minimum in heat periods, whatever the price.
@@ -535,7 +545,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     // 7. Expensive now: coast, unless it gets too cold (not when booked: someone is there).
     if (outlook.expensive && !booked && !warmingAnyPrice) {
         const double floor = target - s.peakAllowedDrop;
-        if (t < floor || (in.currentlyOn && t < stopAt(floor, floor + h))) {
+        if (t < floor || keepOn(floor + h)) {
             return make(true, Reason::BelowComfortDuringPeak,
                         std::format("Expensive now ({:.2f} {}/kWh), but {} is below {} (target {} - {:.1f})",
                                     *outlook.current, currency, temp(t), temp(floor), temp(target), s.peakAllowedDrop),
@@ -569,7 +579,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                               outside ? std::format(" at {} outside{}", temp(*outside), forecast ? " (forecast)" : "") : "");
         }
         const double ceiling = std::min(target + boost, room.maxTemp - h);
-        if (due && (t < ceiling - h || (in.currentlyOn && t < stopAt(ceiling - h, ceiling)))) {
+        if (due && (t < ceiling - h || keepOn(ceiling))) {
             inputs.ceiling = ceiling;
             return make(true, Reason::PreheatBeforePeak,
                         std::format("Pre-heating to {} before expensive period at {} ({:.2f} vs {:.2f} {}/kWh now{})",
@@ -582,7 +592,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     // 9. Among the cheapest slots: a little extra.
     if (outlook.cheapest && !warmingAnyPrice) {
         const double ceiling = std::min(target + s.cheapBoost, room.maxTemp - h);
-        if (t < ceiling - h || (in.currentlyOn && t < stopAt(ceiling - h, ceiling))) {
+        if (t < ceiling - h || keepOn(ceiling)) {
             inputs.ceiling = ceiling;
             return make(true, Reason::CheapBoost,
                         std::format("Among the cheapest slots ({:.2f} {}/kWh, median {:.2f}): heating to {}",
@@ -599,7 +609,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         const std::string what = booked ? "the booking" : inputs.storing ? "the off period" : "the next period";
         const std::string where = std::format("{} (curve {} now, {} at {})", temp(t), temp(target), temp(*inputs.warmupTo),
                                               formatLocalHm(tz.toLocal(warmupAt)));
-        if (t < target || (in.currentlyOn && t < stopAt(target, target + h))) {
+        if (t < target || keepOn(target + h)) {
             if (inputs.storing) {
                 return make(true, Reason::WarmUp,
                             std::format("Storing heat for the off period (to stay above {}): {}{}", temp(*inputs.coastAbove),
@@ -612,14 +622,14 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                     inputs);
     }
 
-    // 10. Plain thermostat with hysteresis.
+    // 10. Plain thermostat: on at target - 0.1, off at target + 0.1 less the after-heat.
     const std::string where = std::format("{} (target {} for {})", temp(t), temp(target), inputs.targetLabel);
     if (t <= target - h) return make(true, Reason::BelowTarget, "Below target: " + where, inputs);
-    if (t >= stopAt(target - h, target + h)) {
-        return make(false, Reason::TargetReached, "Target reached: " + where + earlyNote(target - h, target + h), inputs);
+    if (keepOn(target + h)) return make(true, Reason::HoldOn, "Heating within band: " + where + minOnNote(target + h), inputs);
+    if (t >= stopAt(target + h)) {
+        return make(false, Reason::TargetReached, "Target reached: " + where + earlyNote(target + h), inputs);
     }
-    return in.currentlyOn ? make(true, Reason::HoldOn, "Heating within band: " + where, inputs)
-                          : make(false, Reason::HoldOff, "Within band: " + where, inputs);
+    return make(false, Reason::HoldOff, "Within band: " + where, inputs);
 }
 
 }  // namespace hb
@@ -697,7 +707,7 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
                 if (kind == "off") coastFrom = *room_t;
                 *room_t = outside + (*room_t - outside) * cool;
                 const double floor = kind == "off" ? room.frostTemp : d.inputs.target.value_or(room.frostTemp);
-                if (kind == "keep" && *room_t > floor + room.strategy.hysteresis) kind = "idle";
+                if (kind == "keep" && *room_t > floor + kHeatBand) kind = "idle";
                 *room_t = std::max(*room_t, floor);  // heating holds it at the floor
                 if (kind == "off") coastTo = *room_t;
             } else if (d.inputs.target &&
@@ -707,7 +717,7 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
                 const double ceiling = d.inputs.ceiling.value_or(
                     *d.inputs.target + (kind == "coast" ? -room.strategy.peakAllowedDrop : 0.0));
                 *room_t = outside + (*room_t - outside) * cool;
-                if (*room_t > ceiling + room.strategy.hysteresis) kind = "idle";
+                if (*room_t > ceiling + kHeatBand) kind = "idle";
                 else *room_t = std::max(*room_t, ceiling);
             } else if (d.inputs.target) {
                 *room_t = std::max(*room_t, *d.inputs.target - (kind == "coast" ? room.strategy.peakAllowedDrop : 0.0));

@@ -38,8 +38,14 @@ struct ProgramPoint {
 };
 
 // How eagerly the planner trades comfort for price. Defaults are deliberately mild.
+// Heating starts this far below a target (or "heat until" level) and, without a learned after-heat,
+// stops this far above it. The room's learned after-heat moves the stop down instead.
+inline constexpr double kHeatBand = 0.1;
+// Once on, a heater stays on at least this long (unless a hard limit says off), so stopping early for
+// the after-heat never clicks the relay every tick.
+inline constexpr std::chrono::minutes kMinHeatOn{15};
+
 struct Strategy {
-    double hysteresis = 0.3;        // ±°C around target before switching
     double peakAllowedDrop = 1.0;   // during expensive slots, coast down to target - this
     double preheatBoost = 1.0;      // before expensive slots, heat up to target + this
     std::chrono::minutes preheatWindow{180};  // look this far ahead for expensive slots

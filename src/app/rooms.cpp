@@ -47,7 +47,6 @@ namespace {
 Strategy parseStrategy(const json& j) {
     Strategy s;
     if (!j.is_object()) return s;
-    s.hysteresis = j.value("hysteresis", s.hysteresis);
     s.peakAllowedDrop = j.value("peakAllowedDrop", s.peakAllowedDrop);
     s.preheatBoost = j.value("preheatBoost", s.preheatBoost);
     s.preheatWindow = minutes{j.value("preheatMinutes", s.preheatWindow.count())};
@@ -56,7 +55,6 @@ Strategy parseStrategy(const json& j) {
     s.limpOn = minutes{j.value("limpOnMinutes", s.limpOn.count())};
     s.limpOff = minutes{j.value("limpOffMinutes", s.limpOff.count())};
     s.limpConfigured = j.contains("limpOnMinutes") || j.contains("limpOffMinutes");
-    if (s.hysteresis < 0 || s.hysteresis > 2) throw std::runtime_error("strategy.hysteresis must be 0..2");
     if (s.staleAfter < minutes{10}) throw std::runtime_error("strategy.staleMinutes must be at least 10");
     return s;
 }

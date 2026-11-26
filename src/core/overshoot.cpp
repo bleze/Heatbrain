@@ -31,6 +31,9 @@ std::optional<double> learnOvershoot(const std::vector<HeatSwitch>& switches,
         rises.push_back(std::max(0.0, *peak - *start));
     }
     if (rises.size() < 3) return std::nullopt;
+    // The latest cycles only: the after-heat changes with the weather, the radiator's knob and how
+    // long each heating run is, so old cycles would hold it back.
+    if (rises.size() > kRecentCycles) rises.erase(rises.begin(), rises.end() - kRecentCycles);
     std::sort(rises.begin(), rises.end());
     const std::size_t n = rises.size();
     const double median = n % 2 ? rises[n / 2] : (rises[n / 2 - 1] + rises[n / 2]) / 2;

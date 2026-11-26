@@ -133,7 +133,7 @@ std::vector<OnSpan> offlineSchedule(const RoomConfig& room, const PriceTable& pr
             // heating is not needed. Without a starting temperature: the whole run.
             std::size_t first = i;
             if (start && slots[i].target) {
-                const double need = *slots[i].target + room.strategy.hysteresis;
+                const double need = *slots[i].target + kHeatBand;
                 while (first < j && unheated[first] && *unheated[first] > need) ++first;
             }
             const double share = std::clamp(duty.forRun(g == Group::Keep, slots[i].target), 0.0, 1.0);

@@ -52,7 +52,7 @@ const HELP = {
       "Heat to X: keeps the room around X and is clever about prices - pre-heats before expensive hours, lets the room cool a little while it is expensive, and adds a little extra in the cheapest hours.",
       "Keep above X: only heats when the room falls below X. No pre-heating or boosting, and the price does not matter. Good for nights or rooms you rarely use.",
       "Off: never heats - only frost protection still does (5 °C by default). Use it for the 17-21 peak tariff or for sleeping.",
-      "Off, stay above X: still never heats during the period, but stores heat just before it, so the room coasts through and is still above X when it ends. How much depends on how long the period is, the forecast outdoor temperature and how fast the room cools (learned; until then a cautious guess). It heats along the same curve as a warm-up, reaching the level about half an hour before the period starts, whatever the price. It never stores more than the room's max allows (max − hysteresis): when that does not last through the period, the period still stays off, and the program row, the plan and the chart say how far it is expected to fall - raise the max, lower the floor or shorten the period. Choose plain Off for no floor. Good for the peak tariff in rooms you use in the evening; for an empty room, a plain off saves more.",
+      "Off, stay above X: still never heats during the period, but stores heat just before it, so the room coasts through and is still above X when it ends. How much depends on how long the period is, the forecast outdoor temperature and how fast the room cools (learned; until then a cautious guess). It heats along the same curve as a warm-up, reaching the level about half an hour before the period starts, whatever the price. It never stores more than the room's max allows (max − 0.1): when that does not last through the period, the period still stays off, and the program row, the plan and the chart say how far it is expected to fall - raise the max, lower the floor or shorten the period. Choose plain Off for no floor. Good for the peak tariff in rooms you use in the evening; for an empty room, a plain off saves more.",
     ],
   },
   limits: {
@@ -73,7 +73,7 @@ const HELP = {
       "Pre-heating: when an expensive period is coming and the price now is at least 15 % lower, heatbrain heats a little above target so the room can coast through it. Until it has learned how fast the room warms and cools, that is 1 °C above target, looking 3 hours ahead - more when it will be cold outside during the expensive hours (up to ×1.5), less when mild (down to ×0.5).",
       "Once it has learned (a few days of history), pre-heating is worked out instead: just enough that the room coasts through the whole expensive stretch without falling more than the peak coasting allows, never above the room's max - and started only as late as heating that far allows, because stored heat leaks away. It then looks up to 8 hours ahead, so a slow room (a concrete floor) can start in time. On a mild evening that can mean no pre-heating at all.",
       "Cheap boost (default 0.5 °C): in the cheapest hours, heat up to target + this - heat stored when it costs least.",
-      "Hysteresis (default 0.3 °C): heating starts at target - 0.3 and stops at target + 0.3, so the relay does not click on and off every few minutes.",
+      "Heating starts at target - 0.1 °C. A radiator keeps warming the room after it switches off, so heatbrain learns each room's after-heat (the median rise after its last 7 switch-offs) and stops that much before target + 0.1 - below the target, if the after-heat is large. Each start heats at least 15 minutes, so the relay never clicks on and off every few minutes. The line then runs close to the target instead of swinging around it.",
       "Readings older than 30 minutes are not trusted. For up to 3 hours heatbrain then estimates the temperature from the last reading - cooling towards outdoors, warming while it heated since, at the rates it has learned for the room - and heats to the target on that estimate (no price boosts on a guess). Without learned rates, or after 3 hours, the room runs limp mode until fresh readings arrive: as much as it usually heats in such a period (learned from the last week, at most 45 minutes an hour), or 10 minutes an hour until that is known.",
     ],
   },
@@ -237,7 +237,7 @@ const RULES = [
   ["Expensive now", "coast down to target - peak coasting"],
   ["Expensive soon, cheaper now", "pre-heat to target + boost (more when cold outside)"],
   ["Among the cheapest hours", "heat to target + cheap boost"],
-  ["Otherwise", "thermostat: target ± hysteresis"],
+  ["Otherwise", "thermostat: on at target - 0.1, off early for the after-heat"],
 ];
 
 function helpContent(keys) {

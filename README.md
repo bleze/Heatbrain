@@ -211,11 +211,17 @@ planner decides each room, checking in this order:
 | 9 | Expensive slot within 3 h and clearly cheaper now: pre-heat (see below) | `PREHEAT_BEFORE_PEAK` |
 | 10 | Among the cheapest slots: heat to target + 0.5 °C | `CHEAP_BOOST` |
 | 11 | Warming up for a warmer period ahead (see below): heat below the curve | `WARM_UP`, `WARM_UP_ON_TRACK` |
-| 12 | Thermostat with ±0.3 °C hysteresis | `BELOW_TARGET`, `TARGET_REACHED`, `HOLD_ON`, `HOLD_OFF` |
+| 12 | Thermostat: on at target − 0.1 °C, off at target + 0.1 °C less the after-heat (see below) | `BELOW_TARGET`, `TARGET_REACHED`, `HOLD_ON`, `HOLD_OFF` |
 
 "Expensive" = top quarter of the next 24 h *and* 15% above the median; "cheapest" = bottom
 quarter *and* 10% below the median, so flat-price days fall back to a plain thermostat.
 All margins are configurable per room (`strategy`).
+
+**The band and the after-heat.** Every rule that heats "until" a level starts 0.1 °C below it
+(fixed; there is no hysteresis setting). A radiator keeps warming the room after it switches off,
+so heatbrain learns each room's after-heat - the median rise after its latest 7 switch-offs - and
+stops that much before the level + 0.1 °C, below where heating starts if need be. Each start then
+heats at least 15 minutes, so stopping early never makes the relay click every tick.
 
 **Pre-heating.** Until a room's heating model is learned, it heats to target + 1.0 °C, scaled
 ×0.5–1.5 by the outdoor temperature expected during the expensive hours (forecast, else the
@@ -239,9 +245,9 @@ a warm-up inside the Wi-Fi off period at full power, and thermostats get the new
 **Coasting through an off period.** An off point with `"coastAbove": 19` still never heats during
 the period, but heat is stored just before it: the level the room needs so that, cooling towards the
 forecast outdoor temperature at its learned rate (a cautious 5 %/h until learned) for the whole
-period, it is still above 19 when the period ends (at most `maxTemp` − hysteresis). It is reached
+period, it is still above 19 when the period ends (at most `maxTemp` − 0.1 °C). It is reached
 along the warm-up curve, regardless of price (the floor was asked for). It never stores more than
-`maxTemp` − hysteresis allows; when that does not last, the period still stays off and the program
+`maxTemp` − 0.1 °C allows; when that does not last, the period still stays off and the program
 row, the plan strip, the chart and the decision text say how far the room is expected to fall. In the room chart the hours
 ahead show how the room is expected to coast through every off period, and the floor as a thin
 solid line marked with its value, so off periods are no longer holes in the target line.

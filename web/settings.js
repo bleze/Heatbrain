@@ -701,9 +701,9 @@
     const ag = el("div", { class: "form-grid" }, adv);
     field(ag, "Peak coasting", num(st, "peakAllowedDrop", { step: 0.1, placeholder: "1.0", unit: "−°C" }), { hint: "below target in expensive hours" });
     // Worked out by heatbrain now (still read from the config file if set there): how much and how early
-    // to pre-heat (from the learned rates), when a reading is too old, and limp mode's share.
+    // to pre-heat (from the learned rates), when a reading is too old, and limp mode's share. The band
+    // is fixed (0.1 °C, stopping early by the learned after-heat), so it has no field.
     field(ag, "Cheap boost", num(st, "cheapBoost", { step: 0.1, placeholder: "0.5", unit: "+°C" }), { hint: "extra in the cheapest hours" });
-    field(ag, "Hysteresis", num(st, "hysteresis", { step: 0.1, placeholder: "0.3", unit: "±°C" }), { hint: "avoids rapid on/off" });
   }
 
   // Cool -> warm ramp through nearby stops only (blending blue straight into amber passes

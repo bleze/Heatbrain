@@ -145,8 +145,8 @@ TEST_CASE("Decisions and temperatures are recorded; 'changed' marks switch event
     f.now += minutes{5};
     f.controller->tick(f.now, true);  // still ON: not a change
     f.setTemps(19.5, 14.0);
-    f.now += minutes{5};
-    f.controller->tick(f.now, true);  // target reached: OFF
+    f.now += minutes{10};
+    f.controller->tick(f.now, true);  // target reached, on for 15 min (the minimum): OFF
 
     const auto all = f.history.decisions("bedroom", f.now - hours{1}, f.now + seconds{1}, false);
     REQUIRE(all.size() == 3);
