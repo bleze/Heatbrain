@@ -105,6 +105,9 @@ History::History(const std::filesystem::path& dbFile) {
             sensor_key TEXT NOT NULL, day INTEGER NOT NULL, n INTEGER NOT NULL,
             t_sum REAL NOT NULL, t_min REAL NOT NULL, t_max REAL NOT NULL, h_n INTEGER NOT NULL, h_sum REAL NOT NULL,
             PRIMARY KEY (sensor_key, day));
+        CREATE TABLE IF NOT EXISTS room_days (
+            room_id TEXT NOT NULL, date TEXT NOT NULL, on_hours REAL NOT NULL, kwh REAL NOT NULL,
+            covered_hours REAL NOT NULL, PRIMARY KEY (room_id, date));
     )");
     // Added later (older databases get them on start-up): CO2 per reading, and per day.
     addColumnIfMissing("temperatures", "co2", "REAL");
@@ -268,6 +271,45 @@ void History::fillSensorDays(const std::function<Instant(Instant)>& dayOf) {
     }
 }
 
+std::vector<RoomDay> History::roomDays(const std::string& roomId, const std::string& fromDate,
+                                      const std::string& toDate) const {
+    Stmt s(db_, "SELECT date, on_hours, kwh, covered_hours FROM room_days WHERE room_id=? AND date>=? AND date<=? ORDER BY date");
+    s.bind(1, roomId).bind(2, fromDate).bind(3, toDate);
+    std::vector<RoomDay> out;
+    while (s.step()) out.push_back({s.text(0), s.dbl(1), s.dbl(2), s.dbl(3)});
+    return out;
+}
+
+void History::saveRoomDays(const std::string& roomId, const std::vector<RoomDay>& days) {
+    exec("BEGIN");
+    try {
+        Stmt s(db_, "INSERT OR REPLACE INTO room_days VALUES (?,?,?,?,?)");
+        for (const auto& d : days) {
+            s.reset();
+            s.bind(1, roomId).bind(2, d.date).bind(3, d.onHours).bind(4, d.kWh).bind(5, d.coveredHours);
+            s.step();
+        }
+        exec("COMMIT");
+    } catch (...) {
+        exec("ROLLBACK");
+        throw;
+    }
+}
+
+std::optional<Instant> History::firstDecision(const std::string& roomId) const {
+    Stmt s(db_, "SELECT min(ts) FROM decisions WHERE room_id=?");
+    s.bind(1, roomId);
+    if (!s.step() || s.isNull(0)) return std::nullopt;
+    return s.instant(0);
+}
+
+std::optional<std::string> History::firstRoomDay(const std::string& roomId) const {
+    Stmt s(db_, "SELECT min(date) FROM room_days WHERE room_id=?");
+    s.bind(1, roomId);
+    if (!s.step() || s.isNull(0)) return std::nullopt;
+    return s.text(0);
+}
+
 void History::recordMeter(const std::vector<MeterReading>& readings) {
     exec("BEGIN");
     try {
@@ -335,11 +377,15 @@ void History::replaceFrom(const std::filesystem::path& file) {
     try {
         exec("BEGIN");
         try {
-            for (const char* table : {"decisions", "temperatures", "prices", "meter", "sensor_days"}) {
-                // Older exports have no meter table: keep what is here then.
+            for (const char* table : {"decisions", "temperatures", "prices", "meter", "sensor_days", "room_days"}) {
+                // Older exports have no meter table: keep what is here then. The daily heating summary
+                // is worked out from the decisions: without it in the export, it is summed up again.
                 Stmt has(db_, "SELECT count(*) FROM src.sqlite_master WHERE type='table' AND name=?");
                 has.bind(1, std::string(table));
-                if (!has.step() || has.i64(0) == 0) continue;
+                if (!has.step() || has.i64(0) == 0) {
+                    if (std::string(table) == "room_days") exec("DELETE FROM main.room_days");
+                    continue;
+                }
                 std::string cols;
                 {
                     Stmt c(db_, (std::string("SELECT name FROM pragma_table_info('") + table + "', 'main') WHERE name IN "
@@ -361,6 +407,24 @@ void History::replaceFrom(const std::filesystem::path& file) {
     exec("DETACH DATABASE src");
 }
 
+long long History::forgetDecisions(const std::string& roomId, Instant before, const std::string& lastDate) {
+    exec("BEGIN");
+    try {
+        Stmt d(db_, "DELETE FROM decisions WHERE room_id=? AND ts<?");
+        d.bind(1, roomId).bind(2, before);
+        d.step();
+        const long long n = sqlite3_changes(db_);
+        Stmt r(db_, "DELETE FROM room_days WHERE room_id=? AND date<=?");
+        r.bind(1, roomId).bind(2, lastDate);
+        r.step();
+        exec("COMMIT");
+        return n;
+    } catch (...) {
+        exec("ROLLBACK");
+        throw;
+    }
+}
+
 void History::prune(Instant olderThan) {
     for (const char* table : {"decisions", "temperatures"}) {
         Stmt s(db_, (std::string("DELETE FROM ") + table + " WHERE ts<?").c_str());
@@ -368,7 +432,7 @@ void History::prune(Instant olderThan) {
         s.step();
     }
     // Meter readings are never pruned: one row an hour (~9000 a year) is worth keeping for
-    // month-by-month and year-by-year comparisons.
+    // month-by-month and year-by-year comparisons. Nor are the daily summaries (sensor_days, room_days).
     Stmt s(db_, "DELETE FROM prices WHERE slot<?");
     s.bind(1, olderThan);
     s.step();

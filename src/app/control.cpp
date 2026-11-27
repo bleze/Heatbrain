@@ -787,6 +787,41 @@ int runHistory(const Args& args) {
     return 0;
 }
 
+// --- forget ----------------------------------------------------------------------------
+
+int runForget(const Args& args) {
+    if (args.positional.size() != 2) throw std::runtime_error("Usage: heatbrain forget <room> <YYYY-MM-DDTHH:MM> [--yes]");
+    const auto cfg = hb::loadConfig(resolveDataDir(args), exampleConfigCandidates());
+    const hb::TimeZone tz(cfg.timezone);
+    const std::string& room = args.positional[0];
+    const auto local = hb::parseIsoLocal(args.positional[1]);
+    if (!local) throw std::runtime_error("Not a local time: " + args.positional[1] + " (use e.g. 2026-11-25T18:42)");
+    const Instant before = tz.toInstant(*local);
+    hb::History history(cfg.dataDir / "history.db");
+
+    const auto doomed = history.decisions(room, Instant{}, before, false);
+    if (doomed.empty()) {
+        std::cout << room << ": no decisions before " << args.positional[1] << "\n";
+        return 0;
+    }
+    // What the plug was on for (each decision until the next, at most 15 minutes: a gap is no control).
+    double onHours = 0;
+    for (std::size_t i = 0; i + 1 < doomed.size(); ++i) {
+        if (doomed[i].on) onHours += duration<double, std::ratio<3600>>(std::min<Instant::duration>(doomed[i + 1].at - doomed[i].at, minutes{15})).count();
+    }
+    const auto first = tz.toLocal(doomed.front().at), last = tz.toLocal(doomed.back().at);
+    std::cout << std::format("{}: {} decisions from {} {} to {} {} (plug on about {:.1f} h)\n", room, doomed.size(),
+                             hb::formatLocalDate(first), hb::formatLocalHm(first), hb::formatLocalDate(last),
+                             hb::formatLocalHm(last), onHours);
+    if (!args.yes) {
+        std::cout << "Nothing deleted. Add --yes to delete them (export the history first if you may want them back).\n";
+        return 0;
+    }
+    const auto n = history.forgetDecisions(room, before, hb::formatLocalDate(tz.toLocal(before)));
+    std::cout << std::format("Deleted {} decisions. Costs and heating hours no longer count them.\n", n);
+    return 0;
+}
+
 // --- override --------------------------------------------------------------------------
 
 int runOverride(const Args& args) {

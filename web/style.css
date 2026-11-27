@@ -36,6 +36,9 @@
   --band: rgba(98, 80, 214, 0.08);
   --night: rgba(40, 52, 110, 0.07);   /* chart night shade */
   --night-key: rgba(40, 52, 110, 0.28);
+  /* Rooms in the heating-hours chart: the validated categorical order (adjacent pairs). */
+  --room-1: #257de0; --room-2: #f47230; --room-3: #00b894; --room-4: #f2a600;
+  --room-5: #ee7fac; --room-6: #008a17; --room-7: #6a4ce2; --room-8: #ec4647;
   --sun-ink: #a86f00;       /* sunrise/sunset times: the solar colour, dark enough for small text */
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%2352514e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
@@ -66,6 +69,8 @@
     --cool-tint: rgba(57, 135, 229, 0.07);
     --band: rgba(144, 133, 233, 0.12);
     --night: rgba(0, 0, 0, 0.32);
+    --room-1: #338ced; --room-2: #e76624; --room-3: #00a888; --room-4: #d28e05;
+    --room-5: #e24d8b; --room-6: #0aac23; --room-7: #9887ef; --room-8: #eb6263;
     --night-key: rgba(120, 130, 190, 0.35);
     --sun-ink: #e0a020;
     --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23c3c2b7' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -98,6 +103,8 @@
   --cool-tint: rgba(57, 135, 229, 0.07);
   --band: rgba(144, 133, 233, 0.12);
   --night: rgba(0, 0, 0, 0.32);
+  --room-1: #338ced; --room-2: #e76624; --room-3: #00a888; --room-4: #d28e05;
+  --room-5: #e24d8b; --room-6: #0aac23; --room-7: #9887ef; --room-8: #eb6263;
   --night-key: rgba(120, 130, 190, 0.35);
   --sun-ink: #e0a020;
 }
@@ -406,6 +413,27 @@ button.ghost:hover { background: color-mix(in srgb, var(--ink) 9%, transparent);
 .chart .use-heat { fill: var(--flame-1); }
 .chart .use-rest { fill: var(--ink-2); opacity: 0.45; }
 #usage .card-head { flex-wrap: wrap; gap: 8px; }
+/* Heating hours: stacked room bars over the outdoor temperature, the scatter beside them */
+#heatdays .card-head { flex-wrap: wrap; gap: 8px; }
+#heatdays-grain { margin-left: auto; }
+#heatdays { container-type: inline-size; }
+.hd-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@container (min-width: 1000px) { .hd-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; } }
+.hd-grid > div { min-width: 0; }
+.chart .hd-seg.today { opacity: 0.55; }
+.chart .hd-nodata { fill: var(--muted); opacity: 0.35; }
+.chart .hd-cross { fill: var(--ink); opacity: 0.06; pointer-events: none; }
+.chart .hd-temp-band { fill: var(--ink-2); opacity: 0.14; }
+.chart .hd-temp-line { fill: none; stroke: var(--ink-2); stroke-width: 2; stroke-linejoin: round; }
+.chart .hd-temp-dot { fill: var(--ink-2); }
+.chart .hd-dot { fill: var(--flame-1); fill-opacity: 0.75; stroke: var(--surface); stroke-width: 1.5; pointer-events: none; }
+.chart .hd-dot.hover { fill-opacity: 1; r: 5.5; }
+.chart .hd-fit { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 6 4; opacity: 0.7; }
+.hd-scatter-head .panel-title { color: var(--ink-2); font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.hd-scatter-empty { font-size: 13px; padding: 24px 0; }
+.legend-toggle { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 4px; color: var(--ink-2); font: inherit; cursor: pointer; border-radius: 6px; }
+.legend-toggle:hover { background: var(--surface-2); }
+.legend-toggle.off { color: var(--muted); text-decoration: line-through; }
 #usage-grain { margin-left: auto; }
 .meter-status { margin-top: 10px; font-size: 13px; }
 .token-field { margin-top: 12px; }

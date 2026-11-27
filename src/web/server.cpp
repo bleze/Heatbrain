@@ -478,6 +478,39 @@ void WebServer::routes() {
         sendJson(res, out);
     });
 
+    // Hours each room heated per day (days=0: everything kept), with the outdoor sensor's days.
+    s.Get("/api/heating-days", [this](const httplib::Request& req, httplib::Response& res) {
+        const int dayCount = req.has_param("days") ? std::clamp(std::atoi(req.get_param_value("days").c_str()), 0, 3660) : 90;
+        const json cfg = readConfigFile(ctx_.configFile);
+        // The outdoor sensor as the controller picks it: the configured one ("<source>:<id or name>"),
+        // else the first outdoor module among the last readings.
+        std::string outdoorKey, outdoorName;
+        try {
+            if (std::filesystem::exists(ctx_.dataDir / "readings.json")) {
+                const json items = json::parse(std::ifstream(ctx_.dataDir / "readings.json")).value("readings", json::object());
+                const std::string ref = cfg.value("outdoorSensor", std::string());
+                const std::string source = ref.substr(0, ref.find(':'));
+                const std::string id = ref.find(':') == std::string::npos ? ref : ref.substr(ref.find(':') + 1);
+                for (const auto& [k, r] : items.items()) {
+                    if (!ref.empty() && (k == ref || (k.starts_with(source + ":") && r.value("name", "") == id))) {
+                        outdoorKey = k;
+                        outdoorName = r.value("name", k);
+                    }
+                }
+                for (const auto& [k, r] : items.items()) {
+                    if (outdoorKey.empty() && r.value("kind", "") == "outdoor") {
+                        outdoorKey = k;
+                        outdoorName = r.value("name", k);
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            log::warn("Heating days: readings.json: {}", e.what());
+        }
+        History history(ctx_.dataDir / "history.db");
+        sendJson(res, heatingDaysReport(cfg, history, floor<seconds>(system_clock::now()), dayCount, outdoorKey, outdoorName));
+    });
+
     // A sensor's last year, a point per day: [[day, minTemp, avgTemp, maxTemp, avgHumidity|null, avgCo2|null, maxCo2|null], ...] - for the
     // charts in Settings -> Sensors (with /api/batteries for the battery).
     s.Get("/api/sensor-days", [this](const httplib::Request& req, httplib::Response& res) {

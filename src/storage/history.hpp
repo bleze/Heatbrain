@@ -47,6 +47,15 @@ struct SensorDay {
     std::optional<double> avgCo2, maxCo2;  // ppm
 };
 
+// One room's finished local day: how long its radiator was on, and how much of the day heatbrain
+// was running for it (no decisions = no data, not a cold room). Kept for good, like SensorDay.
+struct RoomDay {
+    std::string date;         // local date "2026-11-21"
+    double onHours = 0;
+    double kWh = 0;           // with the power set when the day was summed up
+    double coveredHours = 0;  // time with decisions (gaps longer than 3 ticks left out)
+};
+
 struct PricePoint {
     Instant slot;
     double total = 0;
@@ -74,6 +83,12 @@ public:
     // Once: the daily summary from the detailed readings already stored (dayOf: local day start).
     void fillSensorDays(const std::function<Instant(Instant)>& dayOf);
     std::vector<PricePoint> prices(Instant from, Instant to) const;
+    // A room's daily heating summary, dates in [fromDate, toDate] ("YYYY-MM-DD"), in order.
+    std::vector<RoomDay> roomDays(const std::string& roomId, const std::string& fromDate, const std::string& toDate) const;
+    void saveRoomDays(const std::string& roomId, const std::vector<RoomDay>& days);
+    // The room's oldest decision, and oldest summed-up day (decisions are pruned, days are not).
+    std::optional<Instant> firstDecision(const std::string& roomId) const;
+    std::optional<std::string> firstRoomDay(const std::string& roomId) const;
     // Household meter readings (Eloverblik), replaced when fetched again.
     void recordMeter(const std::vector<MeterReading>& readings);
     std::vector<MeterReading> meterReadings(Instant from, Instant to) const;
@@ -83,6 +98,10 @@ public:
     std::vector<Instant> readingTimes(Instant from, Instant to) const;
 
     void prune(Instant olderThan);
+    // Deletes a room's decisions before `before`, and its daily summaries up to `lastDate`
+    // ("YYYY-MM-DD", the local date of `before`; those days are summed up again from what is left).
+    // Returns the number of decisions deleted.
+    long long forgetDecisions(const std::string& roomId, Instant before, const std::string& lastDate);
 
     // Consistent copy of the whole database into a new file (VACUUM INTO), safe while writing.
     void snapshotTo(const std::filesystem::path& file) const;

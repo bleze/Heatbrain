@@ -21,6 +21,7 @@ struct Args {
     bool force = false;
     bool verbose = false;
     bool all = false;    // history: include unchanged decisions
+    bool yes = false;    // forget: really delete
     int hours = 24;      // history window
 };
 
@@ -35,6 +36,8 @@ inline Args parseArgs(int argc, char** argv) {
             a.slots = true;
         } else if (arg == "--force") {
             a.force = true;
+        } else if (arg == "--yes") {
+            a.yes = true;
         } else if (arg == "--all") {
             a.all = true;
         } else if (arg == "--hours" && i + 1 < argc) {
@@ -78,6 +81,7 @@ int runPlan(const Args& args);
 int runDaemon(const Args& args);
 int runHistory(const Args& args);
 int runOverride(const Args& args);
+int runForget(const Args& args);
 int runNotifyTest(const Args& args);
 
 }  // namespace hbcli

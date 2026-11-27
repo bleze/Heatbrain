@@ -312,6 +312,8 @@ heatbrain run                        # the control loop
 heatbrain history bedroom            # switch events of the last 24 h  [--hours 72] [--all]
 heatbrain override bedroom on 60     # manual ON for 60 min (picked up by a running 'run')
 heatbrain override bedroom clear
+heatbrain forget shed 2026-11-25T18:42   # what deleting a room's decisions before then would remove;
+                                         # add --yes to delete (e.g. hours from before it had a sensor)
 ```
 
 ## Web UI

@@ -46,6 +46,10 @@ Usage:
   heatbrain override                  List manual overrides
   heatbrain override <room> on|off <minutes>
   heatbrain override <room> clear
+  heatbrain forget <room> <YYYY-MM-DDTHH:MM>
+                                      Delete the room's decisions before that local time
+                                      (e.g. from before it had a sensor); shows what it
+                                      would delete unless given --yes
   heatbrain notify-test               Send a test message to the notification channels
   heatbrain help
 
@@ -346,6 +350,7 @@ int main(int argc, char** argv) {
         if (args.command == "run") return runDaemon(args);
         if (args.command == "history") return runHistory(args);
         if (args.command == "override") return runOverride(args);
+        if (args.command == "forget") return runForget(args);
         if (args.command == "notify-test") return runNotifyTest(args);
         if (args.command == "help") {
             std::cout << kUsage;

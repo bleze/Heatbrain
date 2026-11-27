@@ -217,6 +217,15 @@ const HELP = {
       "The file contains passwords: keep it private and delete it when the move is done.",
     ],
   },
+  heatingHours: {
+    title: "Heating hours",
+    body: [
+      "How long each room's radiator was on, per day - stacked by room, so the bar's height is the whole house. Over the year it shows the heating season: tall bars in winter, next to nothing in summer. Weeks and months show the average per day, so a short month compares fairly with a long one. Click a room's name to leave it out (the colours stay with their rooms).",
+      "Plugs count the time the plug was on; a thermostat that reports its own heating time counts that instead. Rooms without a temperature sensor are left out, as in Heating cost. A grey stub means no data that day (heatbrain wasn't running), not a day without heat; today's bar is lighter until the day is over.",
+      "Underneath: the outdoor sensor's day - the band from the day's low to its high, the line its average. Beside it each whole day is a dot, its hours against the outdoor average. The dashed line through the days that heated shows how many hours a degree colder adds, and where it reaches zero is roughly the outdoor temperature at which the house needs no heating. If that line gets flatter from one winter to the next, the house holds its heat better.",
+      "Each day is summed up once it is over and kept for good (the detailed history goes after 3 years), so the chart can compare one winter with the next.",
+    ],
+  },
   costs: {
     title: "Heating cost",
     body: [
@@ -313,7 +322,7 @@ function renderManual(host) {
   // The sections side by side on wide screens, each a readable column; read left to right, row by row.
   const body = el("div", { class: "manual-sections" }, card);
   const order = ["start", "program", "modes", "limits", "strategy", "priceOnly", "plan", "dryrun", "failsafe", "firmware",
-                 "thermostats", "sensors", "velux", "shelly", "forecast", "openWindow", "insulation", "airQuality", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "transfer"];
+                 "thermostats", "sensors", "velux", "shelly", "forecast", "openWindow", "insulation", "airQuality", "prices", "meter", "away", "bookings", "wifiOff", "notifications", "phone", "costs", "heatingHours", "transfer"];
   const add = (key) => {
     const sec = el("section", { id: `help-${key}` }, body);
     el("h3", {}, sec, HELP[key].title);

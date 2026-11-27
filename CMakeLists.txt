@@ -164,6 +164,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_alerts.cpp
     tests/test_config_service.cpp
     tests/test_cost.cpp
+    tests/test_heating_days.cpp
     tests/test_version.cpp
     tests/test_digest.cpp
     tests/test_transfer.cpp
