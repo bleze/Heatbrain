@@ -118,3 +118,34 @@ TEST_CASE("DatahubTariffComponent sums several charge codes") {
     CHECK(*v[0] == Approx(0.09));
     CHECK_FALSE(v[1]);  // 41000 has no row for 2027
 }
+
+TEST_CASE("Choosing a grid tariff: the companies in the price list, and one company's charge codes priced now") {
+    const auto companies = eds::parseGridCompanies(R"({"records":[
+        {"ChargeOwner":"Radius Elnet A/S","GLN_Number":"5790000705689"},
+        {"ChargeOwner":"Cerius A/S","GLN_Number":"5790000705184"},
+        {"ChargeOwner":"Radius Elnet A/S","GLN_Number":"5790000705689"},
+        {"ChargeOwner":null,"GLN_Number":"5790000432752"},
+        {"ChargeOwner":null,"GLN_Number":"5790000610822"}]})");
+    REQUIRE(companies.size() == 4);
+    CHECK(companies[3].name == "GLN 5790000610822");  // no name in the list: last
+    CHECK(companies[0].name == "Cerius A/S");
+    CHECK(companies[1].name.starts_with("Energinet"));
+    CHECK(companies[2].gln == "5790000705689");
+
+    const auto now = local_days{2026y / 11 / 27} + 18h;
+    const auto charges = eds::parseCharges(R"({"records":[
+        {"ChargeTypeCode":"DT_C_01","Note":"Nettarif C","Description":"0,4 kV","ValidFrom":"2027-01-01T00:00:00","ValidTo":null,
+         "Price1":0.116,"Price18":1.043},
+        {"ChargeTypeCode":"DT_C_01","Note":"Nettarif C","Description":"0,4 kV","ValidFrom":"2026-10-01T00:00:00","ValidTo":"2027-01-01T00:00:00",
+         "Price1":0.106,"Price7":0.319,"Price18":0.956},
+        {"ChargeTypeCode":"DT_B_02","Note":"Nettarif B lav","ValidFrom":"2025-01-01T00:00:00","ValidTo":"2025-04-01T00:00:00","Price1":0.05}]})",
+                                           now);
+    REQUIRE(charges.size() == 2);
+    const auto& c = charges[1];
+    CHECK(c.code == "DT_C_01");
+    CHECK(c.name == "Nettarif C");
+    CHECK(c.validFrom == "2026-10-01");  // the row in effect now, not the newer one ahead
+    CHECK(*c.low == Approx(0.106));
+    CHECK(*c.high == Approx(0.956));
+    CHECK(charges[0].validFrom == "2025-01-01");  // none in effect: the latest
+}

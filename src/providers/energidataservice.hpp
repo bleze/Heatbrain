@@ -22,6 +22,25 @@ std::map<Instant, double> parseDayAheadPrices(std::string_view json, std::string
 // Parses a DatahubPricelist response into tariff rows grouped by ChargeTypeCode.
 std::map<std::string, std::vector<TariffRow>> parseDatahubPricelist(std::string_view json);
 
+// For choosing a grid tariff in Settings: the companies with energy tariffs (D03) in the price list,
+// and one company's charge codes with what each costs now.
+struct GridCompany {
+    std::string gln;
+    std::string name;
+};
+struct ChargeInfo {
+    std::string code;
+    std::string name;         // "Nettarif C"
+    std::string description;  // "Tarif, hvor aftagepunktet typisk er i 0,4 kV-nettet"
+    std::string validFrom;    // of the row in effect at `now` (else the latest)
+    std::optional<double> low, high;  // its lowest and highest hourly price, per kWh excl. VAT
+};
+std::vector<GridCompany> parseGridCompanies(std::string_view json);
+std::vector<ChargeInfo> parseCharges(std::string_view json, LocalTime now);
+// The request URLs (stable for a year, so the cache works): price list rows since the start of last year.
+std::string companiesUrl(LocalTime now, const std::string& baseUrl = kDefaultBaseUrl);
+std::string chargesUrl(const std::string& gln, LocalTime now, const std::string& baseUrl = kDefaultBaseUrl);
+
 // type "energidataservice.spot": day-ahead spot price for a bidding zone (DK1/DK2).
 class SpotComponent final : public PriceComponent {
 public:

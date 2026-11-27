@@ -1741,6 +1741,69 @@
     }
   }
 
+  // Grid tariffs from the Datahub price list: the company and its charge codes as dropdowns (the lists
+  // come from the server, which caches them for days); plain fields when the lists can't be had.
+  function loadDatahub(gln) {
+    const dh = (S.dh ||= { charges: {} });
+    if (!dh.companies && !dh.companiesLoading) {
+      dh.companiesLoading = true;
+      api("/api/datahub/companies").then((x) => { dh.companies = x; render(); })
+        .catch((e) => { dh.companiesError = e.message; render(); });
+    }
+    if (/^\d{13}$/.test(gln || "") && !(gln in dh.charges)) {
+      dh.charges[gln] = null;  // loading
+      api(`/api/datahub/charges?gln=${gln}`).then((x) => { dh.charges[gln] = x; render(); })
+        .catch((e) => { dh.charges[gln] = { error: e.message }; render(); });
+    }
+    return dh;
+  }
+  function renderTariffChoice(cg, comp) {
+    const dh = loadDatahub(comp.gln);
+    if (dh.companies) {
+      const opts = [["", "Choose the company…"], ...dh.companies.map((c) => [c.gln, c.name])];
+      field(cg, "Grid company", sel(comp, "gln", opts, () => { comp.codes = []; render(); }),
+            { hint: comp.gln ? `GLN ${comp.gln}` : "from the Datahub price list" });
+    } else {
+      field(cg, "Grid company GLN", txt(comp, "gln", { placeholder: "5790000705689", onChange: () => { if (/^\d{13}$/.test(comp.gln)) render(); } }),
+            { hint: dh.companiesError ? "the list could not be fetched: enter the 13-digit number" : "13-digit company number (loading the list…)" });
+    }
+    comp.codes = [].concat(comp.codes || []);
+    const list = dh.charges[comp.gln];
+    if (Array.isArray(list)) {
+      // Feed-in tariffs are paid for what a solar plant delivers, not for what the house uses.
+      const usable = list.filter((c) => !/indfødning/i.test(c.name)).sort((a, b) => a.name.localeCompare(b.name, "da"));
+      const kr = (v) => v == null ? "" : v.toFixed(2);
+      const label = (c) => `${c.code} – ${c.name}` +
+        (c.low != null ? ` (${c.low === c.high ? kr(c.low) : `${kr(c.low)}-${kr(c.high)}`} kr/kWh)` : "");
+      const box = el("div", { class: "field wide" }, cg);
+      el("span", {}, box, "Charges");
+      // The chosen codes, and an empty dropdown after "Add charge" (nothing is saved until one is picked).
+      const rows = dh.adding === comp ? [...comp.codes, ""] : comp.codes;
+      rows.forEach((code, k) => {
+        const r = el("div", { class: "sched-row", style: "margin-top:4px" }, box);
+        const proxy = { v: code };
+        const s = sel(proxy, "v", [["", "Choose a charge…"], ...usable.map((c) => [c.code, label(c)])], () => {
+          if (k < comp.codes.length) comp.codes[k] = proxy.v; else if (proxy.v) comp.codes.push(proxy.v);
+          comp.codes = comp.codes.filter(Boolean);
+          dh.adding = null;
+          render();
+        });
+        s.title = usable.find((c) => c.code === code)?.description || "";
+        r.appendChild(s);
+        btn(r, "", "trash", () => {
+          if (k < comp.codes.length) comp.codes.splice(k, 1); else dh.adding = null;
+          changed(); render();
+        }, "ghost danger row-delete");
+      });
+      btn(el("div", { style: "margin-top:6px" }, box), "Add charge", "plus", () => { dh.adding = comp; render(); }, "ghost");
+      el("div", { class: "hint" }, box, "Prices now, excluding VAT. A house is usually on the C tariff (0.4 kV); summed if there are several.");
+    } else {
+      const codes = el("input", { type: "text", value: comp.codes.join(", ") });
+      codes.addEventListener("input", () => { comp.codes = codes.value.split(",").map((x) => x.trim()).filter(Boolean); changed(); });
+      field(cg, "Charge codes", codes, { hint: list === null ? "comma separated (loading the list…)" : list?.error ? "comma separated (the list could not be fetched)" : "comma separated" });
+    }
+  }
+
   // Dates a manual part changes (a tax rising on New Year's Day): from local midnight of each date until
   // the next, the amount (or the seasons) of that row; before the first, the part's own. Prices on and
   // after the date - also the plan's estimates ahead - use the new amount.
@@ -1801,10 +1864,7 @@
       if (comp.type === "energidataservice.spot") {
         field(cg, "Price area", sel(comp, "area", [["DK1", "DK1 (West)"], ["DK2", "DK2 (East)"]]), { hint: "West: Jutland, Funen · East: Zealand" });
       } else if (comp.type === "energidataservice.tariff") {
-        field(cg, "Grid company GLN", txt(comp, "gln", { placeholder: "5790000705689" }), { hint: "13-digit company number" });
-        const codes = el("input", { type: "text", value: [].concat(comp.codes || []).join(", ") });
-        codes.addEventListener("input", () => { comp.codes = codes.value.split(",").map((x) => x.trim()).filter(Boolean); changed(); });
-        field(cg, "Charge codes", codes, { hint: "comma separated" });
+        renderTariffChoice(cg, comp);
       } else if (comp.type === "fixed") {
         field(cg, "Amount", num(comp, "amount", { step: 0.01, unit: `${S.cfg.currency === "DKK" || !S.cfg.currency ? "kr" : S.cfg.currency}/kWh` }), { hint: "excluding VAT" });
       } else if (comp.type === "schedule") {

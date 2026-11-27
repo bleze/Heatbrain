@@ -65,6 +65,85 @@ std::map<std::string, std::vector<TariffRow>> parseDatahubPricelist(std::string_
     return out;
 }
 
+namespace {
+std::string sinceLastYear(LocalTime now) {
+    const year_month_day ymd{floor<days>(now)};
+    return std::format("{}-01-01", static_cast<int>(ymd.year()) - 1);
+}
+}  // namespace
+
+std::string companiesUrl(LocalTime now, const std::string& baseUrl) {
+    return std::format("{}/dataset/DatahubPricelist?columns=ChargeOwner,GLN_Number&filter={}&start={}&limit=0", baseUrl,
+                       urlEncode(json{{"ChargeType", {"D03"}}}.dump()), sinceLastYear(now));
+}
+
+std::string chargesUrl(const std::string& gln, LocalTime now, const std::string& baseUrl) {
+    std::string columns = "ChargeTypeCode,Note,Description,ValidFrom,ValidTo";
+    for (int h = 1; h <= 24; ++h) columns += std::format(",Price{}", h);
+    return std::format("{}/dataset/DatahubPricelist?columns={}&filter={}&start={}&limit=0", baseUrl, columns,
+                       urlEncode(json{{"GLN_Number", {gln}}, {"ChargeType", {"D03"}}}.dump()), sinceLastYear(now));
+}
+
+std::vector<GridCompany> parseGridCompanies(std::string_view text) {
+    const json j = parseEnvelope(text);
+    std::map<std::string, std::string> byGln;
+    for (const auto& rec : j.at("records")) {
+        const std::string gln = rec.value("GLN_Number", std::string());
+        if (gln.empty()) continue;
+        std::string name = rec.contains("ChargeOwner") && rec["ChargeOwner"].is_string() ? rec["ChargeOwner"].get<std::string>() : "";
+        if (name.empty() && gln == "5790000432752") name = "Energinet (transmission, system tariff, elafgift)";
+        auto& n = byGln[gln];
+        if (n.empty()) n = name;
+    }
+    std::vector<GridCompany> out;
+    for (const auto& [gln, name] : byGln) out.push_back({gln, name.empty() ? "GLN " + gln : name});
+    // By name; those the list gives no name for last.
+    std::ranges::sort(out, [](const GridCompany& a, const GridCompany& b) {
+        const bool an = a.name.starts_with("GLN "), bn = b.name.starts_with("GLN ");
+        return an != bn ? bn : a.name < b.name;
+    });
+    return out;
+}
+
+std::vector<ChargeInfo> parseCharges(std::string_view text, LocalTime now) {
+    const json j = parseEnvelope(text);
+    struct Best {
+        const json* rec = nullptr;
+        LocalTime from{};
+        bool current = false;
+    };
+    std::map<std::string, Best> best;
+    for (const auto& rec : j.at("records")) {
+        const auto from = parseIsoLocal(rec.value("ValidFrom", std::string()));
+        if (!from) continue;
+        std::optional<LocalTime> to;
+        if (rec.contains("ValidTo") && rec["ValidTo"].is_string()) to = parseIsoLocal(rec["ValidTo"].get<std::string>());
+        const bool current = *from <= now && (!to || now < *to);
+        auto& b = best[rec.value("ChargeTypeCode", std::string())];
+        // The row in effect now wins; else the latest one.
+        if (!b.rec || (current && !b.current) || (current == b.current && *from > b.from)) b = {&rec, *from, current};
+    }
+    std::vector<ChargeInfo> out;
+    for (const auto& [code, b] : best) {
+        if (code.empty()) continue;
+        const json& rec = *b.rec;
+        ChargeInfo c;
+        c.code = code;
+        c.name = rec.contains("Note") && rec["Note"].is_string() ? rec["Note"].get<std::string>() : code;
+        c.description = rec.contains("Description") && rec["Description"].is_string() ? rec["Description"].get<std::string>() : "";
+        c.validFrom = rec.value("ValidFrom", std::string()).substr(0, 10);
+        for (int h = 1; h <= 24; ++h) {
+            const auto it = rec.find(std::format("Price{}", h));
+            if (it == rec.end() || !it->is_number()) continue;
+            const double v = it->get<double>();
+            c.low = c.low ? std::min(*c.low, v) : v;
+            c.high = c.high ? std::max(*c.high, v) : v;
+        }
+        out.push_back(std::move(c));
+    }
+    return out;
+}
+
 // ---------------------------------------------------------------------------------------
 
 SpotComponent::SpotComponent(std::string name, std::string area, std::string baseUrl,

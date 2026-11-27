@@ -32,6 +32,7 @@
 #include "sensors/velux.hpp"
 #include "sensors/push.hpp"
 #include "sensors/shelly.hpp"
+#include "providers/energidataservice.hpp"
 
 namespace hb {
 
@@ -887,6 +888,45 @@ void WebServer::routes() {
             }
         }
         sendJson(res, results);
+    });
+
+    // Choosing a grid tariff in Settings: the Datahub price list's companies and one company's charge
+    // codes (energy tariffs, D03). Energi Data Service is strictly rate limited: cached for days.
+    s.Get("/api/datahub/companies", [this](const httplib::Request&, httplib::Response& res) {
+        try {
+            HttplibClient internet;
+            CachingHttpClient cache(internet, ctx_.dataDir / "cache");
+            const TimeZone tz("Europe/Copenhagen");
+            json out = json::array();
+            for (const auto& c : eds::parseGridCompanies(cache.get(eds::companiesUrl(tz.toLocal(floor<seconds>(system_clock::now()))), days{7}).body)) {
+                out.push_back({{"gln", c.gln}, {"name", c.name}});
+            }
+            sendJson(res, out);
+        } catch (const std::exception& e) {
+            sendError(res, 502, std::string("Could not fetch the grid companies: ") + e.what());
+        }
+    });
+    s.Get("/api/datahub/charges", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string gln = req.get_param_value("gln");
+        if (gln.size() != 13 || !std::ranges::all_of(gln, [](char c) { return c >= '0' && c <= '9'; })) {
+            return sendError(res, 400, "gln must be the 13-digit company number");
+        }
+        try {
+            HttplibClient internet;
+            CachingHttpClient cache(internet, ctx_.dataDir / "cache");
+            const TimeZone tz("Europe/Copenhagen");
+            const auto now = tz.toLocal(floor<seconds>(system_clock::now()));
+            json out = json::array();
+            for (const auto& c : eds::parseCharges(cache.get(eds::chargesUrl(gln, now), days{1}).body, now)) {
+                json j{{"code", c.code}, {"name", c.name}, {"description", c.description}, {"validFrom", c.validFrom}};
+                if (c.low) j["low"] = *c.low;
+                if (c.high) j["high"] = *c.high;
+                out.push_back(j);
+            }
+            sendJson(res, out);
+        } catch (const std::exception& e) {
+            sendError(res, 502, std::string("Could not fetch the charge codes: ") + e.what());
+        }
     });
 
     s.Get("/api/firmware/latest", [this](const httplib::Request&, httplib::Response& res) {
