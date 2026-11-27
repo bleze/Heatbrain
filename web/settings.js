@@ -1741,6 +1741,18 @@
     }
   }
 
+  // The fields a new price part of type `t` starts with. A grid tariff named like the electricity tax
+  // starts as Energinet's elafgift (EA-001), which the price list carries with the dates it changes.
+  function newPartFields(t, name) {
+    if (t === "fixed") return { amount: 0 };
+    if (t === "energidataservice.spot") return { area: "DK2" };
+    if (t === "energidataservice.tariff") {
+      return /elafgift|electricity tax/i.test(name || "") ? { gln: "5790000432752", codes: ["EA-001"] } : { gln: "", codes: [] };
+    }
+    if (t === "schedule") return { seasons: [{ bands: [{ from: "00:00", to: "24:00", amount: 0 }] }] };
+    return {};
+  }
+
   // Grid tariffs from the Datahub price list: the company and its charge codes as dropdowns (the lists
   // come from the server, which caches them for days); plain fields when the lists can't be had.
   function loadDatahub(gln) {
@@ -1748,12 +1760,20 @@
     if (!dh.companies && !dh.companiesLoading) {
       dh.companiesLoading = true;
       api("/api/datahub/companies").then((x) => { dh.companies = x; render(); })
-        .catch((e) => { dh.companiesError = e.message; render(); });
+        .catch((e) => {
+          dh.companiesError = e.message;
+          render();
+          setTimeout(() => { dh.companiesLoading = false; }, 60_000);  // try again later
+        });
     }
     if (/^\d{13}$/.test(gln || "") && !(gln in dh.charges)) {
       dh.charges[gln] = null;  // loading
       api(`/api/datahub/charges?gln=${gln}`).then((x) => { dh.charges[gln] = x; render(); })
-        .catch((e) => { dh.charges[gln] = { error: e.message }; render(); });
+        .catch((e) => {
+          dh.charges[gln] = { error: e.message };
+          render();
+          setTimeout(() => { delete dh.charges[gln]; }, 60_000);  // Datahub's rate limit: try again later
+        });
     }
     return dh;
   }
@@ -1762,7 +1782,7 @@
     if (dh.companies) {
       const opts = [["", "Choose the company…"], ...dh.companies.map((c) => [c.gln, c.name])];
       field(cg, "Grid company", sel(comp, "gln", opts, () => { comp.codes = []; render(); }),
-            { hint: comp.gln ? `GLN ${comp.gln}` : "from the Datahub price list" });
+            { wide: true, hint: comp.gln ? `GLN ${comp.gln}` : "from the Datahub price list" });
     } else {
       field(cg, "Grid company GLN", txt(comp, "gln", { placeholder: "5790000705689", onChange: () => { if (/^\d{13}$/.test(comp.gln)) render(); } }),
             { hint: dh.companiesError ? "the list could not be fetched: enter the 13-digit number" : "13-digit company number (loading the list…)" });
@@ -1780,7 +1800,7 @@
       // The chosen codes, and an empty dropdown after "Add charge" (nothing is saved until one is picked).
       const rows = dh.adding === comp ? [...comp.codes, ""] : comp.codes;
       rows.forEach((code, k) => {
-        const r = el("div", { class: "sched-row", style: "margin-top:4px" }, box);
+        const r = el("div", { class: "sched-row charge-row", style: "margin-top:4px" }, box);
         const proxy = { v: code };
         const s = sel(proxy, "v", [["", "Choose a charge…"], ...usable.map((c) => [c.code, label(c)])], () => {
           if (k < comp.codes.length) comp.codes[k] = proxy.v; else if (proxy.v) comp.codes.push(proxy.v);
@@ -1858,7 +1878,16 @@
       const left = el("div", { class: "row" }, head);
       left.appendChild(badge(comp.type === "fixed" ? "plus" : comp.type === "schedule" ? "clock" : "bolt", "amber"));
       left.appendChild(txt(comp, "name"));
-      el("span", { class: "muted" }, left, (COMPONENT_TYPES.find(([t]) => t === comp.type) || [, comp.type])[1]);
+      // The part's type can be changed in place (a fixed elafgift -> the grid tariff list with its dates).
+      const typeView = { type: comp.type };
+      const typeSel = sel(typeView, "type", COMPONENT_TYPES.map(([t, label]) => [t, label]), () => {
+        const keep = { type: typeView.type, name: comp.name };
+        for (const k of Object.keys(comp)) delete comp[k];
+        Object.assign(comp, keep, newPartFields(keep.type, keep.name));
+        render();
+      });
+      typeSel.className = "part-type";
+      left.appendChild(typeSel);
       confirmBtn(head, "", "trash", "Remove?", () => { comps.splice(i, 1); changed(); render(); }, "ghost danger");
       const cg = el("div", { class: "form-grid" }, c);
       if (comp.type === "energidataservice.spot") {
@@ -1884,10 +1913,7 @@
     btn(add, "Add part", "plus", () => {
       const t = typeSel.value;
       const comp = { type: t, name: (COMPONENT_TYPES.find(([x]) => x === t) || [, t])[1].split(" (")[0] };
-      if (t === "fixed") comp.amount = 0;
-      if (t === "energidataservice.spot") comp.area = "DK2";
-      if (t === "energidataservice.tariff") { comp.gln = ""; comp.codes = []; }
-      if (t === "schedule") comp.seasons = [{ bands: [{ from: "00:00", to: "24:00", amount: 0 }] }];
+      Object.assign(comp, newPartFields(t, comp.name));
       comps.push(comp); changed(); render();
     });
 
