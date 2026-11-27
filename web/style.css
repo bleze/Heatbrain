@@ -621,7 +621,16 @@ details.advanced summary { cursor: pointer; color: var(--ink-2); font-weight: 50
 /* The program's mode: wide enough for "Off, stay above" next to the chevron, the same on every row. */
 .sched-row select { width: 175px; }  /* with the 110 px time: ends where Never above does */
 .sched-row.charge-row select { flex: 1; width: auto; min-width: 0; max-width: 640px; }  /* "DT_C_01 – Nettarif C (0.11-0.96 kr/kWh)" in full */
-select.part-type { width: auto; }
+/* Price parts: the header (icon, name, type) and the part's fields share three columns, so "Price area" and
+   "Amount" sit right under the type dropdown, as wide as it; lists (grid tariff, seasons) span the card. */
+.price-part .part-head, .price-part .part-fields { display: grid; grid-template-columns: 30px minmax(0, 220px) minmax(0, 220px); gap: 8px; align-items: center; }
+.price-part .part-head > input, .price-part .part-head > select { width: 100%; }
+.price-part .part-fields { margin-top: 12px; row-gap: 12px; align-items: start; }
+.price-part .part-fields > .field { grid-column: 3; }
+.price-part .part-fields > .field.wide { grid-column: 1 / -1; }
+.price-part .part-fields .stepper { width: 100%; }
+.price-part .part-fields .stepper input, .price-part .sched-row .stepper input { flex: 1; width: auto; min-width: 0; }
+.price-part .sched-row .stepper { width: 220px; max-width: 100%; }  /* a change's amount: as wide as the one above */
 .timeline { display: flex; height: 26px; border-radius: 8px; overflow: hidden; margin-top: 10px; border: 1px solid var(--border); }
 .timeline div { display: grid; place-items: center; font-size: 11px; font-weight: 600; color: #fff; min-width: 0; overflow: hidden; white-space: nowrap; padding: 0 2px; }
 .timeline .tl-off { background: repeating-linear-gradient(135deg, var(--surface-2) 0 6px, var(--grid) 6px 12px); color: var(--ink-2) !important; }

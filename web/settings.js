@@ -1873,9 +1873,9 @@
     const comps = arr(price, "components");
     const list = el("div", { class: "list" }, card);
     comps.forEach((comp, i) => {
-      const c = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, list);
+      const c = el("div", { class: "card price-part", style: "margin:0;background:var(--surface-2)" }, list);
       const head = el("div", { class: "item-head" }, c);
-      const left = el("div", { class: "row" }, head);
+      const left = el("div", { class: "part-head" }, head);
       left.appendChild(badge(comp.type === "fixed" ? "plus" : comp.type === "schedule" ? "clock" : "bolt", "amber"));
       left.appendChild(txt(comp, "name"));
       // The part's type can be changed in place (a fixed elafgift -> the grid tariff list with its dates).
@@ -1889,7 +1889,8 @@
       typeSel.className = "part-type";
       left.appendChild(typeSel);
       confirmBtn(head, "", "trash", "Remove?", () => { comps.splice(i, 1); changed(); render(); }, "ghost danger");
-      const cg = el("div", { class: "form-grid" }, c);
+      // On the header's columns: a part's own fields sit under its type, as wide as it.
+      const cg = el("div", { class: "part-fields" }, c);
       if (comp.type === "energidataservice.spot") {
         field(cg, "Price area", sel(comp, "area", [["DK1", "DK1 (West)"], ["DK2", "DK2 (East)"]]), { hint: "West: Jutland, Funen · East: Zealand" });
       } else if (comp.type === "energidataservice.tariff") {
