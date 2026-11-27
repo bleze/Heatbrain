@@ -641,6 +641,10 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
             return std::nullopt;
         }
         const Instant peak = *outlook.nextExpensiveAt;
+        // The room is off then anyway: nothing to hold through it (an off period stores heat only by its own choice).
+        if (const auto then = periodAt(room, minuteOfDay(tz.toLocal(peak))); then && then->point.mode == ProgramMode::Off) {
+            return std::nullopt;
+        }
         const Instant peakEnd = outlook.nextExpensiveUntil.value_or(peak + hours{1});
         // The outdoor temperature during the expensive stretch: forecast, else the current reading.
         std::optional<double> outside = in.forecast ? in.forecast->meanOver(peak, peakEnd) : std::nullopt;
@@ -666,6 +670,28 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                                             *outlook.current, currency, why)};
     };
 
+    // The period ends within the hour and the program steps down after it (off, or at least 0.5 lower):
+    // heat started now would mostly warm the period after, which does not want it. Not started while the
+    // room is expected (settled cooling rate) to stay within kEndSlack of `level` until the period ends.
+    // Gives the explanation, or nothing when heating should start as usual.
+    constexpr double kEndSlack = 0.5;
+    const auto endingSoon = [&](double level) -> std::optional<std::string> {
+        if (in.currentlyOn || booked || away || warming || !period || room.program.size() < 2) return std::nullopt;
+        const int left = ((period->toMinute - minuteOfDay(tz.toLocal(in.now))) % 1440 + 1440) % 1440;
+        if (left == 0 || left > 60) return std::nullopt;
+        const auto next = periodAt(room, period->toMinute);
+        if (!next || (next->point.mode != ProgramMode::Off && next->point.target > target - 0.5)) return std::nullopt;
+        const Instant end = in.now + minutes{left};
+        const double out = (in.forecast ? in.forecast->meanOver(in.now, end) : std::nullopt).value_or(in.outdoorTemp.value_or(5.0));
+        const double loss = in.coolingRate ? *in.coolingRate : in.thermal ? in.thermal->loss : 0.05;
+        const double atEnd = t <= out ? t : out + (t - out) * std::exp(-loss * left / 60.0);
+        if (atEnd < level - kEndSlack) return std::nullopt;
+        return std::format(", but the period ends at {} ({} after): about {} by then - not worth starting the heat for "
+                           "the last {} min",
+                           formatLocalHm(tz.toLocal(end)),
+                           next->point.mode == ProgramMode::Off ? std::string("off") : temp(next->point.target), temp(atEnd), left);
+    };
+
     // 5. "Keep above": a floor that always holds, whatever the price. Above it, heat is still stored
     //    while it is cheap (as in a heat period, but never letting the room dip below the floor):
     //    before an expensive stretch enough to coast through it, and a little extra in the cheapest
@@ -673,6 +699,7 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     if (mode == ProgramMode::Keep) {
         const std::string where = std::format("{} (keep above {} for {})", temp(t), temp(target), inputs.targetLabel);
         if (t <= target - h || keepOn(target + h)) {
+            if (const auto note = endingSoon(target)) return make(false, Reason::KeepSatisfied, "Below the floor: " + where + *note, inputs);
             return make(true, Reason::KeepAbove, "Below the floor: " + where + minOnNote(target + h), inputs);
         }
         if (!away) {
@@ -704,6 +731,12 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     if (outlook.expensive && !booked && !warmingAnyPrice) {
         const double floor = target - s.peakAllowedDrop;
         if (t < floor || keepOn(floor + h)) {
+            if (const auto note = endingSoon(floor)) {
+                return make(false, Reason::PeakAvoid,
+                            std::format("Expensive now ({:.2f} {}/kWh): {} is below {}{}", *outlook.current, currency, temp(t),
+                                        temp(floor), *note),
+                            inputs);
+            }
             return make(true, Reason::BelowComfortDuringPeak,
                         std::format("Expensive now ({:.2f} {}/kWh), but {} is below {} (target {} - {:.1f})",
                                     *outlook.current, currency, temp(t), temp(floor), temp(target), s.peakAllowedDrop),
@@ -760,7 +793,10 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
 
     // 10. Plain thermostat: on at target - 0.1, off at target + 0.1 less the after-heat.
     const std::string where = std::format("{} (target {} for {})", temp(t), temp(target), inputs.targetLabel);
-    if (t <= target - h) return make(true, Reason::BelowTarget, "Below target: " + where, inputs);
+    if (t <= target - h) {
+        if (const auto note = endingSoon(target)) return make(false, Reason::HoldOff, "Below target: " + where + *note, inputs);
+        return make(true, Reason::BelowTarget, "Below target: " + where, inputs);
+    }
     if (keepOn(target + h)) return make(true, Reason::HoldOn, "Heating within band: " + where + minOnNote(target + h), inputs);
     if (t >= stopAt(target + h)) {
         return make(false, Reason::TargetReached, "Target reached: " + where + earlyNote(target + h), inputs);

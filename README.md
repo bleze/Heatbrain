@@ -223,6 +223,12 @@ planner decides each room, checking in this order:
 quarter *and* 10% below the median, so flat-price days fall back to a plain thermostat.
 All margins are configurable per room (`strategy`).
 
+**The end of a period.** In the last hour before the program steps down (to off, or to a target at
+least 0.5 °C lower), heating is not started when the room is expected (settled cooling rate) to stay
+within 0.5 °C of the target until the period ends: the heat would mostly warm the period after.
+`minTemp` and frost protection still always heat. Pre-heating ignores expensive hours that fall in an
+off period: the room does not need to hold anything then.
+
 **The band and the after-heat.** Every rule that heats "until" a level starts 0.1 °C below it
 (fixed; there is no hysteresis setting). A radiator keeps warming the room after it switches off,
 so heatbrain learns each room's after-heat - the median rise after its latest 7 switch-offs - and

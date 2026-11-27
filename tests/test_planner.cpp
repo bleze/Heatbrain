@@ -247,7 +247,8 @@ TEST_CASE("Off periods: off even below minimum, but never below frost protection
     CHECK(decide(manual, r).reason == Reason::ManualOn);
 
     CHECK(decide(input(at(21), 18.0), r).reason == Reason::BelowTarget);  // window ended
-    CHECK(decide(input(at(15), 19.2), r).reason == Reason::PreheatBeforePeak);  // pre-heat still works
+    // No pre-heating for the peak: the room is off then anyway (storing for it is the off period's own choice).
+    CHECK(decide(input(at(15), 19.2), r).reason != Reason::PreheatBeforePeak);
 }
 
 TEST_CASE("Program periods: switch points run until the next one and wrap past midnight") {
@@ -352,14 +353,13 @@ TEST_CASE("Plan ahead shows the intent per period") {
     r.program = {{7 * 60, ProgramMode::Heat, 19.0}, {17 * 60, ProgramMode::Off, 0}, {21 * 60, ProgramMode::Heat, 20.0},
                  {23 * 60, ProgramMode::Keep, 16.0}};
     const auto plan = planAhead(r, makePrices(), tz(), at(12), hours{14}, std::nullopt, std::nullopt);
-    // 12:00 heat 19 -> 14:00 pre-heat (peak at 17 within 3 h) -> 17 off -> 21 heat 20 -> 23 keep 16,
+    // 12:00 heat 19 -> 17 off (no pre-heat: the peak falls in the off period) -> 21 heat 20 -> 23 keep 16,
     // with a cheap boost above the floor once the cheapest slots begin
     std::vector<std::string> kinds;
     for (const auto& s : plan) kinds.push_back(s.kind);
-    CHECK(kinds == std::vector<std::string>{"heat", "preheat", "off", "heat", "keep", "boost"});
-    CHECK(plan[1].from == at(14));
-    CHECK(plan[2].from == at(17));
-    CHECK(plan[3].target == 20.0);
+    CHECK(kinds == std::vector<std::string>{"heat", "off", "heat", "keep", "boost"});
+    CHECK(plan[1].from == at(17));
+    CHECK(plan[2].target == 20.0);
     CHECK(plan.back().to == at(26));
 
     const auto away = planAhead(r, makePrices(), tz(), at(12), hours{4}, AwayMode{12.0, at(13), at(15)}, std::nullopt);
@@ -996,4 +996,50 @@ TEST_CASE("Warm again by the end: heat is stored only when that is cheaper than 
     double end = 0;
     for (auto it = first; it != plan.end() && it->kind == "off"; ++it) end = it->coastTo.value_or(0);
     CHECK(end == Catch::Approx(20.0).margin(0.3));
+}
+
+namespace {
+// The basement: keep above 20 until 17:00, off 17-21, then keep above 19.
+RoomConfig basementRoom() {
+    RoomConfig r = bedroom();
+    r.minTemp = 15;
+    r.maxTemp = 24;
+    r.program = {{9 * 60, ProgramMode::Keep, 20.0}, {17 * 60, ProgramMode::Off, 0.0}, {21 * 60, ProgramMode::Keep, 19.0},
+                 {23 * 60, ProgramMode::Keep, 15.0}};
+    return r;
+}
+}  // namespace
+
+TEST_CASE("The last hour before the program steps down: no heat started for a dip it would only carry into the next period") {
+    const auto room = basementRoom();
+    auto in = input(at(16, 15), 19.9);
+    in.outdoorTemp = 2.0;
+    in.coolingRate = 0.012;  // a slow basement: about 19.7 by 17:00
+    const auto d = decide(in, room);
+    CHECK_FALSE(d.on);
+    CHECK_THAT(d.detail, ContainsSubstring("not worth starting the heat for the last 45 min"));
+
+    in.currentlyOn = true;  // already heating: carries on as usual
+    CHECK(decide(in, room).on);
+    in.currentlyOn = false;
+    in.now = at(15, 30);  // more than an hour left
+    in.measuredAt = in.now;
+    CHECK(decide(in, room).on);
+    in.now = at(16, 15);
+    in.measuredAt = in.now;
+    in.temperature = 19.2;  // would end more than 0.5 below the floor
+    CHECK(decide(in, room).on);
+    in.temperature = 19.9;
+    in.coolingRate.reset();  // the cautious 5 %/h: 19.2 by 17:00
+    CHECK(decide(in, room).on);
+}
+
+TEST_CASE("No pre-heating for expensive hours in which the room is off anyway") {
+    auto room = basementRoom();
+    room.program[0].mode = ProgramMode::Heat;
+    auto in = input(at(15), 20.0);
+    in.outdoorTemp = 2.0;
+    const auto d = decide(in, room);
+    CHECK(d.reason != Reason::PreheatBeforePeak);
+    CHECK_FALSE(d.on);
 }
