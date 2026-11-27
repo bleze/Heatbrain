@@ -40,6 +40,7 @@ struct RoomResult {
     const RoomConfig* room = nullptr;
     std::vector<BookingPlan> bookings;
     std::optional<ThermalModel> thermal;  // when learned well enough to use
+    std::optional<double> coolingRate, coastRate;  // per hour: settled, and the first hours after switching off
     std::optional<ThermalModel> recentThermal, earlierThermal;  // last 7 days / the 4 weeks before
     std::optional<double> overshoot;  // learned rise after switching off (heating stops that much early)
     Decision decision;
@@ -185,7 +186,8 @@ private:
     std::map<std::string, SensorReading> readings_;  // "<source>:<sensor id>", last good reading
     std::map<std::string, bool> lastOn_;             // room id -> previous decision
     std::map<std::string, Instant> onSince_;         // room id -> when it last switched on (while on)
-    std::map<std::string, Instant> offSince_;        // room id -> when it last switched off (seen by this run)
+    std::map<std::string, Instant> offSince_;        // room id -> when it last switched off
+    std::set<std::string> offLookedUp_;              // rooms whose last switch-off was looked up in the history
     std::map<std::string, std::pair<std::string, Instant>> failsafeChecks_;  // plug id -> (problem, checked at)
     std::filesystem::path dataDir_;  // firmware test records; empty = not checked
     std::optional<Instant> lastPrune_;

@@ -350,6 +350,8 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
         room["bookings"] = booked;
         if (r.thermal) room["thermal"] = {{"gain", r.thermal->gain}, {"loss", r.thermal->loss}};
         if (r.overshoot) room["overshoot"] = *r.overshoot;
+        if (r.coolingRate) room["coolingRate"] = *r.coolingRate;
+        if (r.coastRate) room["coastRate"] = *r.coastRate;
         if (const auto it = insulation.find(r.room->id); it != insulation.end()) {
             room["heatLoss"] = {{"wattsPerK", it->second.wattsPerK}, {"monthKWh", it->second.month.kWh}, {"monthCost", it->second.month.cost}};
             if (it->second.perM2) room["heatLoss"]["perM2"] = *it->second.perM2;

@@ -559,6 +559,8 @@ TickResult Controller::tick(Instant now, bool apply) {
         rr.bookings = std::move(bookingPlans);
         rr.thermal = learned;
         rr.overshoot = in.overshoot;
+        rr.coolingRate = in.coolingRate;
+        rr.coastRate = in.coastRate;
         if (!room.priceOnly) {
             auto& t = trend_[room.id];
             if (std::get<0>(t) == Instant{} || now - std::get<0>(t) >= hours{24}) {
@@ -589,6 +591,18 @@ TickResult Controller::tick(Instant now, bool apply) {
             cooling = in.coolingRate;
             // How long ago the heat went off: the first hours cool faster (heating now: 0).
             std::optional<double> sinceHeat;
+            // After a restart: the last switch-off from the history (once; this run tracks it after that).
+            if (!in.currentlyOn && history_ && !offLookedUp_.contains(room.id)) {
+                offLookedUp_.insert(room.id);
+                try {
+                    const auto ds = history_->decisions(room.id, now - kCoastSpan, now, true);
+                    for (auto it = ds.rbegin(); it != ds.rend(); ++it) {
+                        if (!it->on) { offSince_.try_emplace(room.id, it->at); break; }
+                    }
+                } catch (const std::exception& e) {
+                    log::warn("{}: when the heat last went off is unknown ({})", room.id, e.what());
+                }
+            }
             if (in.currentlyOn) sinceHeat = 0.0;
             else if (const auto it = offSince_.find(room.id); it != offSince_.end()) {
                 sinceHeat = duration<double, std::ratio<3600>>(now - it->second).count();
