@@ -112,3 +112,24 @@ TEST_CASE("Forgetting a room's early decisions: they no longer count, the rest i
     CHECK(days[0][3].get<double>() == Approx(17.0));
     CHECK(h.decisions("office", at(20, 0), now, false).size() == 12 * 60);  // other rooms untouched
 }
+
+TEST_CASE("Cost: 'saved by timing' counts finished days only (today's average includes hours still to come)") {
+    test::TempDir dir;
+    History h(dir.path() / "history.db");
+    // 2.0 at night, 4.0 by day (average 3.0); heated 06:00-08:00 each day: 06-07 at 2.0, 07-08 at 4.0.
+    PriceTable prices;
+    for (Instant t = at(21, 0); t < at(23, 0); t += minutes{15}) {
+        const int hour = hourOfDay(tz().toLocal(t));
+        prices.slots.push_back({t, {}, hour < 7 ? 2.0 : 4.0});
+    }
+    h.recordPrices(prices);
+    decide(h, "bedroom", at(21, 0), at(22, 12));
+    const json c = costReport(kCfg, h, at(22, 12), 2);
+    // Each day: 2 kWh (1 kW for 2 h) costing 1 x 2.0 + 1 x 4.0 = 6.0; the day average is
+    // (7 h x 2.0 + 17 h x 4.0) / 24, so at that price the same 2 kWh would have cost 2 x average.
+    const double average = (7 * 2.0 + 17 * 4.0) / 24;
+    CHECK(c["total"]["cost"].get<double>() == Approx(12.0));       // both days
+    CHECK(c["total"]["savedCost"].get<double>() == Approx(6.0));   // the 21st only: today is not over
+    CHECK(c["total"]["saved"].get<double>() == Approx(2 * average - 6.0));
+    CHECK(c["total"]["marketCost"].get<double>() == Approx(2 * 2 * average));  // both days, for "day average"
+}

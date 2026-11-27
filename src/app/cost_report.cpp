@@ -103,11 +103,16 @@ json costReport(const json& cfg, const History& history, Instant now, int dayCou
     const Instant from = startOfLocalDay(tz, now - hours{24 * (dayCount - 1)});
 
     std::map<Instant, double> prices;
-    for (const auto& p : history.prices(from, now + hours{1})) prices[p.slot] = p.total;
+    // Up to the end of today: today's day average is over the whole day (its prices are known the day before).
+    const Instant endOfToday = startOfLocalDay(tz, startOfLocalDay(tz, now) + hours{30});
+    for (const auto& p : history.prices(from, endOfToday)) prices[p.slot] = p.total;
     const auto market = dailyAveragePrice(prices, tz);
 
+    // "Saved by timing" counts finished days only: today's heating so far is compared with the whole
+    // day's average price, which includes cheap hours still to come - every morning would look bad.
+    const std::string today = formatLocalDate(tz.toLocal(now));
     json rooms = json::array();
-    json totals{{"kWh", 0.0}, {"cost", 0.0}, {"saved", 0.0}};
+    json totals{{"kWh", 0.0}, {"cost", 0.0}, {"saved", 0.0}, {"savedCost", 0.0}, {"marketCost", 0.0}};
     for (const auto& r : cfg.value("rooms", json::array())) {
         const std::string id = r.value("id", "");
         // A room without a sensor (price-only) is left out: its radiator's own thermostat decides
@@ -130,7 +135,7 @@ json costReport(const json& cfg, const History& history, Instant now, int dayCou
         room["live"] = run.live;
         room["measured"] = run.measured;
         json dj = json::array();
-        double kWh = 0, cost = 0, saved = 0, onHours = 0, live = 0;
+        double kWh = 0, cost = 0, saved = 0, onHours = 0, live = 0, savedCost = 0;
         for (const auto& d : run.days) {
             dj.push_back({{"date", d.date}, {"kWh", d.kWh}, {"cost", d.cost}, {"onHours", d.onHours},
                           {"liveKWh", d.liveKWh}, {"kWhWithoutPrice", d.kWhWithoutPrice}});
@@ -138,14 +143,21 @@ json costReport(const json& cfg, const History& history, Instant now, int dayCou
             cost += d.cost;
             onHours += d.onHours;
             live += d.liveKWh;
-            if (auto m = market.find(d.date); m != market.end()) saved += (d.kWh - d.kWhWithoutPrice) * m->second;
+            const auto m = market.find(d.date);
+            if (m != market.end()) totals["marketCost"] = totals["marketCost"].get<double>() + (d.kWh - d.kWhWithoutPrice) * m->second;
+            if (d.date != today && m != market.end()) {
+                saved += (d.kWh - d.kWhWithoutPrice) * m->second;
+                savedCost += d.cost;
+            }
         }
-        saved -= cost;
+        saved -= savedCost;
         room["days"] = dj;
-        room["total"] = {{"kWh", kWh}, {"cost", cost}, {"onHours", onHours}, {"liveKWh", live}, {"saved", saved}};
+        room["total"] = {{"kWh", kWh}, {"cost", cost}, {"onHours", onHours}, {"liveKWh", live}, {"saved", saved},
+                         {"savedCost", savedCost}};
         totals["kWh"] = totals["kWh"].get<double>() + kWh;
         totals["cost"] = totals["cost"].get<double>() + cost;
         totals["saved"] = totals["saved"].get<double>() + saved;
+        totals["savedCost"] = totals["savedCost"].get<double>() + savedCost;
         rooms.push_back(room);
     }
     json marketJson = json::object();

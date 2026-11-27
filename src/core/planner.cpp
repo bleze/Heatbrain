@@ -527,11 +527,67 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                     inputs);
     }
 
-    // 5. "Keep above": a floor only - no pre-heating or boosting, price does not matter.
+    // Cheap now, expensive soon: heat above `base` so the room coasts through the expensive stretch
+    // without falling below base - allowedDrop, started only as early as that takes (learned rates).
+    // Gives the level to heat to and the explanation, or nothing when it is not time (or not worth it).
+    struct Preheat {
+        double ceiling;
+        std::string text;
+    };
+    const auto preheatFor = [&](double base, double allowedDrop) -> std::optional<Preheat> {
+        if (!outlook.nextExpensiveAt || !outlook.current || *outlook.current >= *outlook.nextExpensivePrice * kPreheatMaxRatio) {
+            return std::nullopt;
+        }
+        const Instant peak = *outlook.nextExpensiveAt;
+        const Instant peakEnd = outlook.nextExpensiveUntil.value_or(peak + hours{1});
+        // The outdoor temperature during the expensive stretch: forecast, else the current reading.
+        std::optional<double> outside = in.forecast ? in.forecast->meanOver(peak, peakEnd) : std::nullopt;
+        const bool forecast = outside.has_value();
+        if (!outside) outside = in.outdoorTemp;
+        double boost = s.preheatBoost * outdoorFactor(base, outside);
+        std::string why = outside ? std::format(", +{:.1f}° as it will be {} outside", boost, temp(*outside)) : "";
+        bool due = true;
+        if (in.thermal && in.thermal->usable()) {
+            // Learned: just enough to coast through the stretch (the room's max caps it below), and
+            // started only as early as heating that far takes (stored heat leaks away).
+            boost = neededPreheat(*in.thermal, base, allowedDrop, outside.value_or(5.0), peak, peakEnd);
+            const auto lead = estimateWarmup(*in.thermal, t, std::min(base + boost, room.maxTemp - h),
+                                             in.outdoorTemp.value_or(outside.value_or(5.0)));
+            due = boost > 0.05 && peak - in.now <= lead.duration;
+            why = std::format(", +{:.1f}° to last until {}{}", boost, formatLocalHm(tz.toLocal(peakEnd)),
+                              outside ? std::format(" at {} outside{}", temp(*outside), forecast ? " (forecast)" : "") : "");
+        }
+        const double ceiling = std::min(base + boost, room.maxTemp - h);
+        if (!due || !(t < ceiling - h || keepOn(ceiling))) return std::nullopt;
+        return Preheat{ceiling, std::format("Pre-heating to {} before expensive period at {} ({:.2f} vs {:.2f} {}/kWh now{})",
+                                            temp(ceiling), formatLocalHm(tz.toLocal(peak)), *outlook.nextExpensivePrice,
+                                            *outlook.current, currency, why)};
+    };
+
+    // 5. "Keep above": a floor that always holds, whatever the price. Above it, heat is still stored
+    //    while it is cheap (as in a heat period, but never letting the room dip below the floor):
+    //    before an expensive stretch enough to coast through it, and a little extra in the cheapest
+    //    slots - so the floor is held with cheap heat rather than at the peak. Away: the floor only.
     if (mode == ProgramMode::Keep) {
         const std::string where = std::format("{} (keep above {} for {})", temp(t), temp(target), inputs.targetLabel);
         if (t <= target - h || keepOn(target + h)) {
             return make(true, Reason::KeepAbove, "Below the floor: " + where + minOnNote(target + h), inputs);
+        }
+        if (!away) {
+            if (const auto pre = preheatFor(target, 0.0)) {
+                inputs.ceiling = pre->ceiling;
+                return make(true, Reason::PreheatBeforePeak, pre->text + std::format(" (keep above {})", temp(target)), inputs);
+            }
+            if (outlook.cheapest) {
+                const double ceiling = std::min(target + s.cheapBoost, room.maxTemp - h);
+                if (t < ceiling - h || keepOn(ceiling)) {
+                    inputs.ceiling = ceiling;
+                    return make(true, Reason::CheapBoost,
+                                std::format("Among the cheapest slots ({:.2f} {}/kWh, median {:.2f}): heating to {} (keep above {})",
+                                            *outlook.current, currency, *outlook.median, temp(ceiling), temp(target)),
+                                inputs);
+                }
+            }
         }
         return make(false, Reason::KeepSatisfied, "Above the floor: " + where + earlyNote(target + h), inputs);
     }
@@ -558,34 +614,10 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
     }
 
     // 8. Cheap now, expensive soon: pre-heat.
-    if (!warmingAnyPrice && outlook.nextExpensiveAt && *outlook.current < *outlook.nextExpensivePrice * kPreheatMaxRatio) {
-        const Instant peak = *outlook.nextExpensiveAt;
-        const Instant peakEnd = outlook.nextExpensiveUntil.value_or(peak + hours{1});
-        // The outdoor temperature during the expensive stretch: forecast, else the current reading.
-        std::optional<double> outside = in.forecast ? in.forecast->meanOver(peak, peakEnd) : std::nullopt;
-        const bool forecast = outside.has_value();
-        if (!outside) outside = in.outdoorTemp;
-        double boost = s.preheatBoost * outdoorFactor(target, outside);
-        std::string why = outside ? std::format(", +{:.1f}° as it will be {} outside", boost, temp(*outside)) : "";
-        bool due = true;
-        if (in.thermal && in.thermal->usable()) {
-            // Learned: just enough to coast through the stretch (the room's max caps it below), and
-            // started only as early as heating that far takes (stored heat leaks away).
-            boost = neededPreheat(*in.thermal, target, s.peakAllowedDrop, outside.value_or(5.0), peak, peakEnd);
-            const auto lead = estimateWarmup(*in.thermal, t, std::min(target + boost, room.maxTemp - h),
-                                             in.outdoorTemp.value_or(outside.value_or(5.0)));
-            due = boost > 0.05 && peak - in.now <= lead.duration;
-            why = std::format(", +{:.1f}° to last until {}{}", boost, formatLocalHm(tz.toLocal(peakEnd)),
-                              outside ? std::format(" at {} outside{}", temp(*outside), forecast ? " (forecast)" : "") : "");
-        }
-        const double ceiling = std::min(target + boost, room.maxTemp - h);
-        if (due && (t < ceiling - h || keepOn(ceiling))) {
-            inputs.ceiling = ceiling;
-            return make(true, Reason::PreheatBeforePeak,
-                        std::format("Pre-heating to {} before expensive period at {} ({:.2f} vs {:.2f} {}/kWh now{})",
-                                    temp(ceiling), formatLocalHm(tz.toLocal(peak)), *outlook.nextExpensivePrice,
-                                    *outlook.current, currency, why),
-                        inputs);
+    if (!warmingAnyPrice) {
+        if (const auto pre = preheatFor(target, s.peakAllowedDrop)) {
+            inputs.ceiling = pre->ceiling;
+            return make(true, Reason::PreheatBeforePeak, pre->text, inputs);
         }
     }
 

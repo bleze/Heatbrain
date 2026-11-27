@@ -190,8 +190,8 @@ Only provision a plug once heatbrain runs continuously; otherwise it enters limp
 
 Each room has plugs, a sensor (`"netatmo:Bedroom"`, by module name or id), `minTemp`,
 `maxTemp` and a **daily program** of switch points, each running until the next one (the
-last continues past midnight): **heat to X** (price-aware), **keep above X** (a floor only:
-no pre-heating or boosting) or **off** (only frost protection, e.g. the 17-21 peak tariff or
+last continues past midnight): **heat to X** (price-aware), **keep above X** (a floor that
+holds whatever the price; above it heat is only stored while cheap) or **off** (only frost protection, e.g. the 17-21 peak tariff or
 the night), optionally with **stay above X** (`"coastAbove"`, see below). Older configs with `schedule` bands and `noHeat` windows are converted
 automatically. Rooms without a sensor use `priceOnly`
 (run the N cheapest hours per day, with no-heat windows). Every tick (default 5 min) the
@@ -205,7 +205,7 @@ planner decides each room, checking in this order:
 | 3 | Temperature fell fast (1 °C within 30 min): window open? Paused for 30 min | `WINDOW_OPEN` |
 | 4 | Program says off: only frost protection | `SCHEDULED_OFF` |
 | 5 | Temperature missing or older than 30 min: 10 min ON / 50 min OFF | `STALE_DATA_LIMP` |
-| 6 | Keep-above period (or away): heat only below the floor | `KEEP_ABOVE`, `KEEP_SATISFIED` |
+| 6 | Keep-above period (or away): heat below the floor whatever the price; above it (not away) pre-heat before an expensive stretch so it stays above the floor, and floor + 0.5 °C in the cheapest slots | `KEEP_ABOVE`, `PREHEAT_BEFORE_PEAK`, `CHEAP_BOOST`, `KEEP_SATISFIED` |
 | 7 | Below `minTemp`: ON whatever the price | `BELOW_MIN` |
 | 8 | Expensive slot: coast down to target − 1.0 °C | `PEAK_AVOID`, `BELOW_COMFORT_DURING_PEAK` |
 | 9 | Expensive slot within 3 h and clearly cheaper now: pre-heat (see below) | `PREHEAT_BEFORE_PEAK` |

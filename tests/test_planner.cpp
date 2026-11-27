@@ -265,13 +265,25 @@ TEST_CASE("Program periods: switch points run until the next one and wrap past m
     CHECK(periodAt(single, 12 * 60)->label == "all day");
 }
 
-TEST_CASE("Keep above: a floor only, ignores price, no pre-heat or boost") {
+TEST_CASE("Keep above: the floor holds whatever the price; above it, heat is stored while cheap") {
     RoomConfig r = bedroom();
     r.program = {{0, ProgramMode::Keep, 15.0}};
     CHECK(decide(input(at(18), 14.5), r).reason == Reason::KeepAbove);       // peak price, still heats
-    CHECK(decide(input(at(18), 15.5), r).reason == Reason::KeepSatisfied);
-    CHECK(decide(input(at(3), 15.5), r).reason == Reason::KeepSatisfied);    // cheapest hours: no boost
-    CHECK(decide(input(at(15), 15.5), r).reason == Reason::KeepSatisfied);   // before the peak: no pre-heat
+    CHECK(decide(input(at(18), 15.5), r).reason == Reason::KeepSatisfied);   // expensive: no more than the floor
+    // The cheapest hours: a little extra (cheap boost), up to floor + 0.5.
+    const auto cheap = decide(input(at(3), 15.2), r);
+    CHECK(cheap.reason == Reason::CheapBoost);
+    CHECK(cheap.inputs.ceiling == Catch::Approx(15.5));
+    CHECK(decide(input(at(3), 15.6), r).reason == Reason::KeepSatisfied);
+    // Cheap before the peak: stored to coast through it.
+    const auto pre = decide(input(at(15), 15.5), r);
+    CHECK(pre.reason == Reason::PreheatBeforePeak);
+    CHECK(*pre.inputs.ceiling > 15.5);
+    CHECK_THAT(pre.detail, ContainsSubstring("keep above 15.0"));
+    // Away: the floor only.
+    auto away = input(at(3), 15.2);
+    away.away = AwayMode{15.0, at(0), at(23)};
+    CHECK(decide(away, r).reason == Reason::KeepSatisfied);
     CHECK(decide(input(at(12), 15.05, /*on=*/true), r).on);                  // the band while heating
     CHECK_FALSE(decide(input(at(12), 15.1, /*on=*/true), r).on);
     CHECK(decide(input(at(12), 15.0), r).inputs.mode == "keep");
@@ -340,10 +352,11 @@ TEST_CASE("Plan ahead shows the intent per period") {
     r.program = {{7 * 60, ProgramMode::Heat, 19.0}, {17 * 60, ProgramMode::Off, 0}, {21 * 60, ProgramMode::Heat, 20.0},
                  {23 * 60, ProgramMode::Keep, 16.0}};
     const auto plan = planAhead(r, makePrices(), tz(), at(12), hours{14}, std::nullopt, std::nullopt);
-    // 12:00 heat 19 -> 14:00 pre-heat (peak at 17 within 3 h) -> 17 off -> 21 heat 20 -> 23 keep 16
+    // 12:00 heat 19 -> 14:00 pre-heat (peak at 17 within 3 h) -> 17 off -> 21 heat 20 -> 23 keep 16,
+    // with a cheap boost above the floor once the cheapest slots begin
     std::vector<std::string> kinds;
     for (const auto& s : plan) kinds.push_back(s.kind);
-    CHECK(kinds == std::vector<std::string>{"heat", "preheat", "off", "heat", "keep"});
+    CHECK(kinds == std::vector<std::string>{"heat", "preheat", "off", "heat", "keep", "boost"});
     CHECK(plan[1].from == at(14));
     CHECK(plan[2].from == at(17));
     CHECK(plan[3].target == 20.0);
