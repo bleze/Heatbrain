@@ -30,8 +30,22 @@ struct ThermalModel {
     double gain = 0;   // °C per hour at full heat
     int coolingStretches = 0;
     int heatingStretches = 0;
+    // How fast it cools in the first hours after the heat goes off (per hour, like `loss`): usually
+    // faster than `loss`, which is mostly learned from long, settled stretches (nights) - the air and
+    // the radiator's surroundings give their heat off first. Learned from each switch-off followed by
+    // at least kCoastMin without heat, over up to kCoastSpan of it.
+    double coastLoss = 0;
+    int coasts = 0;
     bool usable() const { return coolingStretches >= 3 && heatingStretches >= 3 && gain > 0.05; }
 };
+
+// The span after a switch-off that `coastLoss` describes, and the least of it a coast must last to count.
+inline constexpr std::chrono::hours kCoastSpan{4};
+inline constexpr std::chrono::hours kCoastMin{2};
+
+// What is left of the room's excess over outdoors after `hours` without heat: cooling at `early` for
+// the first kCoastSpan after the heat went off (`since` hours before the start, 0: just now), at `loss` after.
+double coastFactor(double hours, double loss, std::optional<double> early, double since = 0);
 
 // Fits the model on samples (sorted by time, any spacing up to 20 min; gaps split stretches).
 // Each stretch is 90 minutes or more of steady heating or not-heating with a known outdoor temperature.

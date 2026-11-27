@@ -5,7 +5,10 @@
 // (a "webhook" / Action set up on the device); they are kept here and read as the source "shelly".
 //
 // Such a sensor only reports when a value changes (by its threshold, e.g. 0.5 °C), so no news means
-// "still about the same": a reading is treated as current for kQuietOk after it came, then as stale.
+// "still about the same": a reading is treated as current for kPushQuietOk after it came, then as stale.
+// A steady room can be quiet for many hours (a shed at 6.4 °C all day), and while the Wi-Fi is off at
+// night nothing can come through at all - so the limit is long; a device that has really gone (battery)
+// shows up as low battery first.
 
 #include <chrono>
 #include <filesystem>
@@ -20,7 +23,7 @@
 
 namespace hb {
 
-inline constexpr std::chrono::hours kPushQuietOk{3};
+inline constexpr std::chrono::hours kPushQuietOk{12};
 
 class PushRegistry {
 public:

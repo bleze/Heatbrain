@@ -126,6 +126,8 @@ RoomConfig parseRoom(const json& rj) {
                                                      r.frostTemp, r.maxTemp));
             }
             p.coastAbove = c;
+        } else {
+            p.warmAtEnd = pj.value("warmAtEnd", false);
         }
         r.program.push_back(p);
     }

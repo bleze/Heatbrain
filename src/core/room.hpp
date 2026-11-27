@@ -35,6 +35,10 @@ struct ProgramPoint {
     // Off only: heat is stored beforehand so the room coasts through the period without falling
     // below this. The period itself still never heats (frost protection aside).
     std::optional<double> coastAbove;
+    // Off only (without a floor): store heat beforehand so the room is back at the next period's target
+    // when the period ends - only when that is cheaper than heating then (the prices before and after,
+    // and the extra heat a warmer room loses on the way). Otherwise it reheats when the period ends.
+    bool warmAtEnd = false;
 };
 
 // How eagerly the planner trades comfort for price. Defaults are deliberately mild.

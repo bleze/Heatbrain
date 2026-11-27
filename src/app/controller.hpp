@@ -185,6 +185,7 @@ private:
     std::map<std::string, SensorReading> readings_;  // "<source>:<sensor id>", last good reading
     std::map<std::string, bool> lastOn_;             // room id -> previous decision
     std::map<std::string, Instant> onSince_;         // room id -> when it last switched on (while on)
+    std::map<std::string, Instant> offSince_;        // room id -> when it last switched off (seen by this run)
     std::map<std::string, std::pair<std::string, Instant>> failsafeChecks_;  // plug id -> (problem, checked at)
     std::filesystem::path dataDir_;  // firmware test records; empty = not checked
     std::optional<Instant> lastPrune_;

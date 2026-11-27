@@ -57,3 +57,33 @@ TEST_CASE("Unknown component types give a helpful error") {
     const auto cfg = nlohmann::json::parse(R"({"components":[{"type":"nope","name":"x"}]})");
     CHECK_THROWS_WITH(PriceModel(cfg, ctx), Catch::Matchers::ContainsSubstring("fixed"));
 }
+
+TEST_CASE("A part's amount can change on given dates, from local midnight") {
+    test::TempDir dir;
+    test::FakeHttp http;
+    CachingHttpClient cache(http, dir.path());
+    const TimeZone tz("Europe/Copenhagen");
+    ProviderContext ctx{cache, tz, "DKK", [] { return Instant{}; }};
+    const auto cfg = nlohmann::json::parse(R"({
+      "components": [
+        {"type": "fixed", "name": "Elafgift", "amount": 0.008,
+         "changes": [{"from": "2028-07-01", "amount": 0.5}, {"from": "2028-01-01", "amount": 0.727}]},
+        {"type": "schedule", "name": "Grid", "seasons": [{"bands": [{"from":"00:00","to":"24:00","amount":0.1}]}],
+         "changes": [{"from": "2028-01-01", "seasons": [{"bands": [{"from":"00:00","to":"24:00","amount":0.2}]}]}]}
+      ]
+    })");
+    PriceModel model(cfg, ctx);
+    const Instant newYear = tz.toInstant(local_days{2028y / 1 / 1});
+    const PriceTable t = model.build(newYear - 30min, newYear + 30min);
+    REQUIRE(t.slots.size() == 4);
+    CHECK(*t.slots[1].parts[0] == Approx(0.008));
+    CHECK(*t.slots[1].parts[1] == Approx(0.1));
+    CHECK(*t.slots[2].parts[0] == Approx(0.727));  // the changes in any order
+    CHECK(*t.slots[2].parts[1] == Approx(0.2));
+    const Instant july = tz.toInstant(local_days{2028y / 7 / 1});
+    CHECK(*model.build(july, july + 15min).slots[0].parts[0] == Approx(0.5));
+
+    const auto bad = nlohmann::json::parse(
+        R"({"components":[{"type":"fixed","name":"Tax","amount":1,"changes":[{"from":"1/1/2028","amount":2}]}]})");
+    CHECK_THROWS_WITH(PriceModel(bad, ctx), Catch::Matchers::ContainsSubstring("2028-01-01"));
+}

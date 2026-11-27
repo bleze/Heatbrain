@@ -139,6 +139,12 @@ The price per kWh is a list of components in `heatbrain.json`, summed, then surc
 | `schedule` | Time-of-day bands with seasons/weekdays written in config: works for any grid company |
 | `fixed` | Constant per kWh: taxes, supplier markup |
 
+The Danish electricity tax is in the Datahub price list too (`"gln": "5790000432752", "codes":
+["EA-001"]`), with the dates it changes (0.008 kr/kWh in 2026-2027, about 0.73 before and after).
+A `fixed` or `schedule` part can change on dates of its own: `"changes": [{"from": "2028-01-01",
+"amount": 0.727}]` (for `schedule`, `"seasons"`) applies from local midnight of that date until the
+next change, also to the plan's prices ahead.
+
 Adding a country means adding a spot provider (ENTSO-E covers all of Europe) and
 describing its tariffs with `schedule`.
 
@@ -192,7 +198,7 @@ Each room has plugs, a sensor (`"netatmo:Bedroom"`, by module name or id), `minT
 `maxTemp` and a **daily program** of switch points, each running until the next one (the
 last continues past midnight): **heat to X** (price-aware), **keep above X** (a floor that
 holds whatever the price; above it heat is only stored while cheap) or **off** (only frost protection, e.g. the 17-21 peak tariff or
-the night), optionally with **stay above X** (`"coastAbove"`, see below). Older configs with `schedule` bands and `noHeat` windows are converted
+the night), optionally with **stay above X** (`"coastAbove"`) or **warm by the end** (`"warmAtEnd": true`), see below. Older configs with `schedule` bands and `noHeat` windows are converted
 automatically. Rooms without a sensor use `priceOnly`
 (run the N cheapest hours per day, with no-heat windows). Every tick (default 5 min) the
 planner decides each room, checking in this order:
@@ -251,6 +257,19 @@ along the warm-up curve, regardless of price (the floor was asked for). It never
 row, the plan strip, the chart and the decision text say how far the room is expected to fall. In the room chart the hours
 ahead show how the room is expected to coast through every off period, and the floor as a thin
 solid line marked with its value, so off periods are no longer holes in the target line.
+
+**Warm by the end.** An off point with `"warmAtEnd": true` (and no floor) is back at the next
+period's target when it ends - by storing heat before it, but only when that is the cheaper degree:
+heat stored at the price of the hour before keeps only a share `k` of its excess by the end (Newton
+cooling over the period), against heating at the price of the hour after, so it stores when
+`price_before / k < price_after`. With the winter peak tariff 21:00 is usually cheaper than 16:00,
+and the room reheats then; the decision text says which it chose and the prices it compared.
+
+**Cooling right after switching off.** Besides the settled cooling rate, each room learns how fast
+it cools in the first 4 hours after the heat goes off (the median over switch-offs followed by at
+least 2 hours without heat), usually faster: the air and the radiator's surroundings give their
+heat off first. The expected coast in the chart and the heat stored for an off period use it for
+the first 4 hours, the settled rate after.
 
 **The heating model.** `dT/dt = gain · heating − loss · (T − T_outdoor)`, fitted per room from
 the last 21 days of decisions (90-minute stretches of steady heating or not; limp mode, night

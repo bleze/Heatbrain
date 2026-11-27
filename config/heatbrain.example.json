@@ -29,10 +29,13 @@
         ]
       },
       {
-        "type": "fixed",
+        "type": "energidataservice.tariff",
         "name": "Elafgift",
-        "_comment": "Statutory electricity tax per kWh excl. VAT. Verify against your bill.",
-        "amount": 0.008
+        "_comment": "Statutory electricity tax per kWh excl. VAT, from the Datahub price list with the dates it changes (0.008 in 2026-2027).",
+        "gln": "5790000432752",
+        "codes": [
+          "EA-001"
+        ]
       },
       {
         "type": "fixed",

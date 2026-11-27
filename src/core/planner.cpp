@@ -75,9 +75,69 @@ std::optional<ProgramStep> nextStepUp(const RoomConfig& room, const TimeZone& tz
     return ProgramStep{at, current->point.target, next->target, next->mode};
 }
 
-std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, Instant now, std::optional<double> learnedLoss,
-                                   const OutdoorForecast* forecast, std::optional<double> outdoor, minutes within) {
+namespace {
+
+// The mean price over [from, to), if every slot in it is known.
+std::optional<double> meanPrice(const PriceTable* prices, Instant from, Instant to) {
+    if (!prices) return std::nullopt;
+    double sum = 0;
+    int n = 0;
+    for (const auto& s : prices->slots) {
+        if (s.start < from || s.start >= to) continue;
+        if (!s.total) return std::nullopt;
+        sum += *s.total;
+        ++n;
+    }
+    if (n == 0 || n < (to - from) / kSlotLength) return std::nullopt;
+    return sum / n;
+}
+
+// The off period at program index `idx`, beginning at `at`, after a period with target `before`.
+std::optional<CoastStep> coastFor(const RoomConfig& room, std::size_t idx, Instant at, double before,
+                                  std::optional<double> learnedLoss, const OutdoorForecast* forecast,
+                                  std::optional<double> outdoor, std::optional<double> coastRate,
+                                  const PriceTable* prices) {
     constexpr double kCautiousLoss = 0.05;  // per hour, as the plan assumes until the room is learned
+    const auto& p = room.program;
+    const ProgramPoint& off = p[idx];
+    const ProgramPoint& after = p[(idx + 1) % p.size()];
+    if (off.mode != ProgramMode::Off) return std::nullopt;
+    CoastStep c;
+    if (off.coastAbove) {
+        c.floor = *off.coastAbove;
+    } else if (off.warmAtEnd && after.mode != ProgramMode::Off && &after != &off) {
+        c.floor = after.target;
+        c.toNext = true;
+    } else {
+        return std::nullopt;
+    }
+    int length = ((after.atMinute - off.atMinute) % 1440 + 1440) % 1440;
+    if (length == 0) length = 1440;
+    c.at = at;
+    c.until = at + minutes{length};
+    c.outdoor = (forecast ? forecast->meanOver(c.at, c.until) : std::nullopt).value_or(outdoor.value_or(5.0));
+    const double loss = learnedLoss && *learnedLoss > 0 ? *learnedLoss : kCautiousLoss;
+    const std::optional<double> early = coastRate && *coastRate > 0 ? coastRate : std::nullopt;
+    // Newton cooling backwards from the floor at the end: T(h) = out + (T0 - out) * kept.
+    c.kept = coastFactor(length / 60.0, loss, early);
+    c.level = c.floor <= c.outdoor ? c.floor : c.outdoor + (c.floor - c.outdoor) / c.kept;
+    c.level = std::min(c.level, room.maxTemp - kHeatBand);
+    c.atEnd = c.level <= c.outdoor ? c.level : c.outdoor + (c.level - c.outdoor) * c.kept;
+    if (c.toNext) {
+        // Linear in the excess over outdoors: every degree stored above `before` is `kept` of a degree
+        // saved at the end. Store when that is the cheaper degree.
+        c.priceBefore = meanPrice(prices, c.at - hours{1}, c.at);
+        c.priceAfter = meanPrice(prices, c.until, c.until + hours{1});
+        c.pays = c.level > before + 0.05 && c.priceBefore && c.priceAfter && *c.priceBefore < *c.priceAfter * c.kept;
+    }
+    return c;
+}
+
+}  // namespace
+
+std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, Instant now, std::optional<double> learnedLoss,
+                                   const OutdoorForecast* forecast, std::optional<double> outdoor, minutes within,
+                                   std::optional<double> coastRate, const PriceTable* prices) {
     const auto& p = room.program;
     if (p.size() < 2) return std::nullopt;
     const LocalTime local = tz.toLocal(now);
@@ -91,23 +151,28 @@ std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, I
     }
     const auto current = periodAt(room, mod);
     if (!current || current->point.mode == ProgramMode::Off) return std::nullopt;
-    const ProgramPoint& off = p[next];
-    if (off.mode != ProgramMode::Off || !off.coastAbove) return std::nullopt;
-    int length = ((p[(next + 1) % p.size()].atMinute - off.atMinute) % 1440 + 1440) % 1440;
-    if (length == 0) length = 1440;
-    CoastStep c;
-    c.at = tz.toInstant(floor<minutes>(local) + minutes{ahead});
-    if (c.at - now > within) return std::nullopt;
-    c.until = c.at + minutes{length};
-    c.floor = *off.coastAbove;
-    c.outdoor = (forecast ? forecast->meanOver(c.at, c.until) : std::nullopt).value_or(outdoor.value_or(5.0));
-    const double loss = learnedLoss && *learnedLoss > 0 ? *learnedLoss : kCautiousLoss;
-    // Newton cooling backwards from the floor at the end: T(h) = out + (T0 - out) e^(-loss h).
-    const double hours = length / 60.0;
-    c.level = c.floor <= c.outdoor ? c.floor : c.outdoor + (c.floor - c.outdoor) * std::exp(std::min(loss * hours, 50.0));
-    c.level = std::min(c.level, room.maxTemp - kHeatBand);
-    c.atEnd = c.level <= c.outdoor ? c.level : c.outdoor + (c.level - c.outdoor) * std::exp(-std::min(loss * hours, 50.0));
-    return c;
+    const Instant at = tz.toInstant(floor<minutes>(local) + minutes{ahead});
+    if (at - now > within) return std::nullopt;
+    return coastFor(room, next, at, current->point.target, learnedLoss, forecast, outdoor, coastRate, prices);
+}
+
+std::optional<CoastStep> currentCoast(const RoomConfig& room, const TimeZone& tz, Instant now, std::optional<double> learnedLoss,
+                                      const OutdoorForecast* forecast, std::optional<double> outdoor,
+                                      std::optional<double> coastRate, const PriceTable* prices) {
+    const auto& p = room.program;
+    if (p.size() < 2) return std::nullopt;
+    const LocalTime local = tz.toLocal(now);
+    const int mod = minuteOfDay(local);
+    std::size_t idx = p.size() - 1;
+    for (std::size_t i = 0; i < p.size(); ++i) {
+        if (p[i].atMinute <= mod) idx = i;
+    }
+    if (p[idx].mode != ProgramMode::Off) return std::nullopt;
+    const std::size_t prev = (idx + p.size() - 1) % p.size();
+    if (p[prev].mode == ProgramMode::Off) return std::nullopt;
+    const int since = ((mod - p[idx].atMinute) % 1440 + 1440) % 1440;
+    const Instant at = tz.toInstant(floor<minutes>(local) - minutes{since});
+    return coastFor(room, idx, at, p[prev].target, learnedLoss, forecast, outdoor, coastRate, prices);
 }
 
 bool continuesSegment(const PlanSegment& a, const PlanSegment& b) {
@@ -369,9 +434,9 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                            ? nextCoast(room, tz, in.now,
                                        in.coolingRate ? in.coolingRate
                                                       : in.thermal ? std::optional<double>(in.thermal->loss) : std::nullopt,
-                                       in.forecast.get(), in.outdoorTemp)
+                                       in.forecast.get(), in.outdoorTemp, hours{12}, in.coastRate, &prices)
                            : std::nullopt;
-    if (coast && coast->level > target + 0.05) {
+    if (coast && coast->pays && coast->level > target + 0.05) {
         const double outside = (in.forecast ? in.forecast->meanOver(in.now, coast->at) : std::nullopt)
                                    .value_or(in.outdoorTemp.value_or(5.0));
         const ProgramStep step{coast->at, target, coast->level, ProgramMode::Keep};
@@ -387,14 +452,27 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
             inputs.coastAbove = coast->floor;
             inputs.storing = true;
             // Max caps the stored heat: the period stays off, but say that the floor will not hold.
-            if (coast->fallsShort()) {
-                shortNote = std::format(". Max {} only lasts until about {} at {}: below {}", temp(room.maxTemp),
-                                        temp(coast->atEnd), formatLocalHm(tz.toLocal(coast->until)), temp(coast->floor));
+            const std::string window =
+                formatWindow(DayWindow{minuteOfDay(tz.toLocal(coast->at)), minuteOfDay(tz.toLocal(coast->until))});
+            if (coast->toNext) {
+                inputs.coastAbove.reset();
+                inputs.warmAtEnd = coast->floor;
+                if (coast->fallsShort()) {
+                    shortNote = std::format(". Max {} only lasts until about {} at {}", temp(room.maxTemp),
+                                            temp(coast->atEnd), formatLocalHm(tz.toLocal(coast->until)));
+                }
+                shortNote += std::format(" ({:.2f} {}/kWh before, {:.0f} % of it left by {}, vs {:.2f} then)",
+                                         *coast->priceBefore, prices.currency, coast->kept * 100,
+                                         formatLocalHm(tz.toLocal(coast->until)), *coast->priceAfter);
+                inputs.targetLabel = std::format("storing heat for the off period {} (back at {} by {})", window,
+                                                 temp(coast->floor), formatLocalHm(tz.toLocal(coast->until)));
+            } else {
+                if (coast->fallsShort()) {
+                    shortNote = std::format(". Max {} only lasts until about {} at {}: below {}", temp(room.maxTemp),
+                                            temp(coast->atEnd), formatLocalHm(tz.toLocal(coast->until)), temp(coast->floor));
+                }
+                inputs.targetLabel = std::format("storing heat for the off period {} (stay above {})", window, temp(coast->floor));
             }
-            inputs.targetLabel = std::format(
-                "storing heat for the off period {} (stay above {})",
-                formatWindow(DayWindow{minuteOfDay(tz.toLocal(coast->at)), minuteOfDay(tz.toLocal(coast->until))}),
-                temp(coast->floor));
         }
     }
     if (!coast && !booked && !away && mode != ProgramMode::Off && room.warmup > minutes{0}) {  // 0: no early start
@@ -490,6 +568,26 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
                                     temp(*inputs.coastAbove)),
                         inputs);
         }
+        if (!away && period && period->point.warmAtEnd) {
+            if (const auto c = currentCoast(room, tz, in.now,
+                                            in.coolingRate ? in.coolingRate
+                                                           : in.thermal ? std::optional<double>(in.thermal->loss) : std::nullopt,
+                                            in.forecast.get(), in.outdoorTemp, in.coastRate, &prices)) {
+                const std::string end = formatLocalHm(tz.toLocal(c->until));
+                inputs.warmAtEnd = c->floor;
+                std::string why;
+                if (c->pays) {
+                    why = std::format("coasting on heat stored before it, back at {} by {}", temp(c->floor), end);
+                } else if (c->priceBefore && c->priceAfter && c->level > c->floor) {
+                    why = std::format("heating again at {} - cheaper than storing heat before it ({:.2f} {}/kWh then vs {:.2f} "
+                                      "before, of which {:.0f} % would be left)",
+                                      end, *c->priceAfter, prices.currency, *c->priceBefore, c->kept * 100);
+                } else {
+                    why = std::format("heating again at {}", end);
+                }
+                return make(false, Reason::ScheduledOff, std::format("Off by program {}: {}", inputs.targetLabel, why), inputs);
+            }
+        }
         return make(false, Reason::ScheduledOff, "Off by program " + inputs.targetLabel, inputs);
     }
 
@@ -521,6 +619,10 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         const bool on = onFor.count() > 0 && pos < onFor.count();
         const std::string why = !in.temperature ? "No temperature reading"
                                                 : std::format("Temperature is {} min old", *inputs.temperatureAgeMinutes);
+        if (onFor.count() == 0) {
+            return make(false, Reason::StaleDataLimp,
+                        why + ": limp mode, but no heat - the room has not needed any in such a period lately", inputs);
+        }
         return make(on, Reason::StaleDataLimp,
                     std::format("{}: limp mode {} min ON / {} min OFF{}", why, onFor.count(), offFor.count(),
                                 onFor != s.limpOn || offFor != s.limpOff ? " (what the room usually heats)" : ""),
@@ -644,8 +746,10 @@ Decision decideRoom(const RoomConfig& room, const PlannerInput& in, const PriceT
         if (t < target || keepOn(target + h)) {
             if (inputs.storing) {
                 return make(true, Reason::WarmUp,
-                            std::format("Storing heat for the off period (to stay above {}): {}{}", temp(*inputs.coastAbove),
-                                        where, shortNote),
+                            inputs.warmAtEnd
+                                ? std::format("Storing heat for the off period (cheaper than heating after it): {}{}", where, shortNote)
+                                : std::format("Storing heat for the off period (to stay above {}): {}{}", temp(*inputs.coastAbove),
+                                              where, shortNote),
                             inputs);
             }
             return make(true, Reason::WarmUp, "Warming up for " + what + ": " + where, inputs);
@@ -689,12 +793,17 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
                                    std::chrono::hours horizon, std::optional<AwayMode> away,
                                    std::optional<double> outdoorTemp, const std::vector<Booking>& bookings,
                                    std::optional<double> currentTemp, std::optional<double> coolingRate,
-                                   std::optional<ThermalModel> thermal, std::shared_ptr<const OutdoorForecast> forecast) {
+                                   std::optional<ThermalModel> thermal, std::shared_ptr<const OutdoorForecast> forecast,
+                                   std::optional<double> coastRate, std::optional<double> hoursSinceHeat) {
     std::vector<PlanSegment> out;
     // The room's temperature as it is likely to go: it cools towards outdoors while not heated and is
     // back at the target after a heating period. Only used to tell "keep above" apart from "idle".
     std::optional<double> room_t = currentTemp;
-    const double cool = std::exp(-coolingRate.value_or(0.05) * 0.25);  // per 15 minutes; cautious default
+    const double slotHours = duration<double, std::ratio<3600>>(kSlotLength).count();
+    const double loss = coolingRate.value_or(0.05);  // cautious default
+    const std::optional<double> early = coastRate && *coastRate > 0 ? coastRate : std::nullopt;
+    // Hours since the room last heated: it cools faster at first (unknown: assume it has settled).
+    double sinceHeat = hoursSinceHeat.value_or(1e9);
     for (Instant t = floorToSlot(now); t < now + horizon; t += kSlotLength) {
         // The target in effect at t, so the planner sees a room that is exactly at target.
         PlannerInput in;
@@ -703,6 +812,7 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
         in.outdoorTemp = outdoorTemp;
         in.thermal = thermal;
         in.coolingRate = coolingRate;
+        in.coastRate = coastRate;
         in.forecast = forecast;
         const double outside = (forecast ? forecast->at(t) : std::nullopt).value_or(outdoorTemp.value_or(5.0));
         const auto period = periodAt(room, minuteOfDay(tz.toLocal(t)));
@@ -734,13 +844,15 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
             default: kind = room.priceOnly ? (d.on ? "heat" : "off") : "heat"; break;
         }
         std::optional<double> coastFrom, coastTo;
+        bool heats = true;
         if (room_t) {
+            const double cooled = outside + (*room_t - outside) * coastFactor(slotHours, loss, early, sinceHeat);
             if (kind == "keep" || kind == "off" || kind == "away") {
                 if (kind == "off") coastFrom = *room_t;
-                *room_t = outside + (*room_t - outside) * cool;
                 const double floor = kind == "off" ? room.frostTemp : d.inputs.target.value_or(room.frostTemp);
-                if (kind == "keep" && *room_t > floor + kHeatBand) kind = "idle";
-                *room_t = std::max(*room_t, floor);  // heating holds it at the floor
+                heats = cooled < floor;
+                *room_t = std::max(cooled, floor);  // heating holds it at the floor
+                if (kind == "keep" && !heats && *room_t > floor + kHeatBand) kind = "idle";
                 if (kind == "off") coastTo = *room_t;
             } else if (d.inputs.target &&
                        (kind == "heat" || kind == "preheat" || kind == "boost" || kind == "coast" || kind == "warmup")) {
@@ -748,13 +860,14 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
                 // either - a room "heated to 5 deg" at 16 deg just cools.
                 const double ceiling = d.inputs.ceiling.value_or(
                     *d.inputs.target + (kind == "coast" ? -room.strategy.peakAllowedDrop : 0.0));
-                *room_t = outside + (*room_t - outside) * cool;
-                if (*room_t > ceiling + kHeatBand) kind = "idle";
+                *room_t = cooled;
+                if (*room_t > ceiling + kHeatBand) { kind = "idle"; heats = false; }
                 else *room_t = std::max(*room_t, ceiling);
             } else if (d.inputs.target) {
                 *room_t = std::max(*room_t, *d.inputs.target - (kind == "coast" ? room.strategy.peakAllowedDrop : 0.0));
             }
         }
+        sinceHeat = heats ? 0.0 : sinceHeat + slotHours;
         const std::optional<double> target = (kind == "off") ? std::nullopt : d.inputs.target;
         const bool warmup = d.inputs.warmupTo.has_value();
         const bool booked = d.inputs.mode == "booked";

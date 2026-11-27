@@ -111,3 +111,32 @@ TEST_CASE("A quiet sensor: the temperature is estimated from the last reading, t
     // No time passed: the reading itself.
     CHECK(estimateTemperature(m, 17.7, t0, t0, {}, 3) == 17.7);
 }
+
+TEST_CASE("Coasting: the first hours after the heat goes off cool at their own rate, then the usual one") {
+    CHECK(coastFactor(2, 0.02, 0.05) == Approx(std::exp(-0.1)));
+    CHECK(coastFactor(6, 0.02, 0.05) == Approx(std::exp(-(0.05 * 4 + 0.02 * 2))));
+    CHECK(coastFactor(2, 0.02, 0.05, 3) == Approx(std::exp(-(0.05 * 1 + 0.02 * 1))));  // 3 h after: 1 h left of it
+    CHECK(coastFactor(2, 0.02, std::nullopt) == Approx(std::exp(-0.04)));               // not learned: the usual rate
+    CHECK(coastFactor(1, 0.02, 0.05, 10) == Approx(std::exp(-0.02)));
+}
+
+TEST_CASE("Thermal model: how fast a room cools right after the heat goes off is learned apart") {
+    // The air gives its heat off first: 8 %/h for the first 3 hours after switching off, 2 %/h after
+    // (the walls). Heats 2 h, rests 10 h.
+    std::vector<ThermalSample> samples;
+    double t = 18;
+    const Instant start = sys_days{2026y / 11 / 1};
+    const int cycle = 12 * 12;
+    for (int i = 0; i < 7 * 24 * 12; ++i) {
+        const int pos = i % cycle;
+        const bool heating = pos < 2 * 12;
+        const double loss = !heating && pos < 5 * 12 ? 0.08 : 0.02;
+        samples.push_back({start + minutes{5 * i}, std::round(t * 10) / 10, 0.0, heating});
+        for (int s = 0; s < 5; ++s) t += (2.0 * heating - loss * t) / 60.0;
+    }
+    const auto m = fitThermalModel(samples);
+    CHECK(m.coasts >= 10);
+    // Over the first 4 hours: 3 at 8 % and 1 at 2 % = 6.5 %/h on average; the settled rate is lower.
+    CHECK(m.coastLoss == Approx(0.065).margin(0.01));
+    CHECK(m.loss < m.coastLoss);
+}

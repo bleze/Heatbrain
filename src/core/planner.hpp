@@ -124,14 +124,26 @@ struct CoastStep {
     double level = 0;   // needed at `at` (at most max - the band)
     double outdoor = 0; // assumed during the off period
     double atEnd = 0;   // where the room is expected at `until`, from `level`: below `floor` when max caps it
+    // "Warm again by the end": `floor` is the next period's target. Stored only when that `pays`: a degree
+    // stored at `priceBefore` (the hour before) is worth only `kept` of a degree at the end, against a
+    // degree heated then at `priceAfter` (the hour after). Without both prices it does not pay.
+    bool toNext = false;
+    bool pays = true;
+    double kept = 1;
+    std::optional<double> priceBefore, priceAfter;
     bool fallsShort() const { return atEnd < floor - 0.05; }
 };
-// The next program switch after `now`, if it is an off period with a floor within `within`. The room
-// cools at `loss` (its learned cooling rate, per hour), else a cautious 5 %/h, towards the forecast
-// (else `outdoor`, else 5).
+// The next program switch after `now`, if it is an off period with a floor (or "warm again by the end")
+// within `within`. The room cools at `coastRate` for the first hours after the heat goes off and at
+// `loss` after (its learned rates), else a cautious 5 %/h, towards the forecast (else `outdoor`, else 5).
 std::optional<CoastStep> nextCoast(const RoomConfig& room, const TimeZone& tz, Instant now, std::optional<double> loss,
                                    const OutdoorForecast* forecast, std::optional<double> outdoor,
-                                   std::chrono::minutes within = std::chrono::hours{12});
+                                   std::chrono::minutes within = std::chrono::hours{12},
+                                   std::optional<double> coastRate = {}, const PriceTable* prices = nullptr);
+// The off period in effect at `now` as nextCoast would have seen it when it began (for its decision text).
+std::optional<CoastStep> currentCoast(const RoomConfig& room, const TimeZone& tz, Instant now, std::optional<double> loss,
+                                      const OutdoorForecast* forecast, std::optional<double> outdoor,
+                                      std::optional<double> coastRate, const PriceTable* prices);
 
 struct PlannerInput {
     Instant now;
@@ -150,6 +162,8 @@ struct PlannerInput {
     // How fast it cools (per hour), as soon as that alone is learned (before the whole model is):
     // sizes the heat stored for an off period with a floor, as the plan's expected coast does.
     std::optional<double> coolingRate;
+    // How fast it cools in the first hours after the heat goes off (learned): the start of an off period.
+    std::optional<double> coastRate;
     std::shared_ptr<const OutdoorForecast> forecast;  // outdoor temperature ahead, if known
     // The temperature now, estimated from the last reading (not fresh, but recent) with the learned
     // rates and what heatbrain did since: used instead of limp mode while the sensor is quiet.
@@ -177,6 +191,7 @@ struct DecisionInputs {
     std::optional<double> ceiling;  // pre-heat / cheap boost: heating up to this
     std::optional<double> warmupTo;  // warming up: the target of the period ahead (`target` is the curve)
     std::optional<double> coastAbove;  // an off period with a floor (or storing heat for one: then `warmupTo` is the level)
+    std::optional<double> warmAtEnd;  // an off period to be back at this (the next target) when it ends
     bool storing = false;  // the warm-up is heat stored for an off period, not a warmer period
     std::optional<double> estimate;  // no fresh reading: the temperature estimated from the last one
     std::optional<double> overshoot;  // learned rise after switching off: heating stops that much early
@@ -221,7 +236,8 @@ std::vector<PlanSegment> planAhead(const RoomConfig& room, const PriceTable& pri
                                    std::optional<double> outdoorTemp, const std::vector<Booking>& bookings = {},
                                    std::optional<double> currentTemp = {}, std::optional<double> coolingRate = {},
                                    std::optional<ThermalModel> thermal = {},
-                                   std::shared_ptr<const OutdoorForecast> forecast = {});
+                                   std::shared_ptr<const OutdoorForecast> forecast = {},
+                                   std::optional<double> coastRate = {}, std::optional<double> hoursSinceHeat = {});
 
 // The pre-heat a room needs before an expensive stretch [from, until): how far above `target` it
 // must be when the stretch starts to coast through it without falling below target - allowedDrop,

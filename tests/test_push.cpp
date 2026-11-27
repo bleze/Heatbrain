@@ -10,7 +10,7 @@ namespace {
 const Instant kNow = sys_days{2026y / 11 / 24} + 12h;
 }
 
-TEST_CASE("Pushed sensor: temperature and humidity reports merge; no news means no change for 3 hours") {
+TEST_CASE("Pushed sensor: temperature and humidity reports merge; no news means no change for 12 hours") {
     auto& reg = PushRegistry::instance();
     reg.clear();
     reg.put("shed", "Shed", std::nullopt, 61.0, std::nullopt, kNow - 10min);
@@ -26,7 +26,8 @@ TEST_CASE("Pushed sensor: temperature and humidity reports merge; no news means 
     CHECK(*r[0].measuredAt == kNow);  // current: nothing changed enough to report
     CHECK(r[0].reachable);
 
-    r = pushReadings(reg.snapshot(), kNow + 4h);
+    CHECK(pushReadings(reg.snapshot(), kNow + 7h)[0].reachable);  // a steady room: quiet all afternoon
+    r = pushReadings(reg.snapshot(), kNow + 13h);
     CHECK(*r[0].measuredAt == kNow - 5min);  // too long without a word: stale
     CHECK_FALSE(r[0].reachable);
     reg.clear();

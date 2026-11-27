@@ -96,6 +96,7 @@ json toJson(const DecisionInputs& in) {
     if (in.ceiling) j["ceiling"] = *in.ceiling;
     if (in.warmupTo) j["warmupTo"] = *in.warmupTo;
     if (in.coastAbove) j["coastAbove"] = *in.coastAbove;
+    if (in.warmAtEnd) j["warmAtEnd"] = *in.warmAtEnd;
     if (in.estimate) j["estimate"] = *in.estimate;
     if (in.overshoot) j["overshoot"] = *in.overshoot;
     return j;
@@ -485,6 +486,7 @@ TickResult Controller::tick(Instant now, bool apply) {
             const ThermalModel m = thermalModel(room, now);
             if (m.usable()) in.thermal = m;
             if (m.coolingStretches >= 3 && m.loss > 0) in.coolingRate = m.loss;  // as the plan's expected coast
+            if (m.coasts >= 3 && m.coastLoss > 0) in.coastRate = m.coastLoss;  // the first hours after switching off
             // The sensor is quiet (the reading is older than trusted, but recent): estimate the temperature
             // from the last reading - cooling towards outdoors, warming while heatbrain heated since -
             // rather than fall back to limp mode at once. Needs the learned rates and an outdoor temperature.
@@ -585,8 +587,14 @@ TickResult Controller::tick(Instant now, bool apply) {
             std::optional<double> current, cooling;
             if (in.temperature && in.measuredAt && now - *in.measuredAt <= room.strategy.staleAfter) current = in.temperature;
             cooling = in.coolingRate;
+            // How long ago the heat went off: the first hours cool faster (heating now: 0).
+            std::optional<double> sinceHeat;
+            if (in.currentlyOn) sinceHeat = 0.0;
+            else if (const auto it = offSince_.find(room.id); it != offSince_.end()) {
+                sinceHeat = duration<double, std::ratio<3600>>(now - it->second).count();
+            }
             rr.plan = planAhead(room, prices_, tz_, now, hours{24}, away, outdoor, bookings, current, cooling, in.thermal,
-                                forecast);
+                                forecast, in.coastRate, sinceHeat);
         }
         if (offline && offline->start < now + hours{24} && room.thermostat.empty()) {  // thermostats keep their setpoint
             // Show the night as it will run: the loaded schedule, or what would be loaded now.
@@ -618,6 +626,7 @@ TickResult Controller::tick(Instant now, bool apply) {
             rr.plugs = room.thermostat.empty() ? applyToPlugs(room, rr.decision.on, now, result)
                                                : applyToThermostat(room, rr.decision, result);
             if (rr.decision.on && !(lastOn_.contains(room.id) && lastOn_[room.id])) onSince_[room.id] = now;
+            if (!rr.decision.on && lastOn_.contains(room.id) && lastOn_[room.id]) offSince_[room.id] = now;
             if (!rr.decision.on) onSince_.erase(room.id);
             lastOn_[room.id] = rr.decision.on;
             if (history_) {

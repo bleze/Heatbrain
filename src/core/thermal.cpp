@@ -82,7 +82,40 @@ ThermalModel fitThermalModel(const std::vector<ThermalSample>& all) {
     }
     m.heatingStretches = static_cast<int>(gains.size());
     m.gain = gains.empty() ? 0.0 : median(gains);
+
+    // Coasts: from each switch-off, up to kCoastSpan without heat (at least kCoastMin, no gaps).
+    std::vector<double> coasts;
+    for (std::size_t i = 1; i < samples.size(); ++i) {
+        if (!samples[i - 1].heating || samples[i].heating || samples[i].at - samples[i - 1].at > kMaxGap) continue;
+        std::size_t j = i;
+        double outdoor = 0;
+        int n = 0;
+        for (std::size_t k = i; k < samples.size(); ++k) {
+            if (samples[k].heating || (k > i && samples[k].at - samples[k - 1].at > kMaxGap) ||
+                samples[k].at - samples[i].at > kCoastSpan) {
+                break;
+            }
+            j = k;
+            if (samples[k].outdoor) { outdoor += *samples[k].outdoor; ++n; }
+        }
+        const double h = duration<double, std::ratio<3600>>(samples[j].at - samples[i].at).count();
+        if (n == 0 || samples[j].at - samples[i].at < kCoastMin) continue;
+        outdoor /= n;
+        const double t0 = samples[i].temperature, t1 = samples[j].temperature;
+        // Warmer at the end: heat from elsewhere (people, sun) - says nothing about the loss, as above.
+        if (t0 - outdoor < kMinIndoorOutdoorGap || t1 > t0 || t1 <= outdoor) continue;
+        coasts.push_back(-std::log((t1 - outdoor) / (t0 - outdoor)) / h);
+    }
+    m.coasts = static_cast<int>(coasts.size());
+    m.coastLoss = coasts.empty() ? 0.0 : median(coasts);
     return m;
+}
+
+double coastFactor(double hours, double loss, std::optional<double> early, double since) {
+    const double span = duration<double, std::ratio<3600>>(kCoastSpan).count();
+    const double fast = std::clamp(span - since, 0.0, std::max(hours, 0.0));
+    const double exponent = early.value_or(loss) * fast + loss * std::max(hours - fast, 0.0);
+    return std::exp(-std::min(exponent, 50.0));
 }
 
 double estimateTemperature(const ThermalModel& m, double last, Instant lastAt, Instant now,

@@ -630,13 +630,17 @@
       r.appendChild(at);
       // "Off, stay above" is an off point with a floor (coastAbove): its own choice, so the
       // temperature sits in the same column as every other row's.
-      const view = { mode: pt.mode === "off" && pt.coastAbove != null ? "coast" : pt.mode };
-      const modeSel = sel(view, "mode", [["heat", "Heat to"], ["keep", "Keep above"], ["off", "Off"], ["coast", "Off, stay above"]], () => {
+      // "Off, warm by the end" (warmAtEnd) likewise: an off point that may store heat for the next period.
+      const view = { mode: pt.mode === "off" && pt.coastAbove != null ? "coast" : pt.mode === "off" && pt.warmAtEnd ? "warm" : pt.mode };
+      const modeSel = sel(view, "mode", [["heat", "Heat to"], ["keep", "Keep above"], ["off", "Off"], ["coast", "Off, stay above"],
+                                         ["warm", "Off, warm by the end"]], () => {
         const floor = pt.coastAbove ?? Math.min(pt.target ?? 19, 19);
-        if (view.mode === "off" || view.mode === "coast") {
+        delete pt.warmAtEnd;
+        if (view.mode === "off" || view.mode === "coast" || view.mode === "warm") {
           pt.mode = "off";
           delete pt.target;
           if (view.mode === "coast") pt.coastAbove = floor; else delete pt.coastAbove;
+          if (view.mode === "warm") pt.warmAtEnd = true;
         } else {
           pt.mode = view.mode;
           pt.target ??= pt.mode === "keep" ? 15 : 20;
@@ -644,12 +648,15 @@
         }
         render();
       });
-      modeSel.title = "Off, stay above: never heats in the period, but stores heat just before it, so the room coasts through and is still above this when it ends.";
+      modeSel.title = "Off, stay above: never heats in the period, but stores heat just before it, so the room coasts through and is still above this when it ends.\n" +
+        "Off, warm by the end: never heats in the period; stores heat before it so the room is back at the next period's target when it ends - only when that is cheaper than heating then.";
       r.appendChild(modeSel);
       if (pt.mode !== "off") {
         r.appendChild(num(pt, "target", { step: 0.5, unit: "°C", onChange: () => drawTimeline(tl, room) }));
       } else if (pt.coastAbove != null) {
         r.appendChild(num(pt, "coastAbove", { step: 0.5, unit: "°C", onChange: () => drawTimeline(tl, room) }));
+      } else if (pt.warmAtEnd) {
+        el("span", { class: "muted", title: "Compares the price the hour before with the hour after, and the heat a warmer room loses meanwhile" }, r, "if cheaper");
       }
       // The saved plan says the stored heat won't last (the room's max caps it): say so under the row.
       const short = pt.mode === "off" && pt.coastAbove != null &&
@@ -727,7 +734,7 @@
     const segs = [];
     for (let m = 0; m < 1440; m += 15) {
       const st = pts.length ? stateAt(m) : null;
-      const key = st ? `${st.mode}:${st.target ?? ""}:${st.coastAbove ?? ""}` : "none";
+      const key = st ? `${st.mode}:${st.target ?? ""}:${st.coastAbove ?? ""}:${st.warmAtEnd ? 1 : ""}` : "none";
       const last = segs[segs.length - 1];
       if (last && last.key === key) last.len += 15; else segs.push({ key, st, len: 15 });
     }
@@ -739,8 +746,10 @@
       if (st.mode === "off") {
         const coastAbove = st.coastAbove;
         el("div", { style: `flex:${sg.len}`, class: "tl-off",
-                    title: coastAbove != null ? `off, coasting on heat stored before it: stays above ${coastAbove}°C` : "off (frost protection only)" },
-           bar, coastAbove != null ? `off ≥${coastAbove}°` : "off");
+                    title: coastAbove != null ? `off, coasting on heat stored before it: stays above ${coastAbove}°C`
+                      : st.warmAtEnd ? "off, back at the next target when it ends if storing heat before it is cheaper than heating then"
+                      : "off (frost protection only)" },
+           bar, coastAbove != null ? `off ≥${coastAbove}°` : st.warmAtEnd ? "off ↗" : "off");
         continue;
       }
       const label = st.mode === "keep" ? `≥${st.target}°` : `${st.target}°`;
@@ -1732,6 +1741,44 @@
     }
   }
 
+  // Dates a manual part changes (a tax rising on New Year's Day): from local midnight of each date until
+  // the next, the amount (or the seasons) of that row; before the first, the part's own. Prices on and
+  // after the date - also the plan's estimates ahead - use the new amount.
+  function renderPriceChanges(c, comp) {
+    const changes = comp.changes || [];
+    const box = el("div", { style: "margin-top:8px" }, c);
+    el("div", { class: "muted" }, box, changes.length ? "Changes on these dates (from midnight):" : "");
+    const unit = `${S.cfg.currency === "DKK" || !S.cfg.currency ? "kr" : S.cfg.currency}/kWh`;
+    changes.forEach((ch, k) => {
+      const r = el("div", { class: "sched-row" }, box);
+      const d = el("input", { type: "date", value: ch.from || "" }, r);
+      d.addEventListener("change", () => { ch.from = d.value; changed(); });
+      if (comp.type === "fixed") {
+        r.appendChild(num(ch, "amount", { step: 0.01, unit }));
+      } else {
+        const ta = el("textarea", { rows: 3, style: "flex:1;min-width:220px" }, r);
+        ta.value = JSON.stringify(ch.seasons || comp.seasons || [], null, 0);
+        ta.addEventListener("input", () => {
+          try { ch.seasons = JSON.parse(ta.value); ta.style.borderColor = ""; changed(); }
+          catch { ta.style.borderColor = "var(--critical)"; }
+        });
+      }
+      btn(r, "", "trash", () => {
+        changes.splice(k, 1);
+        if (!changes.length) delete comp.changes;
+        changed(); render();
+      }, "ghost danger row-delete");
+    });
+    btn(el("div", { style: "margin-top:6px" }, box), "Add a change on a date", "plus", () => {
+      const last = changes[changes.length - 1];
+      const ch = { from: `${new Date().getFullYear() + 1}-01-01` };
+      if (comp.type === "fixed") ch.amount = last?.amount ?? comp.amount ?? 0;
+      else ch.seasons = JSON.parse(JSON.stringify(last?.seasons ?? comp.seasons ?? []));
+      (comp.changes ||= []).push(ch);
+      changed(); render();
+    }, "ghost");
+  }
+
   function renderPrices(body) {
     const price = (S.cfg.price ||= { components: [] });
     const card = el("section", { class: "card" }, body);
@@ -1769,6 +1816,7 @@
         });
         field(cg, "Seasons (JSON)", ta, { wide: true, hint: '[{"months":[10,11,12,1,2,3],"bands":[{"from":"17:00","to":"21:00","amount":0.95}]}]' });
       }
+      if (comp.type === "fixed" || comp.type === "schedule") renderPriceChanges(c, comp);
     });
     const add = el("div", { class: "row", style: "margin-top:12px" }, card);
     const typeSel = el("select", {}, add);

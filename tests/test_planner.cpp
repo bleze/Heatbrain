@@ -910,6 +910,12 @@ TEST_CASE("Limp mode heats what the room usually does in such a period, once tha
     CHECK_FALSE(decide(in).on);
     CHECK_THAT(decide(in).detail, ContainsSubstring("45 min ON / 15 min OFF"));
 
+    // A room that has not heated in such periods lately: no heat, said plainly (not "0 min ON / 60 min OFF").
+    duty.byTarget[OfflineDuty::key(false, 19.0)] = 0.0;
+    in.duty = duty;
+    CHECK_FALSE(decide(in).on);
+    CHECK_THAT(decide(in).detail, ContainsSubstring("no heat - the room has not needed any"));
+
     // Not learned: the configured cycle (10 on, 50 off).
     duty.learned = false;
     in.duty = duty;
@@ -923,4 +929,71 @@ TEST_CASE("Limp mode heats what the room usually does in such a period, once tha
     duty.learned = true;
     in.duty = duty;
     CHECK_THAT(decide(in, room).detail, ContainsSubstring("20 min ON / 40 min OFF"));
+}
+
+namespace {
+// Heat to 20 all day, but off 17-21, to be back at 20 by 21:00 if storing heat for it is cheaper.
+RoomConfig warmAtEndRoom() {
+    RoomConfig r = peakOffRoom(std::nullopt);
+    r.program[1].warmAtEnd = true;
+    return r;
+}
+// 16:00 cheap, 21:00 dear: storing pays.
+std::array<double, 24> dearEvening() {
+    auto h = kHourly;
+    h[16] = 2.0;
+    h[21] = 3.0;
+    return h;
+}
+}  // namespace
+
+TEST_CASE("Coast: the first hours of an off period cool at the learned after-switch-off rate") {
+    const auto room = peakOffRoom(19.0);
+    // 4 hours at 6 %/h (the coast rate) towards 5 deg: 5 + 14 e^0.24 (not 5 %/h: 5 + 14 e^0.2).
+    const auto c = nextCoast(room, tz(), at(15), 0.05, nullptr, 5.0, hours{12}, 0.06);
+    REQUIRE(c);
+    CHECK(c->level == Catch::Approx(5 + 14 * std::exp(0.24)).epsilon(1e-6));
+}
+
+TEST_CASE("Warm again by the end: heat is stored only when that is cheaper than heating after the period") {
+    const auto room = warmAtEndRoom();
+    // The usual winter day: 2.5 at 16 against 2.4 at 21 - reheating after is cheaper.
+    const auto c = nextCoast(room, tz(), at(15), 0.05, nullptr, 5.0, hours{12}, std::nullopt, nullptr);
+    REQUIRE(c);
+    CHECK(c->toNext);
+    CHECK(c->floor == 20.0);
+    CHECK_FALSE(c->pays);  // no prices: never
+    const auto prices = makePrices();
+    const auto plain = nextCoast(room, tz(), at(15), 0.05, nullptr, 5.0, hours{12}, std::nullopt, &prices);
+    REQUIRE(plain);
+    CHECK(plain->priceBefore == Catch::Approx(2.5));
+    CHECK(plain->priceAfter == Catch::Approx(2.4));
+    CHECK_FALSE(plain->pays);
+    auto in = input(at(16), 20.0);
+    in.outdoorTemp = 5.0;
+    CHECK_FALSE(decide(in, room).inputs.storing);
+    const auto off = decide(input(at(18), 19.5), room);
+    CHECK_FALSE(off.on);
+    CHECK_THAT(off.detail, ContainsSubstring("heating again at 21:00 - cheaper than storing"));
+
+    // Cheap at 16, dear at 21: 2.0 / e^-0.2 = 2.44 < 3.0 - store.
+    const auto dear = makePrices(dearEvening());
+    const auto d = decide(in, room, dear);
+    CHECK(d.on);
+    CHECK(d.inputs.storing);
+    CHECK_FALSE(d.inputs.coastAbove);
+    REQUIRE(d.inputs.warmAtEnd);
+    CHECK(*d.inputs.warmAtEnd == 20.0);
+    CHECK_THAT(d.detail, ContainsSubstring("cheaper than heating after it"));
+    CHECK_THAT(decide(input(at(18), 21.0), room, dear).detail, ContainsSubstring("back at 20.0°C by 21:00"));
+
+    // The plan: pre-heat before, and the expected coast ends (about) at the next target (8 outside:
+    // 22.7 stored, below the max).
+    const auto plan = planAhead(room, dear, tz(), at(12), hours{12}, std::nullopt, 8.0, {}, 20.0, 0.05);
+    const auto first = std::ranges::find_if(plan, [](const PlanSegment& s) { return s.kind == "off"; });
+    REQUIRE(first != plan.end());
+    CHECK(std::prev(first)->kind == "preheat");
+    double end = 0;
+    for (auto it = first; it != plan.end() && it->kind == "off"; ++it) end = it->coastTo.value_or(0);
+    CHECK(end == Catch::Approx(20.0).margin(0.3));
 }
