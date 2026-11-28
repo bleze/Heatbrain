@@ -1,6 +1,7 @@
 #include "app/cameras.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <format>
 #include <future>
 #include <set>
@@ -23,12 +24,12 @@ std::vector<CameraConfig> parseCameras(const json& cfg) {
         CameraConfig c;
         c.id = cj.value("id", "");
         if (c.id.empty() || !ids.insert(c.id).second) throw std::runtime_error("camera id missing or duplicated: '" + c.id + "'");
-        c.name = cj.value("name", c.id);
-        if (c.name.empty()) c.name = c.id;
+        c.name = cj.value("name", "");
         c.host = cj.value("host", "");
-        if (c.host.empty()) throw std::runtime_error("camera " + c.name + ": address missing");
+        const std::string label = c.name.empty() ? c.id : c.name;
+        if (c.host.empty()) throw std::runtime_error("camera " + label + ": address missing");
         if (c.host.find_first_of("/ ?#@") != std::string::npos) {
-            throw std::runtime_error("camera " + c.name + ": address must be an IP or host name (and :port), not a URL");
+            throw std::runtime_error("camera " + label + ": address must be an IP or host name (and :port), not a URL");
         }
         c.user = cj.value("user", "");
         c.password = cj.value("password", "");
@@ -117,7 +118,7 @@ void CameraHub::configure(std::vector<CameraConfig> cameras) {
             return e->cfg.id == c.id && e->cfg.host == c.host && e->cfg.user == c.user && e->cfg.password == c.password;
         });
         if (old != entries_.end()) {
-            (*old)->cfg.name = c.name;
+            (*old)->cfg.name = c.name;  // the rest is the same
             next.push_back(*old);
         } else {
             auto e = std::make_shared<Entry>();
@@ -131,8 +132,45 @@ void CameraHub::configure(std::vector<CameraConfig> cameras) {
 std::vector<CameraConfig> CameraHub::cameras() const {
     std::lock_guard lock(mutex_);
     std::vector<CameraConfig> out;
-    for (const auto& e : entries_) out.push_back(e->cfg);
+    for (const auto& e : entries_) {
+        out.push_back(e->cfg);
+        out.back().name = e->shownName();
+    }
     return out;
+}
+
+std::string CameraHub::Entry::shownName() const {
+    if (!cfg.name.empty()) return cfg.name;
+    if (!ownName.empty()) return ownName;
+    return cfg.id;
+}
+
+namespace {
+// The name a camera leaves at its factory default says nothing ("Network Camera").
+bool defaultName(std::string n) {
+    std::ranges::transform(n, n.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return n.empty() || n.starts_with("network camera") || n.starts_with("networkcamera") || n.starts_with("ip cam") ||
+           n.starts_with("vivotek");
+}
+}  // namespace
+
+// The camera's own name, model and firmware (with the login, which the scan did not have).
+void CameraHub::askInfo(Entry& e, Instant now) {
+    e.infoAt = now;
+    HttpRequest req{"GET", "http://" + e.cfg.host + "/cgi-bin/viewer/getparam.cgi?system_hostname&system_info_modelname&system_info_firmwareversion",
+                    {}, {}, {}};
+    if (!e.cfg.user.empty()) req.headers.emplace_back("Authorization", "Basic " + base64Encode(e.cfg.user + ":" + e.cfg.password));
+    try {
+        const auto r = http_.send(req);
+        if (r.status != 200) return;
+        const auto p = params(r.body);
+        std::lock_guard lock(mutex_);
+        if (const auto it = p.find("system_hostname"); it != p.end()) e.ownName = defaultName(it->second) ? "" : it->second;
+        if (const auto it = p.find("system_info_modelname"); it != p.end()) e.model = it->second;
+        if (const auto it = p.find("system_info_firmwareversion"); it != p.end()) e.firmware = it->second;
+    } catch (const std::exception&) {
+        // not important: asked again later
+    }
 }
 
 std::shared_ptr<CameraHub::Entry> CameraHub::entry(const std::string& id) const {
@@ -160,9 +198,12 @@ CameraPicture CameraHub::picture(const std::string& id, milliseconds maxAge) {
             error = "did not send a picture";
         } else {
             CameraPicture p{std::make_shared<const std::string>(std::move(r.body)), now};
-            std::lock_guard lock(mutex_);
-            e->last = p;
-            e->error.clear();
+            {
+                std::lock_guard lock(mutex_);
+                e->last = p;
+                e->error.clear();
+            }
+            if (!e->infoAt || now - *e->infoAt >= hours{6}) askInfo(*e, now);
             return p;
         }
     } catch (const std::exception& ex) {
@@ -170,7 +211,7 @@ CameraPicture CameraHub::picture(const std::string& id, milliseconds maxAge) {
     }
     {
         std::lock_guard lock(mutex_);
-        if (e->error != error) log::warn("Camera {}: {}", e->cfg.name, error);
+        if (e->error != error) log::warn("Camera {}: {}", e->shownName(), error);
         e->error = error;
     }
     throw std::runtime_error(error);
@@ -180,7 +221,8 @@ std::vector<CameraStatus> CameraHub::status() const {
     std::lock_guard lock(mutex_);
     std::vector<CameraStatus> out;
     for (const auto& e : entries_) {
-        CameraStatus s{e->cfg.id, e->cfg.name, e->last.has_value() && e->error.empty(), e->error, std::nullopt};
+        CameraStatus s{e->cfg.id, e->shownName(), e->ownName, e->model, e->firmware, e->last.has_value() && e->error.empty(),
+                       e->error, std::nullopt};
         if (e->last) s.lastPicture = e->last->at;
         out.push_back(std::move(s));
     }

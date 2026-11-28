@@ -423,7 +423,8 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
     }
     json cameras = json::array();
     for (const auto& c : hb::CameraHub::instance().status()) {
-        cameras.push_back({{"id", c.id}, {"name", c.name}, {"ok", c.ok}, {"error", c.error},
+        cameras.push_back({{"id", c.id}, {"name", c.name}, {"ownName", c.ownName}, {"model", c.model}, {"firmware", c.firmware},
+                           {"ok", c.ok}, {"error", c.error},
                            {"at", c.lastPicture ? json(c.lastPicture->time_since_epoch().count()) : json(nullptr)}});
     }
     return json{{"now", now.time_since_epoch().count()},

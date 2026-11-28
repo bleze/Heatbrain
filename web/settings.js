@@ -852,7 +852,7 @@
     renderFoundCameras(list, cameras);
   }
 
-  // VIVOTEK cameras from the scan: added to Settings -> Climate -> Outdoor cameras.
+  // VIVOTEK cameras from the scan: added to Sensors -> Outdoor cameras.
   function renderFoundCameras(list, cameras) {
     for (const d of cameras) {
       const r = el("div", { class: "item-head", style: "flex-wrap:wrap;gap:8px" }, list);
@@ -873,7 +873,7 @@
           const id = slug(name || `camera-${d.host.split(".").pop()}`, new Set(cams.map((c) => c.id)));
           arr(S.cfg, "cameras").push({ id, name, host: d.host, user: "", password: "" });
           changed(); render();
-          toast(d.needsLogin ? "Added: set its name, user and password under Climate → Outdoor cameras" : "Added: name it under Climate → Outdoor cameras");
+          toast(d.needsLogin ? "Added: set its name, user and password under Sensors → Outdoor cameras" : "Added: name it under Sensors → Outdoor cameras");
         });
       }
     }
@@ -1325,6 +1325,8 @@
     }, "primary");
     el("div", { class: "hint", style: "margin-top:6px" }, shSetup, "It reports only when a value changes (Set up makes that every 0.5°), so heatbrain treats no news as no change for up to 3 hours. During Wi-Fi-off periods nothing arrives.");
 
+    renderCameras(body);
+
     const mods = el("section", { class: "card" }, body);
     const mh = sectionHead(mods, "Your sensors", "thermo", "violet");
     // One time range for all module charts, like the room chart's (remembered in this browser).
@@ -1482,8 +1484,6 @@
       else info.textContent = "Fetching the forecast…";
     }
 
-    renderCameras(body);
-
     // Open-window detection: a fast fall in temperature pauses the room's heating.
     const ow = el("section", { class: "card" }, body);
     sectionHead(ow, "Open windows", "window", "cool",
@@ -1532,8 +1532,9 @@
       const head = el("div", { class: "item-head" }, item);
       const left = el("div", { class: "row" }, head);
       left.appendChild(badge("camera", "cool"));
-      el("b", {}, left, c.name || c.id);
       const st = live.find((x) => x.id === c.id);
+      el("b", {}, left, c.name || st?.ownName || c.id);
+      if (st?.model) el("span", { class: "muted" }, left, `${st.model}${st.firmware ? ` · ${st.firmware.replace(/^.*-VVTK-/, "firmware ")}` : ""}`);
       if (st) {
         const chip = el("span", { class: `chip ${st.ok ? "ok" : st.error ? "error" : ""}` }, left);
         chip.appendChild(icon(st.ok ? "check" : st.error ? "alert" : "clock"));
@@ -1543,7 +1544,8 @@
         cams.splice(cams.indexOf(c), 1); changed(); render();
       }, "ghost danger");
       const g = el("div", { class: "form-grid" }, item);
-      field(g, "Name", txt(c, "name", { placeholder: "Garden" }));
+      // Empty: the camera's own name (Settings on the camera: System -> Host name).
+      field(g, "Name", txt(c, "name", { placeholder: st?.ownName || "Garden" }), { hint: st?.ownName ? "empty: the camera's own name" : null });
       field(g, "Address", txt(c, "host", { placeholder: "192.168.1.61" }), { hint: "IP address (and :port if not 80)" });
       field(g, "User", txt(c, "user", { placeholder: "only if it asks for a login" }));
       field(g, "Password", secret(c, "password", ""));

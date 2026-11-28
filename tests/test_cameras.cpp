@@ -21,7 +21,7 @@ TEST_CASE("Cameras: parsed from the config, with readable errors") {
         {"id": "garden", "name": "Garden", "host": "192.168.1.61"},
         {"id": "drive", "host": "192.168.1.63:8080", "user": "viewer", "password": "pw"}]})"));
     REQUIRE(cams.size() == 2);
-    CHECK(cams[1].name == "drive");
+    CHECK(cams[1].name.empty());  // the camera's own name, once it answers
     CHECK(snapshotUrl(cams[1]) == "http://192.168.1.63:8080/cgi-bin/viewer/video.jpg");
     CHECK(parseCameras(json::object()).empty());
     CHECK_THROWS(parseCameras(json::parse(R"({"cameras": [{"id": "a", "host": "x"}, {"id": "a", "host": "y"}]})")));
@@ -51,10 +51,10 @@ TEST_CASE("Cameras: pictures are fetched with the login, shared while fresh, and
     CHECK(*hub.picture("drive", seconds{30}).jpeg == kJpeg);
     now += seconds{10};
     hub.picture("drive", seconds{30});
-    CHECK(http.calls == 1);  // still fresh: the same picture
+    CHECK(http.calls == 2);  // still fresh: the same picture (the second call asked its name)
     now += seconds{30};
     hub.picture("drive", seconds{30});
-    CHECK(http.calls == 2);
+    CHECK(http.calls == 3);
     CHECK_THROWS_AS(hub.picture("nope", seconds{30}), std::out_of_range);
 
     http.requestHandler = [](const HttpRequest&) { return HttpResponse{401, "", std::nullopt}; };
@@ -109,4 +109,35 @@ TEST_CASE("Cameras: found on the network by VIVOTEK's own answers") {
     CHECK(found[1].host == "10.0.0.63");
     CHECK(found[1].needsLogin);
     CHECK_THROWS(discoverCameras("10.0.0.0/16", http));
+}
+
+TEST_CASE("Cameras: without a name set, the camera's own name (asked with the login)") {
+    test::FakeHttp http;
+    Instant now = sys_days{2026y / 11 / 28} + hours{12};
+    CameraHub hub(http, [&] { return now; });
+    hub.configure({{"camera-63", "", "192.168.1.63", "viewer", "pw"}, {"camera-64", "", "192.168.1.64", "viewer", "pw"}});
+    http.handler = [](const std::string& url) {
+        if (url.find("getparam.cgi") == std::string::npos) return HttpResponse{200, kJpeg, std::nullopt};
+        const bool drive = url.starts_with("http://192.168.1.63/");
+        return HttpResponse{200, std::string("system_hostname='") + (drive ? "Indkørsel" : "Network Camera") +
+                                     "'\r\nsystem_info_modelname='FD8169A'\r\nsystem_info_firmwareversion='FD8169A-VVTK-0102a'\r\n",
+                            std::nullopt};
+    };
+    CHECK(hub.status()[0].name == "camera-63");  // not asked yet
+    hub.picture("camera-63", seconds{0});
+    hub.picture("camera-64", seconds{0});
+    const auto st = hub.status();
+    CHECK(st[0].name == "Indkørsel");
+    CHECK(st[0].model == "FD8169A");
+    CHECK(st[0].firmware == "FD8169A-VVTK-0102a");
+    CHECK(st[1].name == "camera-64");  // left at the factory name
+    CHECK(hub.cameras()[0].name == "Indkørsel");
+    // A name set in heatbrain wins.
+    hub.configure({{"camera-63", "Driveway", "192.168.1.63", "viewer", "pw"}});
+    CHECK(hub.status()[0].name == "Driveway");
+    // Asked again only every 6 hours.
+    const int calls = http.calls;
+    now += minutes{5};
+    hub.picture("camera-63", seconds{0});
+    CHECK(http.calls == calls + 1);
 }
