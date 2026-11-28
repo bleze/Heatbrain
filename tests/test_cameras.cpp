@@ -135,9 +135,19 @@ TEST_CASE("Cameras: without a name set, the camera's own name (asked with the lo
     // A name set in heatbrain wins.
     hub.configure({{"camera-63", "Driveway", "192.168.1.63", "viewer", "pw"}});
     CHECK(hub.status()[0].name == "Driveway");
-    // Asked again only every 6 hours.
+    // Asked again only hourly...
     const int calls = http.calls;
     now += minutes{5};
     hub.picture("camera-63", seconds{0});
     CHECK(http.calls == calls + 1);
+    // ...or when it is back after not answering (restarted after a firmware update).
+    const auto handler = http.handler;
+    http.handler = [](const std::string&) -> HttpResponse { throw HttpError("timed out"); };
+    CHECK_THROWS(hub.picture("camera-63", seconds{0}));
+    http.handler = [handler](const std::string& url) {
+        if (url.find("getparam.cgi") == std::string::npos) return handler(url);
+        return HttpResponse{200, "system_hostname='Gavl'\r\nsystem_info_firmwareversion='FD8379-VVTK-0200a'\r\n", std::nullopt};
+    };
+    hub.picture("camera-63", seconds{0});
+    CHECK(hub.status()[0].firmware == "FD8379-VVTK-0200a");
 }

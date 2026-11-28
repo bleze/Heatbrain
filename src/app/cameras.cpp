@@ -198,12 +198,15 @@ CameraPicture CameraHub::picture(const std::string& id, milliseconds maxAge) {
             error = "did not send a picture";
         } else {
             CameraPicture p{std::make_shared<const std::string>(std::move(r.body)), now};
+            bool wasDown = false;
             {
                 std::lock_guard lock(mutex_);
+                wasDown = !e->error.empty();
                 e->last = p;
                 e->error.clear();
             }
-            if (!e->infoAt || now - *e->infoAt >= hours{6}) askInfo(*e, now);
+            // Back after not answering (a restart, often a firmware update): its firmware may be new.
+            if (!e->infoAt || wasDown || now - *e->infoAt >= hours{1}) askInfo(*e, now);
             return p;
         }
     } catch (const std::exception& ex) {

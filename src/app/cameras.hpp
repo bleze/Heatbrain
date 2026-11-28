@@ -80,7 +80,7 @@ private:
         std::optional<CameraPicture> last;
         std::string error;
         std::string ownName, model, firmware;  // from the camera itself
-        std::optional<Instant> infoAt;         // when that was asked (again every 6 hours)
+        std::optional<Instant> infoAt;         // when that was asked (again hourly, and after not answering)
         std::string shownName() const;
     };
     void askInfo(Entry& e, Instant now);  // with e.fetch held
