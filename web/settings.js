@@ -1527,28 +1527,46 @@
     const cams = S.cfg.cameras || [];  // not created until a camera is added (no unsaved change)
     const live = state.status?.cameras || [];
     const list = el("div", { class: "list" }, card);
+    const saved = JSON.parse(S.saved).cameras || [];
     for (const c of cams) {
+      // Like a plug: badge, name (editable; empty = the camera's own) and id; address with the camera's
+      // own page; how it is doing and what it is as chips underneath.
+      const st = live.find((x) => x.id === c.id);
       const item = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, list);
       const head = el("div", { class: "item-head" }, item);
       const left = el("div", { class: "row" }, head);
       left.appendChild(badge("camera", "cool"));
-      const st = live.find((x) => x.id === c.id);
-      el("b", {}, left, c.name || st?.ownName || c.id);
-      if (st?.model) el("span", { class: "muted" }, left, `${st.model}${st.firmware ? ` · ${st.firmware.replace(/^.*-VVTK-/, "firmware ")}` : ""}`);
-      if (st) {
-        const chip = el("span", { class: `chip ${st.ok ? "ok" : st.error ? "error" : ""}` }, left);
-        chip.appendChild(icon(st.ok ? "check" : st.error ? "alert" : "clock"));
-        chip.appendChild(document.createTextNode(st.ok ? "picture ok" : st.error || "not asked yet"));
-      }
+      const name = txt(c, "name", { placeholder: st?.ownName || "Garden" });
+      name.style.fontWeight = "600";
+      name.title = "Empty: the camera's own name";
+      left.appendChild(name);
+      el("span", { class: "muted" }, left, `id: ${c.id}`);
       confirmBtn(el("div", { class: "row" }, head), "", "trash", "Remove this camera?", () => {
         cams.splice(cams.indexOf(c), 1); changed(); render();
       }, "ghost danger");
+
       const g = el("div", { class: "form-grid" }, item);
-      // Empty: the camera's own name (Settings on the camera: System -> Host name).
-      field(g, "Name", txt(c, "name", { placeholder: st?.ownName || "Garden" }), { hint: st?.ownName ? "empty: the camera's own name" : null });
-      field(g, "Address", txt(c, "host", { placeholder: "192.168.1.61" }), { hint: "IP address (and :port if not 80)" });
-      field(g, "User", txt(c, "user", { placeholder: "only if it asks for a login" }));
+      const addr = el("div", { class: "row addr-row" });
+      addr.appendChild(txt(c, "host", { placeholder: "192.168.1.61" }));
+      field(g, "Address", addr, { span2: true });
+      if (c.host) {
+        btn(addr, "Web UI", "external", () => window.open(`http://${c.host}/`, "_blank", "noopener"), "ghost")
+          .title = `Open the camera's own page (${c.host}) in a new tab`;
+      }
+      field(g, "User", txt(c, "user", { placeholder: "only if it asks" }));
       field(g, "Password", secret(c, "password", ""));
+
+      const chips = el("div", { class: "plugs", style: "margin-top:12px" }, item);
+      const chip = (cls, iconName, text) => { const ch = el("span", { class: `chip ${cls}` }, chips); ch.appendChild(icon(iconName)); ch.appendChild(document.createTextNode(text)); };
+      if (JSON.stringify(c) !== JSON.stringify(saved.find((x) => x.id === c.id) || {})) chip("warn", "save", "unsaved changes");
+      else if (!st || (!st.ok && !st.error)) chip("", "clock", "checking…");
+      else if (!st.ok) chip("error", "alert", st.error);
+      else {
+        chip("ok", "check", st.at ? `picture ${hm(st.at)}` : "picture ok");
+        if (st.model) chip("", "camera", `VIVOTEK ${st.model}`);
+        if (st.firmware) chip("", "cpu", `firmware ${st.firmware.replace(/^.*-VVTK-/, "")}`);
+        if (!c.user) chip("warn", "shield", "no login: anyone on your network can see it");
+      }
     }
     btn(el("div", { style: "margin-top:12px" }, card), "Add camera", "plus", () => {
       const id = slug(`camera-${cams.length + 1}`, new Set(cams.map((x) => x.id)));
