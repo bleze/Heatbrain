@@ -10,6 +10,7 @@
 #include <cmath>
 #include <format>
 
+#include "app/cameras.hpp"
 #include "core/log.hpp"
 #include "core/overshoot.hpp"
 #include "core/version.hpp"
@@ -41,6 +42,7 @@ bool expectedWhileOffline(const std::string& key) {
     const auto endsWith = [&](std::string_view suffix) { return key.ends_with(suffix); };
     return (key.starts_with("plug:") && (endsWith(":unreachable") || endsWith(":mismatch") || endsWith(":failsafe"))) ||
            (key.starts_with("thermostat:") && endsWith(":unreachable")) ||
+           (key.starts_with("camera:") && endsWith(":unreachable")) ||
            (key.starts_with("sensor:") && endsWith(":offline")) ||
            (key.starts_with("room:") && (endsWith(":limp") || endsWith(":not-warming")));
 }
@@ -663,6 +665,8 @@ TickResult Controller::tick(Instant now, bool apply) {
         result.rooms.push_back(std::move(rr));
     }
 
+    if (apply) checkCameras(result);
+
     const bool inWindow = offline && now >= offline->start - offlineLead_ && now < offline->end + kOfflineGrace;
     const bool onSchedule = armedPeriod_ && !networkBack && !armedPlugs_.empty();  // late Wi-Fi: one note is enough
     if (inWindow || onSchedule) {
@@ -1136,6 +1140,24 @@ void Controller::saveReadings() const {
     std::ofstream(tmp) << json{{"readings", items}}.dump();
     std::error_code ec;
     std::filesystem::rename(tmp, dataDir_ / "readings.json", ec);
+}
+
+}  // namespace hb
+
+namespace hb {
+
+// The outdoor cameras: each one's picture once a step (a newer one, fetched for the dashboard, will
+// do). One that keeps failing for half an hour is reported.
+void Controller::checkCameras(TickResult& result) {
+    auto& hub = CameraHub::instance();
+    for (const auto& c : hub.cameras()) {
+        try {
+            hub.picture(c.id, minutes{4});
+        } catch (const std::exception& e) {
+            add(result, "camera:" + c.id + ":unreachable", Severity::Warning, std::format("Camera '{}' {}", c.name, e.what()),
+                minutes{30});
+        }
+    }
 }
 
 }  // namespace hb

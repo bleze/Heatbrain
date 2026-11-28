@@ -11,6 +11,7 @@
 
 #include <fstream>
 #include "core/version.hpp"
+#include "app/cameras.hpp"
 #include "app/cli.hpp"
 #include "app/config.hpp"
 #include "app/controller.hpp"
@@ -109,6 +110,8 @@ std::unique_ptr<ControlEnv> loadControlEnv(const Args& args) {
         e->sources.push_back(std::make_unique<hb::DeviSource>(thermostats));
         e->controller->setThermostats(std::move(thermostats));
     }
+    // Outdoor cameras, for the dashboard (their pictures) and the alerts (one that stops answering).
+    hb::CameraHub::instance().configure(hb::parseCameras(e->cfg.raw));
     // Load the night schedule two control steps before the Wi-Fi goes off (at least 10 minutes).
     e->controller->setOfflineWindow(hb::parseWifiOff(e->cfg.raw),
                                     std::max(minutes{10}, duration_cast<minutes>(e->tick * 2)));
@@ -418,8 +421,14 @@ nlohmann::json buildStatus(const ControlEnv& env, const hb::TickResult& result,
             if (hi) forecast["max"] = {{"at", hi->first.time_since_epoch().count()}, {"temperature", hi->second}};
         }
     }
+    json cameras = json::array();
+    for (const auto& c : hb::CameraHub::instance().status()) {
+        cameras.push_back({{"id", c.id}, {"name", c.name}, {"ok", c.ok}, {"error", c.error},
+                           {"at", c.lastPicture ? json(c.lastPicture->time_since_epoch().count()) : json(nullptr)}});
+    }
     return json{{"now", now.time_since_epoch().count()},
                 {"away", away},
+                {"cameras", cameras},
                 {"wifiOff", wifiOff},
                 {"outdoor", outdoor},
                 {"forecast", forecast},

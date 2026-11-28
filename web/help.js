@@ -110,6 +110,14 @@ const HELP = {
       "During Wi-Fi-off periods the sensor cannot reach heatbrain; it catches up once the Wi-Fi is back.",
     ],
   },
+  cameras: {
+    title: "Outdoor cameras",
+    body: [
+      "heatbrain asks each camera for its still picture (VIVOTEK: /cgi-bin/viewer/video.jpg) and shows it on the outdoor card, refreshed with the dashboard every 30 seconds. Tap a picture for a large view that fetches a new one every second; ← and → switch camera, Esc closes it. It is not video, but it needs no app, no plug-in and nothing extra on the NAS.",
+      "The camera's address and login stay in heatbrain: the browser only ever talks to heatbrain. A camera that asks for a login needs a user here - make one that may only view (the camera's web page: Security). Cameras that show a picture without a login need none, but then anyone on your network can see them too.",
+      "A camera that has not answered for half an hour shows up under problems and is sent as a notification, like a plug. During the Wi-Fi off period that is expected and not reported.",
+    ],
+  },
   airQuality: {
     title: "Air quality (CO₂)",
     body: [

@@ -154,6 +154,32 @@ a { color: var(--accent); }
 .nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .updated { margin-left: auto; color: var(--muted); font-size: 13px; }
 .outdoor-card { background: linear-gradient(180deg, var(--cool-tint), transparent 60%), var(--surface); }
+/* Outdoor cameras: thumbnails on the outdoor card (2 x 2 for four), and a full-screen viewer */
+.cam-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.cam-strip.n1 { grid-template-columns: minmax(0, 1fr); }
+.cam-thumb { position: relative; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  aspect-ratio: 16 / 10; background: var(--surface-2); cursor: zoom-in; display: block; width: 100%; }
+.cam-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-thumb .cam-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+.cam-thumb .cam-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 6px 3px; font-size: 11px; line-height: 1.2;
+  color: #fff; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .6)); }
+.cam-thumb .cam-cap small { opacity: .8; margin-left: 4px; }
+.cam-thumb.cam-error { border-color: var(--warning); }
+.cam-thumb.cam-error img { filter: grayscale(1); opacity: .55; }
+.cam-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cam-viewer { position: fixed; inset: 0; z-index: 100; background: rgba(0, 0, 0, .92); color: #fff; display: flex; flex-direction: column; }
+.cam-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+.cam-bar .grow { flex: 1; }
+.cam-bar button.ghost { color: #fff; }
+.cam-bar button.ghost:hover { background: rgba(255, 255, 255, .14); }
+.cam-when { opacity: .7; font-variant-numeric: tabular-nums; }
+.cam-stage { flex: 1; min-height: 0; display: grid; place-items: center; padding: 0 8px 8px; }
+.cam-stage img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
+.cam-viewer.stale .cam-stage img { opacity: .5; }
+.cam-msg { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 6px 12px; border-radius: 8px;
+  background: rgba(0, 0, 0, .6); font-size: 14px; max-width: calc(100% - 32px); }
+.cam-msg:empty { display: none; }
 .away-btn { border-radius: 999px; }
 .away-btn .icon { color: var(--accent); }  /* same as the plane on the away panel */
 /* Header toggles (Book, Away): pressed = its panel is open; lit = something is in place (an away period) */

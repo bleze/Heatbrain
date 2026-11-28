@@ -1,6 +1,7 @@
 #include "app/config_service.hpp"
 
 #include "app/meter_sync.hpp"
+#include "app/cameras.hpp"
 #include "app/thermostats.hpp"
 
 #include <algorithm>
@@ -70,6 +71,9 @@ json maskSecrets(const json& cfg) {
     if (out.contains("plugs")) {
         for (auto& p : out["plugs"]) maskField(p, "password");
     }
+    if (out.contains("cameras") && out["cameras"].is_array()) {
+        for (auto& c : out["cameras"]) maskField(c, "password");
+    }
     if (out.contains("meter") && out["meter"].is_object()) maskField(out["meter"], "refreshToken");
     if (out.contains("notifications") && out["notifications"].contains("channels")) {
         for (auto& c : out["notifications"]["channels"]) {
@@ -120,6 +124,9 @@ json unmaskSecrets(json incoming, const json& stored) {
     if (incoming.contains("plugs")) {
         for (auto& p : incoming["plugs"]) restoreField(p, findById(stored, "plugs", p), "password");
     }
+    if (incoming.contains("cameras") && incoming["cameras"].is_array()) {
+        for (auto& c : incoming["cameras"]) restoreField(c, findById(stored, "cameras", c), "password");
+    }
     if (incoming.contains("meter") && incoming["meter"].is_object()) {
         restoreField(incoming["meter"], stored.contains("meter") && stored["meter"].is_object() ? &stored["meter"] : nullptr,
                      "refreshToken");
@@ -166,6 +173,7 @@ std::vector<std::string> validateConfig(const json& cfg, const fs::path& dataDir
     check("Wi-Fi off period", [&] { parseWifiOff(cfg); });
     check("Meter", [&] { parseMeterConfig(cfg); });
     check("Thermostats", [&] { parseThermostats(cfg); });
+    check("Cameras", [&] { parseCameras(cfg); });
     check("Temperature sources", [&] { loadTemperatureSources(cfg, offline, dataDir, [] { return Instant{}; }); });
     check("Notifications", [&] { loadNotifications(cfg, offline); });
     check("Web", [&] {

@@ -440,15 +440,19 @@ function planStrip(parent, all) {
 // The outdoor sensor as a card next to the rooms.
 function outdoorCard(host) {
   const o = state.status?.outdoor;
-  if (!o) return;
-  const s = (state.status.sensors || []).find((x) => x.name === o.name && x.kind === "outdoor") || {};
+  const cams = state.status?.cameras || [];
+  if (!o && !cams.length) return;
   const card = el("article", { class: `card room outdoor-card${state.selected === "__outdoor" ? " selected" : ""}`, tabindex: 0 }, host);
-  card.addEventListener("click", () => selectRoom("__outdoor"));
-  card.addEventListener("keydown", (e) => { if (e.key === "Enter") selectRoom("__outdoor"); });
+  if (o) {
+    card.addEventListener("click", () => selectRoom("__outdoor"));
+    card.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target === card) selectRoom("__outdoor"); });
+  }
   const top = el("div", { class: "room-top" }, card);
   const name = el("div", { class: "room-name" }, top);
   name.appendChild(badge("snow", "cool"));
   name.appendChild(document.createTextNode("Outside"));
+  if (!o) { cameraStrip(card, cams); return; }
+  const s = (state.status.sensors || []).find((x) => x.name === o.name && x.kind === "outdoor") || {};
   el("span", { class: "muted" }, top, o.name);
   const hero = el("div", { class: "hero" }, card, temp(o.temperature));
   if (s.humidity != null) {
@@ -456,12 +460,164 @@ function outdoorCard(host) {
     hum.appendChild(icon("drop"));
     hum.appendChild(document.createTextNode(`${Math.round(s.humidity)} %`));
   }
-  el("div", { class: "detail" }, card, "Colder outside means more pre-heating before expensive or off periods.");
+  if (cams.length) cameraStrip(card, cams);
+  else el("div", { class: "detail" }, card, "Colder outside means more pre-heating before expensive or off periods.");
   const chips = el("div", { class: "plugs" }, el("div", { class: "room-foot" }, card));
   const chip = (cls, iconName, text) => { const c = el("span", { class: `chip ${cls}` }, chips); c.appendChild(icon(iconName)); c.appendChild(document.createTextNode(text)); };
   if (s.battery != null) chip(s.battery <= 20 ? "error" : s.battery <= 40 ? "warn" : "", "battery", `battery ${s.battery} %`);
   if (s.ageMinutes != null) chip("", "clock", `${s.ageMinutes} min ago`);
 }
+
+// ---------------------------------------------------------------------------------------
+// Outdoor cameras: thumbnails on the outdoor card, a viewer that refreshes about once a second
+// ---------------------------------------------------------------------------------------
+// heatbrain fetches the pictures (the camera's login stays on the server). They are kept as blob
+// URLs, so redrawing the cards shows the last picture at once instead of a blank while loading.
+const camPics = {};  // id -> { url, at, error, loading }
+const hms = (ts) => fmt({ hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(ts * 1000);
+
+async function fetchCamPic(id, maxAge) {
+  const r = await fetch(`/api/cameras/${encodeURIComponent(id)}/picture?maxAge=${maxAge}`, { cache: "no-store" });
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${r.status}`);
+  }
+  const at = Number(r.headers.get("X-Taken")) || Date.now() / 1000;
+  const blob = await r.blob();
+  const p = camPics[id] || (camPics[id] = {});
+  const old = p.url;
+  if (old) setTimeout(() => URL.revokeObjectURL(old), 10000);  // an <img> may still be loading it
+  p.url = URL.createObjectURL(blob);
+  p.at = at;
+  p.error = null;
+  return p;
+}
+
+function cameraStrip(card, cams) {
+  const strip = el("div", { class: `cam-strip n${Math.min(cams.length, 4)}` }, card);
+  for (const c of cams) {
+    const b = el("button", { type: "button", class: "cam-thumb", "data-cam": c.id }, strip);
+    b.addEventListener("click", (e) => { e.stopPropagation(); openCamera(c.id); });
+    b.addEventListener("keydown", (e) => e.stopPropagation());  // Enter opens the camera, not the outdoor chart
+    paintThumb(b, c);
+  }
+  refreshCamPics(cams);
+}
+
+function paintThumb(b, c) {
+  const p = camPics[c.id] || {};
+  b.replaceChildren();
+  if (p.url) el("img", { src: p.url, alt: c.name }, b);
+  else el("span", { class: "cam-empty" }, b).appendChild(icon("camera"));
+  const cap = el("span", { class: "cam-cap" }, b, c.name);
+  if (p.at) el("small", {}, cap, hm(p.at));
+  const err = p.error || (!p.url ? c.error : "");
+  b.classList.toggle("cam-error", !!err);
+  b.title = err ? `${c.name}: ${err}` : `${c.name} - open`;
+  b.setAttribute("aria-label", b.title);
+}
+
+// The card's pictures: a new one when older than about half a minute (the dashboard refreshes every 30 s).
+function refreshCamPics(cams) {
+  if (document.hidden) return;
+  const now = Date.now() / 1000;
+  for (const c of cams) {
+    const p = camPics[c.id] || (camPics[c.id] = {});
+    if (p.loading || (p.at && now - p.at < 25 && !p.error)) continue;
+    p.loading = true;
+    fetchCamPic(c.id, 30000)
+      .catch((e) => { p.error = e.message; })
+      .finally(() => {
+        p.loading = false;
+        for (const b of document.querySelectorAll(".cam-thumb")) if (b.dataset.cam === c.id) paintThumb(b, c);
+      });
+  }
+}
+
+let camView = null;  // the open viewer: { id, alive, ov, step }
+function openCamera(id) {
+  closeCamera();
+  const cams = state.status?.cameras || [];
+  if (!cams.some((c) => c.id === id)) return;
+  const ov = el("div", { class: "cam-viewer", role: "dialog", "aria-modal": "true" }, document.body);
+  const bar = el("div", { class: "cam-bar" }, ov);
+  const title = el("b", {}, bar);
+  const when = el("span", { class: "cam-when" }, bar);
+  el("span", { class: "grow" }, bar);
+  const view = { id, alive: true, ov };
+  const button = (iconName, label, onClick) => {
+    const b = el("button", { type: "button", class: "ghost", "aria-label": label, title: label }, bar);
+    b.appendChild(icon(iconName));
+    b.addEventListener("click", onClick);
+    return b;
+  };
+  if (cams.length > 1) {
+    button("left", "Previous camera (←)", () => view.step(-1));
+    button("right", "Next camera (→)", () => view.step(1));
+  }
+  const close = button("close", "Close (Esc)", closeCamera);
+  const stage = el("div", { class: "cam-stage" }, ov);
+  const img = el("img", { alt: "" }, stage);
+  const msg = el("div", { class: "cam-msg" }, ov);
+  stage.addEventListener("click", (e) => { if (e.target === stage) closeCamera(); });
+  const show = () => {
+    const c = cams.find((x) => x.id === view.id);
+    title.textContent = c?.name || view.id;
+    ov.setAttribute("aria-label", `Camera ${title.textContent}`);
+    img.alt = title.textContent;
+    const p = camPics[view.id];
+    if (p?.url) { img.src = p.url; when.textContent = hms(p.at); } else { img.removeAttribute("src"); when.textContent = ""; }
+    msg.textContent = "";
+  };
+  view.step = (dir) => {
+    const i = cams.findIndex((c) => c.id === view.id);
+    view.id = cams[(i + dir + cams.length) % cams.length].id;
+    show();
+  };
+  camView = view;
+  show();
+  close.focus();
+  (async () => {
+    while (view.alive) {
+      const started = Date.now();
+      let wait = 1000;
+      if (!document.hidden) {
+        const asked = view.id;
+        try {
+          const p = await fetchCamPic(asked, 800);
+          if (view.alive && asked === view.id) {
+            img.src = p.url;
+            when.textContent = hms(p.at);
+            msg.textContent = "";
+            ov.classList.remove("stale");
+          }
+        } catch (e) {
+          if (view.alive && asked === view.id) {
+            msg.textContent = e.message;
+            ov.classList.add("stale");
+          }
+          wait = 3000;
+        }
+      }
+      await new Promise((r) => setTimeout(r, Math.max(250, wait - (Date.now() - started))));
+    }
+  })();
+}
+function closeCamera() {
+  if (!camView) return;
+  camView.alive = false;
+  camView.ov.remove();
+  camView = null;
+}
+// Before the dashboard's own arrow keys (registered further down), which move the chart.
+document.addEventListener("keydown", (e) => {
+  if (!camView) return;
+  if (e.key === "Escape") closeCamera();
+  else if (e.key === "ArrowLeft" || e.key === "ArrowRight") camView.step(e.key === "ArrowLeft" ? -1 : 1);
+  else return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+});
 
 // A spinbox like the ones in the settings: [ - value unit + ]
 function makeStepper({ value, step = 1, min, max, unit, label }) {

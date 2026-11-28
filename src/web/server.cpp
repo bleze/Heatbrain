@@ -15,6 +15,7 @@
 
 #include "core/battery.hpp"
 #include "app/power_mix_sync.hpp"
+#include "app/cameras.hpp"
 #include "app/config_service.hpp"
 #include "app/cost_report.hpp"
 #include "app/rooms.hpp"
@@ -559,6 +560,23 @@ void WebServer::routes() {
         sendJson(res, loadPowerMix(ctx_.dataDir));
     });
 
+    // Outdoor cameras: the latest picture, fetched by heatbrain (the camera's login stays here).
+    // ?maxAge=<ms>: how old a picture may be (the card asks for 30 s, the viewer for about one).
+    s.Get(R"(/api/cameras/([\w-]+)/picture)", [](const httplib::Request& req, httplib::Response& res) {
+        long maxAge = 30000;
+        if (req.has_param("maxAge")) maxAge = std::clamp(std::atol(req.get_param_value("maxAge").c_str()), 500L, 600000L);
+        try {
+            const auto p = CameraHub::instance().picture(req.matches[1], std::chrono::milliseconds{maxAge});
+            res.set_header("Cache-Control", "no-store");
+            res.set_header("X-Taken", std::to_string(p.at.time_since_epoch().count()));
+            res.set_content(*p.jpeg, "image/jpeg");
+        } catch (const std::out_of_range& e) {
+            sendError(res, 404, e.what());
+        } catch (const std::exception& e) {
+            sendError(res, 502, e.what());
+        }
+    });
+
     // DEVIreg Smart thermostats: what is paired and how they are doing, and pairing itself.
     s.Get("/api/devi", [this](const httplib::Request&, httplib::Response& res) {
         DeviRegistry::instance().setDataDir(ctx_.dataDir);
@@ -697,6 +715,7 @@ void WebServer::routes() {
         HttplibClient probe(milliseconds{1500}, milliseconds{2000});
         try {
             auto shellys = std::async(std::launch::async, [&] { return discoverShelly(subnet, probe); });
+            auto cams = std::async(std::launch::async, [&] { return discoverCameras(subnet, probe); });
             json tasmota = json::array();
             for (const auto& d : discoverTasmota(subnet, probe)) {
                 json j{{"host", d.host}, {"deviceName", d.deviceName}, {"model", d.model}, {"firmware", d.firmware}, {"hardware", d.hardware}};
@@ -705,7 +724,12 @@ void WebServer::routes() {
             }
             json shelly = json::array();
             for (const auto& d : shellys.get()) shelly.push_back(shellyJson(d));
-            sendJson(res, json{{"tasmota", tasmota}, {"shelly", shelly}});
+            json cameras = json::array();
+            for (const auto& d : cams.get()) {
+                cameras.push_back({{"host", d.host}, {"model", d.model}, {"firmware", d.firmware}, {"hostName", d.hostName},
+                                   {"needsLogin", d.needsLogin}, {"openAdmin", d.openAdmin}});
+            }
+            sendJson(res, json{{"tasmota", tasmota}, {"shelly", shelly}, {"cameras", cameras}});
         } catch (const std::exception& e) {
             sendError(res, 400, e.what());
         }

@@ -112,6 +112,7 @@ add_library(heatbrain_io STATIC
   src/devices/devi.cpp
   src/devices/sdg_incoming.cpp
   src/app/thermostats.cpp
+  src/app/cameras.cpp
 )
 target_link_libraries(heatbrain_io PUBLIC
   heatbrain_core
@@ -172,6 +173,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_eloverblik.cpp
     tests/test_dominion.cpp
     tests/test_thermostats.cpp
+    tests/test_cameras.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE

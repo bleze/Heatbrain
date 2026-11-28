@@ -66,6 +66,7 @@ public:
 
     // apply = false: decide only - no plug commands, no history writes.
     TickResult tick(Instant now, bool apply);
+    void checkCameras(TickResult& result);
 
     const std::vector<RoomConfig>& rooms() const { return rooms_; }
     const PriceTable& prices() const { return prices_; }

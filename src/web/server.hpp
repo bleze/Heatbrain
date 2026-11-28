@@ -72,6 +72,7 @@ struct WebContext {
 //   GET    /api/usage?days=N                measured household use vs. heatbrain's radiators
 //   POST   /api/rooms/<id>/bookings         {"from", "until", "target"}: heat the room for a while
 //   DELETE /api/bookings/<id>               cancel a booking
+//   GET    /api/cameras/<id>/picture        an outdoor camera's latest picture (?maxAge=ms)
 //   GET    /api/devi                        paired DEVIreg Smart thermostats and their state
 //   POST   /api/devi/pair                   {"code": "<from the DEVI app>"}: pair, list thermostats
 //   POST   /api/export?history=1            everything needed to move heatbrain, as one JSON file

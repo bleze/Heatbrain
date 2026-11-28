@@ -795,7 +795,7 @@
   function renderFindDevices(body) {
     const disc = el("section", { class: "card" }, body);
     sectionHead(disc, "Find devices", "search", "violet",
-      "Scans your network for Sonoff (Tasmota) plugs and Shelly sensors (about 10 seconds). A Shelly H&T sleeps between readings: press its button once just before you scan.");
+      "Scans your network for Sonoff (Tasmota) plugs, Shelly sensors and VIVOTEK cameras (about 10 seconds). A Shelly H&T sleeps between readings: press its button once just before you scan.");
     const row = el("div", { class: "row", style: "margin-top:12px" }, disc);
     const subnet = el("input", { type: "text", value: S.subnet || guessSubnet(), style: "width:180px" }, row);
     btn(row, "Scan", "search", async (b) => {
@@ -806,8 +806,8 @@
     }, "primary");
     if (!S.discovered) return;
     const list = el("div", { class: "list" }, disc);
-    const tasmota = S.discovered.tasmota || [], shellys = S.discovered.shelly || [];
-    if (!tasmota.length && !shellys.length) el("div", { class: "muted" }, list, "Nothing found. A Shelly H&T: press its button and scan again.");
+    const tasmota = S.discovered.tasmota || [], shellys = S.discovered.shelly || [], cameras = S.discovered.cameras || [];
+    if (!tasmota.length && !shellys.length && !cameras.length) el("div", { class: "muted" }, list, "Nothing found. A Shelly H&T: press its button and scan again.");
     for (const d of tasmota) {
       const r = el("div", { class: "item-head" }, list);
       const info = el("div", { class: "row" }, r);
@@ -847,6 +847,34 @@
       } else {
         const nm = el("input", { type: "text", value: d.name || "", placeholder: "Name, e.g. Shed", style: "width:150px", autocomplete: "off" }, act);
         btn(act, "Set up", "check", (b) => setUpShelly(b, d.host, nm.value.trim(), d, nm), "primary");
+      }
+    }
+    renderFoundCameras(list, cameras);
+  }
+
+  // VIVOTEK cameras from the scan: added to Settings -> Climate -> Outdoor cameras.
+  function renderFoundCameras(list, cameras) {
+    for (const d of cameras) {
+      const r = el("div", { class: "item-head", style: "flex-wrap:wrap;gap:8px" }, list);
+      const info = el("div", { class: "row" }, r);
+      info.appendChild(badge("camera", "cool"));
+      el("b", {}, info, d.hostName || d.model || d.host);
+      el("span", { class: "muted" }, info, [d.host, d.model ? `VIVOTEK ${d.model}` : "VIVOTEK", d.firmware ? `firmware ${d.firmware.replace(/^.*-VVTK-/, "")}` : "", d.needsLogin ? "asks for a login" : ""].filter(Boolean).join(" · "));
+      const act = el("div", { class: "row", style: "gap:8px" }, r);
+      // Open to anyone on the network: worth knowing (and fixing on the camera's own page).
+      if (d.openAdmin) el("span", { class: "chip error", title: "No root password: anyone on your network can change its settings. Set one on the camera's page: Security." }, act, "no admin password");
+      else if (!d.needsLogin) el("span", { class: "chip warn", title: "Anyone on your network can see it." }, act, "no login to view");
+      const cams = S.cfg.cameras || [];
+      if (cams.some((c) => c.host === d.host)) {
+        const ok = el("span", { class: "chip ok" }, act); ok.appendChild(icon("check")); ok.appendChild(document.createTextNode("added"));
+      } else {
+        btn(act, "Add", "plus", () => {
+          const name = d.hostName && !/^(network ?camera|ip ?cam|vivotek)/i.test(d.hostName) ? d.hostName : "";
+          const id = slug(name || `camera-${d.host.split(".").pop()}`, new Set(cams.map((c) => c.id)));
+          arr(S.cfg, "cameras").push({ id, name, host: d.host, user: "", password: "" });
+          changed(); render();
+          toast(d.needsLogin ? "Added: set its name, user and password under Climate → Outdoor cameras" : "Added: name it under Climate → Outdoor cameras");
+        });
       }
     }
   }
@@ -1454,6 +1482,8 @@
       else info.textContent = "Fetching the forecast…";
     }
 
+    renderCameras(body);
+
     // Open-window detection: a fast fall in temperature pauses the room's heating.
     const ow = el("section", { class: "card" }, body);
     sectionHead(ow, "Open windows", "window", "cool",
@@ -1489,6 +1519,43 @@
   const co2Class = (ppm) => (ppm >= co2Limit() ? "error" : ppm >= 1000 ? "warn" : "ok");
 
   // A module's daily summary (/api/sensor-days), fetched once per 10 minutes.
+  // Outdoor cameras (VIVOTEK): their pictures on the dashboard's outdoor card.
+  function renderCameras(body) {
+    const card = el("section", { class: "card" }, body);
+    sectionHead(card, "Outdoor cameras", "camera", "cool",
+      "VIVOTEK cameras: their pictures on the dashboard's outdoor card, bigger and refreshed every second when you tap one. heatbrain fetches them, so the login stays here.", "cameras");
+    const cams = S.cfg.cameras || [];  // not created until a camera is added (no unsaved change)
+    const live = state.status?.cameras || [];
+    const list = el("div", { class: "list" }, card);
+    for (const c of cams) {
+      const item = el("div", { class: "card", style: "margin:0;background:var(--surface-2)" }, list);
+      const head = el("div", { class: "item-head" }, item);
+      const left = el("div", { class: "row" }, head);
+      left.appendChild(badge("camera", "cool"));
+      el("b", {}, left, c.name || c.id);
+      const st = live.find((x) => x.id === c.id);
+      if (st) {
+        const chip = el("span", { class: `chip ${st.ok ? "ok" : st.error ? "error" : ""}` }, left);
+        chip.appendChild(icon(st.ok ? "check" : st.error ? "alert" : "clock"));
+        chip.appendChild(document.createTextNode(st.ok ? "picture ok" : st.error || "not asked yet"));
+      }
+      confirmBtn(el("div", { class: "row" }, head), "", "trash", "Remove this camera?", () => {
+        cams.splice(cams.indexOf(c), 1); changed(); render();
+      }, "ghost danger");
+      const g = el("div", { class: "form-grid" }, item);
+      field(g, "Name", txt(c, "name", { placeholder: "Garden" }));
+      field(g, "Address", txt(c, "host", { placeholder: "192.168.1.61" }), { hint: "IP address (and :port if not 80)" });
+      field(g, "User", txt(c, "user", { placeholder: "only if it asks for a login" }));
+      field(g, "Password", secret(c, "password", ""));
+    }
+    btn(el("div", { style: "margin-top:12px" }, card), "Add camera", "plus", () => {
+      const id = slug(`camera-${cams.length + 1}`, new Set(cams.map((x) => x.id)));
+      arr(S.cfg, "cameras").push({ id, name: "", host: "", user: "", password: "" });
+      changed(); render();
+    });
+    if (cams.length) el("div", { class: "hint", style: "margin-top:8px" }, card, "A user that may only view is enough (the camera's Security settings). A camera that stops answering for half an hour is reported like a plug.");
+  }
+
   function loadSensorDays(key, end) {
     S.sensorDays ||= {};
     const id = `${key}|${end ?? ""}`, c = S.sensorDays[id];
