@@ -221,14 +221,21 @@ void WebServer::routes() {
         }
         json decisions = json::array();
         json events = json::array();
-        for (const auto& d : history.decisions(id, from, to, false)) {
+        auto ds = history.decisions(id, from, to, false);
+        // A thermostat: "on" is what its relay did, which its own sensor decides (heatbrain steers it).
+        std::vector<bool> wanted;
+        for (const auto& d : ds) wanted.push_back(d.on);
+        if (!room->thermostat.empty()) useRelayTime(ds);
+        for (std::size_t i = 0; i < ds.size(); ++i) {
+            const auto& d = ds[i];
             // [time, on, reason, target, 1 when the target is on a warm-up curve, 1 when a booking sets it,
-            //  an off period's "stay above" floor]
+            //  an off period's "stay above" floor, 1 when the thermostat's relay did otherwise than heatbrain decided]
             decisions.push_back({epoch(d.at), d.on ? 1 : 0, d.reason,
                                  d.inputs.contains("target") ? d.inputs["target"] : json(nullptr),
                                  d.inputs.contains("warmupTo") ? 1 : 0, d.inputs.value("mode", "") == "booked" ? 1 : 0,
                                  d.inputs.value("mode", "") == "off" && d.inputs.contains("coastAbove")
-                                     ? d.inputs["coastAbove"] : json(nullptr)});
+                                     ? d.inputs["coastAbove"] : json(nullptr),
+                                 d.on != wanted[i] ? 1 : 0});
             if (d.changed) {
                 events.push_back({{"ts", epoch(d.at)}, {"on", d.on}, {"reason", d.reason}, {"detail", d.detail},
                                   {"inputs", d.inputs}, {"plugs", d.plugs}});

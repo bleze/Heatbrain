@@ -122,7 +122,12 @@ std::vector<SensorReading> DeviSource::read() {
 
 // ---------------------------------------------------------------- setpoint
 
-double thermostatSetpoint(const RoomConfig& room, const Decision& d) {
+namespace {
+double ceilHalf(double v) { return std::ceil(v * 2.0 - 1e-9) / 2.0; }
+double floorHalf(double v) { return std::floor(v * 2.0 + 1e-9) / 2.0; }
+}  // namespace
+
+double thermostatSetpoint(const RoomConfig& room, const Decision& d, const DeviReading& devi) {
     const auto& in = d.inputs;
     const double frost = room.frostTemp;
     double sp;
@@ -157,7 +162,51 @@ double thermostatSetpoint(const RoomConfig& room, const Decision& d) {
             break;
     }
     if (in.mode == "heat") sp = std::max(sp, room.minTemp);
-    return std::clamp(std::round(sp * 2.0) / 2.0, frost, room.maxTemp);  // half degrees, like the DEVI app
+    const double base = std::clamp(std::round(sp * 2.0) / 2.0, frost, room.maxTemp);  // half degrees, like the DEVI app
+    if (!devi.temperature) return base;
+
+    // The thermostat heats by its own sensor, which can read a degree off the room's: a setpoint at
+    // the target may have it heat while heatbrain decided off (or not heat while it decided on).
+    const double t = *devi.temperature;
+    const double lowest = std::min(in.mode == "heat" ? std::max(frost, room.minTemp) : frost, room.maxTemp);
+    const auto follows = [&](double s) { return d.on ? s >= t + kSteerMargin : s <= t - kSteerMargin; };
+    if (follows(base)) return base;
+    if (devi.setpoint && follows(*devi.setpoint) && *devi.setpoint >= lowest && *devi.setpoint <= room.maxTemp) {
+        return *devi.setpoint;  // already steered: not written again every step
+    }
+    return std::clamp(d.on ? ceilHalf(t + 2 * kSteerMargin) : floorHalf(t - 2 * kSteerMargin), lowest, room.maxTemp);
+}
+
+// ---------------------------------------------------------------- relay time
+
+const json* thermostatEntry(const DecisionRecord& d) {
+    if (!d.plugs.is_array()) return nullptr;
+    for (const auto& p : d.plugs) {
+        if (p.is_object() && p.value("thermostat", false)) return &p;
+    }
+    return nullptr;
+}
+
+void useRelayTime(std::vector<DecisionRecord>& ds, seconds maxGap) {
+    const auto counter = [](const json* p) -> std::optional<double> {
+        if (!p || !p->contains("relayOnSeconds") || !(*p)["relayOnSeconds"].is_number()) return std::nullopt;
+        return (*p)["relayOnSeconds"].get<double>();
+    };
+    for (std::size_t i = 0; i < ds.size(); ++i) {
+        DecisionRecord& d = ds[i];
+        if (const json* p = thermostatEntry(d)) {
+            std::optional<bool> relay;
+            if (i + 1 < ds.size() && ds[i + 1].at > d.at && ds[i + 1].at - d.at <= maxGap) {
+                const auto a = counter(p), b = counter(thermostatEntry(ds[i + 1]));
+                const double span = duration<double>(ds[i + 1].at - d.at).count();
+                // Added less than nothing (reset) or more than the interval (catching up): not this interval's.
+                if (a && b && *b >= *a && *b - *a <= span + 60) relay = *b - *a >= span / 2;
+            }
+            if (!relay && p->contains("state") && (*p)["state"].is_boolean()) relay = (*p)["state"].get<bool>();
+            if (relay) d.on = *relay;
+        }
+        if (i > 0) d.changed = d.on != ds[i - 1].on;
+    }
 }
 
 }  // namespace hb

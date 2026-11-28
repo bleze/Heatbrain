@@ -355,11 +355,19 @@ json Controller::applyToThermostat(const RoomConfig& room, const Decision& d, Ti
     json out = json::array();
     const auto t = std::ranges::find_if(thermostats_, [&](const ThermostatConfig& c) { return c.id == room.thermostat; });
     if (t == thermostats_.end()) return out;
-    const double sp = thermostatSetpoint(room, d);
-    json tj{{"id", t->id}, {"thermostat", true}, {"mode", t->live ? "live" : "dryrun"}, {"setpoint", sp}};
+    json tj{{"id", t->id}, {"thermostat", true}, {"mode", t->live ? "live" : "dryrun"}, {"setpoint", thermostatSetpoint(room, d)}};
     try {
         auto th = DeviRegistry::instance().get(t->peerId);
         const DeviState s = th->state();  // refreshed by the DEVI temperature source this step
+        // Steered by the thermostat's own reading (its room sensor, else its floor sensor), if recent.
+        DeviReading reading;
+        if (s.updated && floor<seconds>(system_clock::now()) - *s.updated <= minutes{15}) {
+            reading.temperature = s.roomTemp ? s.roomTemp : s.floorTemp;
+            if (s.controlState && *s.controlState == dominion::ControlState::Manual) reading.setpoint = s.manualSetpoint;
+        }
+        const double sp = thermostatSetpoint(room, d, reading);
+        tj["setpoint"] = sp;
+        if (reading.temperature) tj["deviTemp"] = *reading.temperature;
         if (s.heating) tj["state"] = *s.heating;
         if (s.relayOnSeconds) tj["relayOnSeconds"] = *s.relayOnSeconds;  // for exact energy (cost report)
         if (s.manualSetpoint) tj["deviSetpoint"] = *s.manualSetpoint;
@@ -497,7 +505,8 @@ TickResult Controller::tick(Instant now, bool apply) {
                 outside && history_) {
                 try {
                     std::vector<std::pair<Instant, Instant>> heating;
-                    const auto ds = history_->decisions(room.id, *in.measuredAt - hours{1}, now, false);
+                    auto ds = history_->decisions(room.id, *in.measuredAt - hours{1}, now, false);
+                    if (!room.thermostat.empty()) useRelayTime(ds);
                     for (std::size_t i = 0; i < ds.size(); ++i) {
                         const Instant end = i + 1 < ds.size() ? ds[i + 1].at : now;
                         if (ds[i].on && end > *in.measuredAt) heating.emplace_back(std::max(ds[i].at, *in.measuredAt), end);
@@ -595,9 +604,11 @@ TickResult Controller::tick(Instant now, bool apply) {
             if (!in.currentlyOn && history_ && !offLookedUp_.contains(room.id)) {
                 offLookedUp_.insert(room.id);
                 try {
-                    const auto ds = history_->decisions(room.id, now - kCoastSpan, now, true);
+                    // A thermostat: when its relay went off (all decisions, as the changes follow the relay).
+                    auto ds = history_->decisions(room.id, now - kCoastSpan, now, room.thermostat.empty());
+                    if (!room.thermostat.empty()) useRelayTime(ds);
                     for (auto it = ds.rbegin(); it != ds.rend(); ++it) {
-                        if (!it->on) { offSince_.try_emplace(room.id, it->at); break; }
+                        if (it->changed && !it->on) { offSince_.try_emplace(room.id, it->at); break; }
                     }
                 } catch (const std::exception& e) {
                     log::warn("{}: when the heat last went off is unknown ({})", room.id, e.what());
@@ -721,7 +732,12 @@ std::optional<double> Controller::learnedOvershoot(const RoomConfig& room, Insta
             // The last two weeks with the room's current sensor: the switches heatbrain made on a real
             // temperature, and the readings around them.
             std::vector<HeatSwitch> switches;
-            for (const auto& d : history_->decisions(room.id, now - days{14}, now, true)) {
+            // A thermostat: its relay's switches (all decisions read, the changes follow the relay).
+            const bool thermostat = !room.thermostat.empty();
+            auto ds = history_->decisions(room.id, now - days{14}, now, !thermostat);
+            if (thermostat) useRelayTime(ds);
+            for (const auto& d : ds) {
+                if (!d.changed) continue;
                 if (d.inputs.is_object() && d.inputs.contains("sensor") && d.inputs["sensor"] != room.sensor) {
                     switches.clear();  // another sensor: what it saw says nothing about this one
                     continue;
@@ -750,7 +766,10 @@ ThermalModel Controller::fitBetween(const RoomConfig& room, Instant from, Instan
             std::vector<ThermalSample> samples;
             std::string sensor;            // the sensor of the decisions so far (older ones do not say)
             std::optional<Instant> settle;  // a new sensor: its first hours are skipped
-            for (const auto& d : history_->decisions(room.id, from, to, false)) {
+            // A thermostat heats by its own sensor: learn from what its relay did, not what heatbrain wanted.
+            auto ds = history_->decisions(room.id, from, to, false);
+            if (!room.thermostat.empty()) useRelayTime(ds);
+            for (const auto& d : ds) {
                 // Another sensor: what the old one measured says nothing about the new one's place, and
                 // the new one first has to settle (brought in from somewhere warmer or colder).
                 if (d.inputs.is_object() && d.inputs.contains("sensor")) {

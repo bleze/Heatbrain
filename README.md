@@ -291,8 +291,12 @@ over six hours.
 **Thermostats.** A room can have a DEVIreg Smart instead of plugs. In Live, heatbrain puts the
 thermostat in manual mode and sets its setpoint from the decision (target, pre-heat or boost
 ceiling, the coasting floor, or frost protection when off); the thermostat regulates by itself
-and keeps its last setpoint if heatbrain is gone. Pairing uses a one-time code from the DEVI
-app's "Share house".
+and keeps its last setpoint if heatbrain is gone. It heats by its own sensor, though, which can
+read a degree off the room's: when that setpoint would have the relay do otherwise than heatbrain
+decided, it is steered to a degree above (heat) or below (off) the thermostat's own reading -
+never below frost protection, or the minimum in a heat period. What the relay really did (its
+heating-time counter) is what the room chart shows and what heatbrain learns the room from.
+Pairing uses a one-time code from the DEVI app's "Share house".
 
 **Away mode** is a planned period (from – until, set from the dashboard's Away button,
 stored in `data/away.json`): every room only keeps above the chosen temperature, price-only

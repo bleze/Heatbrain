@@ -171,6 +171,7 @@ if(HEATBRAIN_BUILD_TESTS)
     tests/test_offline.cpp
     tests/test_eloverblik.cpp
     tests/test_dominion.cpp
+    tests/test_thermostats.cpp
   )
   target_link_libraries(heatbrain_tests PRIVATE heatbrain_io Catch2::Catch2WithMain)
   target_compile_definitions(heatbrain_tests PRIVATE

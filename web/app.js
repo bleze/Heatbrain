@@ -1389,9 +1389,11 @@ function renderDetail() {
     }
     const si = lastAtOrBefore(decisions, t);
     if (si >= 0 && t - decisions[si][0] <= 3 * tick) {
-      const [, on, reason] = decisions[si];
+      const [, on, reason, , , , , relayOwn] = decisions[si];
       const cat = on ? reasonCat(reason) || "comfort" : null;
-      rows.push({ label: on ? "Heating" : "Off", value: reasonLabel(reason), color: cat ? catColor(cat) : "var(--grid)", box: true });
+      // A thermostat's relay doing otherwise than heatbrain decided (its own sensor read differently).
+      const value = relayOwn ? (on ? "by the thermostat itself" : "the thermostat did not heat") + ` (heatbrain: ${reasonLabel(reason)})` : reasonLabel(reason);
+      rows.push({ label: on ? "Heating" : "Off", value, color: cat ? catColor(cat) : "var(--grid)", box: true });
     }
     if (wifi) {
       const p = wifi.planned.find(([a, b]) => t >= a && t < b);
